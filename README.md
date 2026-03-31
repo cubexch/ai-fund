@@ -1,4 +1,4 @@
-# AI Crypto Fund
+# AI Fund
 
 ### Hire your AI trading desk. Not another grid bot.
 

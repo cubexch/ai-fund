@@ -1,4 +1,4 @@
-# AI Crypto Fund
+# AI Fund
 
 An AI trading desk with 42 hedge fund agent personas (including 20 named personas like Arthur Hayes, Jim Simons, George Soros, and Jesse Livermore) for Claude Code. Trade on any exchange — Cube, OKX, Kraken, Binance, Coinbase, Robinhood, and 100+ more via CCXT.
 

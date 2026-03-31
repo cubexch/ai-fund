@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Install AI Crypto Fund skills into ~/.claude/skills/
+ * Install AI Fund skills into ~/.claude/skills/
  *
  * Usage:
  *   npx ai-fund install              # install all skills
@@ -58,7 +58,7 @@ function installSkill(name) {
 
 function listSkills() {
   const available = getAvailableSkills();
-  console.log('\n🏢 AI Crypto Fund — Available Agents\n');
+  console.log('\n🏢 AI Fund — Available Agents\n');
   console.log('  Trade on any exchange: Cube, OKX, Kraken, Binance, Coinbase, 100+ more\n');
 
   for (const [desk, roles] of Object.entries(DESKS)) {
@@ -80,7 +80,7 @@ function listSkills() {
 
 function installAll() {
   const skills = getAvailableSkills();
-  console.log(`\n🏢 Installing ${skills.length} AI Crypto Fund agents...\n`);
+  console.log(`\n🏢 Installing ${skills.length} AI Fund agents...\n`);
 
   mkdirSync(CLAUDE_SKILLS_DIR, { recursive: true });
 
@@ -116,7 +116,7 @@ switch (command) {
   }
   default:
     console.log(`
-AI Crypto Fund — 22 AI trading agents for Claude Code
+AI Fund — 22 AI trading agents for Claude Code
 Trade on any exchange: Cube, OKX, Kraken, Binance, Coinbase, 100+ more
 
 Usage:

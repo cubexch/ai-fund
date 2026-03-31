@@ -1,4 +1,4 @@
-# Contributing to AI Crypto Fund
+# Contributing to AI Fund
 
 We welcome contributions! Whether it's a new agent skill, an exchange connector, or a bug fix.
 
