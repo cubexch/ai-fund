@@ -1,0 +1,28 @@
+{
+  "name": "Market Making Desk",
+  "description": "Liquidity provision with order flow intelligence and volatility-adjusted spreads.",
+  "agents": [
+    "risk-manager",
+    "market-maker",
+    "orderflow-analyst",
+    "volatility-analyst"
+  ],
+  "risk_parameters": {
+    "max_position_size_pct": 15,
+    "max_portfolio_drawdown_pct": 10,
+    "max_leverage": 1,
+    "max_inventory_imbalance_pct": 50
+  },
+  "mm_config": {
+    "markets": ["BTC-USDC", "ETH-USDC"],
+    "base_spread_bps": 10,
+    "volatility_multiplier": 1.5,
+    "inventory_skew_factor": 0.5,
+    "max_inventory_per_side_usd": 50000,
+    "layers": 3,
+    "layer_spacing_bps": 5,
+    "cancel_on_disconnect": true,
+    "post_only": true,
+    "refresh_interval_ms": 5000
+  }
+}

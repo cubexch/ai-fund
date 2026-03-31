@@ -1,0 +1,33 @@
+{
+  "name": "Full Desk",
+  "description": "Maximum coverage. All major roles staffed for comprehensive market participation.",
+  "agents": [
+    "risk-manager",
+    "portfolio-manager",
+    "quant-analyst",
+    "orderflow-analyst",
+    "volatility-analyst",
+    "momentum-trader",
+    "market-maker",
+    "performance-analyst"
+  ],
+  "risk_parameters": {
+    "max_position_size_pct": 10,
+    "max_portfolio_drawdown_pct": 15,
+    "max_leverage": 3,
+    "stop_loss_required": true,
+    "max_correlated_exposure_pct": 30,
+    "max_single_sector_pct": 40,
+    "max_gross_exposure_pct": 150
+  },
+  "portfolio_config": {
+    "rebalance_frequency": "weekly",
+    "strategy_allocation": {
+      "momentum": 40,
+      "market_making": 30,
+      "mean_reversion": 20,
+      "cash_reserve": 10
+    },
+    "benchmark": "BTC-USDC"
+  }
+}

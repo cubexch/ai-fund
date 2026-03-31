@@ -1,0 +1,21 @@
+{
+  "name": "Cross-Exchange Arbitrage Desk",
+  "description": "Scan multiple exchanges for price discrepancies. Buy low on one venue, sell high on another. Delta-neutral, pure alpha.",
+  "agents": ["risk-manager", "arbitrageur", "execution-trader", "quant-analyst"],
+  "exchanges": ["cube", "okx", "kraken"],
+  "risk_parameters": {
+    "max_position_size_pct": 10,
+    "max_portfolio_drawdown_pct": 5,
+    "max_leverage": 1,
+    "delta_neutral_required": true,
+    "max_single_exchange_pct": 50,
+    "stop_loss_required": true
+  },
+  "arb_config": {
+    "min_spread_bps": 10,
+    "min_z_score": 2.0,
+    "max_execution_time_ms": 5000,
+    "scan_interval_seconds": 30,
+    "assets": ["BTC", "ETH", "SOL"]
+  }
+}

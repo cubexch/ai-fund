@@ -1,0 +1,59 @@
+{
+  "name": "ai-crypto-fund",
+  "version": "0.1.0",
+  "description": "22 AI hedge fund agents for Claude Code. Hire your trading desk. Trade on any exchange — Cube, OKX, Kraken, Binance, Coinbase, and 100+ more.",
+  "type": "module",
+  "bin": {
+    "ai-crypto-fund": "./scripts/install.js"
+  },
+  "files": [
+    "scripts/",
+    "skills/",
+    "connectors/",
+    "lib/",
+    ".mcp.json",
+    "CLAUDE.md"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=connectors/cube/mcp-server",
+    "dev": "npm run dev --workspace=connectors/cube/mcp-server",
+    "typecheck": "tsc --noEmit"
+  },
+  "workspaces": [
+    "connectors/cube/mcp-server"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cubexch/ai-crypto-fund"
+  },
+  "keywords": [
+    "hedge-fund",
+    "ai-trading",
+    "ai-agents",
+    "trading-bot",
+    "trading-desk",
+    "mcp",
+    "claude-code",
+    "claude",
+    "crypto-trading",
+    "algorithmic-trading",
+    "quantitative-trading",
+    "market-making",
+    "arbitrage",
+    "risk-management",
+    "technical-analysis",
+    "multi-exchange",
+    "cube",
+    "okx",
+    "kraken",
+    "binance",
+    "coinbase",
+    "robinhood",
+    "ccxt",
+    "defi"
+  ]
+}

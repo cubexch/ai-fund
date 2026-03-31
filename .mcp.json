@@ -1,0 +1,47 @@
+{
+  "mcpServers": {
+    "cube": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["tsx", "connectors/cube/mcp-server/src/index.ts"],
+      "env": {
+        "CUBE_API_KEY": "",
+        "CUBE_SECRET_KEY": "",
+        "CUBE_SUBACCOUNT_ID": "",
+        "CUBE_ENV": "staging"
+      }
+    },
+    "okx": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["@okx_ai/okx-trade-mcp", "--modules", "spot,futures,account,market"],
+      "disabled": true,
+      "env": {
+        "OKX_API_KEY": "",
+        "OKX_SECRET_KEY": "",
+        "OKX_PASSPHRASE": "",
+        "OKX_SIMULATED": "true"
+      }
+    },
+    "kraken": {
+      "type": "stdio",
+      "command": "kraken",
+      "args": ["mcp"],
+      "disabled": true,
+      "env": {
+        "KRAKEN_API_KEY": "",
+        "KRAKEN_API_SECRET": ""
+      }
+    },
+    "binance": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["ccxt-mcp", "--exchange", "binance"],
+      "disabled": true,
+      "env": {
+        "BINANCE_API_KEY": "",
+        "BINANCE_API_SECRET": ""
+      }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Momentum Desk",
+  "description": "Trend-following strategy with quant analysis and professional execution.",
+  "agents": [
+    "risk-manager",
+    "quant-analyst",
+    "momentum-trader",
+    "execution-trader"
+  ],
+  "risk_parameters": {
+    "max_position_size_pct": 10,
+    "max_portfolio_drawdown_pct": 15,
+    "max_leverage": 2,
+    "stop_loss_required": true,
+    "max_correlated_exposure_pct": 30
+  },
+  "momentum_config": {
+    "markets": ["BTC-USDC", "ETH-USDC", "SOL-USDC"],
+    "timeframe": "4h",
+    "entry_signal": "MA_cross_with_volume",
+    "exit_signal": "trailing_stop_2x_atr",
+    "min_adx": 25
+  }
+}
