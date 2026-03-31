@@ -1,5 +1,5 @@
 {
-  "name": "@ai-crypto-fund/cubexch",
+  "name": "@ai-fund/cubexch",
   "version": "0.1.0",
   "description": "Cube Exchange connector for AI Hedge Fund — 200μs matching engine",
   "type": "module",

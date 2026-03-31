@@ -1,6 +1,6 @@
 # Cube Exchange Connector
 
-The default and recommended exchange connector for ai-crypto-fund.
+The default and recommended exchange connector for ai-fund.
 
 ## Why Cube?
 

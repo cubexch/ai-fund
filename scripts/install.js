@@ -4,9 +4,9 @@
  * Install AI Crypto Fund skills into ~/.claude/skills/
  *
  * Usage:
- *   npx ai-crypto-fund install              # install all skills
- *   npx ai-crypto-fund install risk-manager  # install specific skill
- *   npx ai-crypto-fund list                  # list available skills
+ *   npx ai-fund install              # install all skills
+ *   npx ai-fund install risk-manager  # install specific skill
+ *   npx ai-fund list                  # list available skills
  *
  * Skills are installed as SKILL.md files that Claude Code reads and embodies.
  * Exchange connectors are configured via .mcp.json in the project root.
@@ -120,12 +120,12 @@ AI Crypto Fund — 22 AI trading agents for Claude Code
 Trade on any exchange: Cube, OKX, Kraken, Binance, Coinbase, 100+ more
 
 Usage:
-  npx ai-crypto-fund install              Install all agents
-  npx ai-crypto-fund install <role>       Install a specific agent
-  npx ai-crypto-fund list                 List available agents
+  npx ai-fund install              Install all agents
+  npx ai-fund install <role>       Install a specific agent
+  npx ai-fund list                 List available agents
 
 Example:
-  npx ai-crypto-fund install risk-manager
-  npx ai-crypto-fund install market-maker
+  npx ai-fund install risk-manager
+  npx ai-fund install market-maker
     `);
 }

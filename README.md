@@ -2,7 +2,7 @@
 
 ### Hire your AI trading desk. Not another grid bot.
 
-> **ai-crypto-fund** is the most comprehensive open-source AI crypto trading framework on GitHub — 42 autonomous hedge fund agents (including 20 named personas like Arthur Hayes, Jim Simons, George Soros, and Jesse Livermore) powered by [Claude Code](https://claude.ai/code) that trade on any exchange: Binance, Coinbase, Kraken, Robinhood, OKX, [Cube](https://cube.exchange), and [100+ more](connectors/README.md).
+> **ai-fund** is the most comprehensive open-source AI crypto trading framework on GitHub — 42 autonomous hedge fund agents (including 20 named personas like Arthur Hayes, Jim Simons, George Soros, and Jesse Livermore) powered by [Claude Code](https://claude.ai/code) that trade on any exchange: Binance, Coinbase, Kraken, Robinhood, OKX, [Cube](https://cube.exchange), and [100+ more](connectors/README.md).
 
 <!-- GitHub Topics: ai-trading, crypto-trading-bot, hedge-fund, ai-hedge-fund, trading-agents, mcp, claude-code, algorithmic-trading, market-making, arbitrage, quantitative-trading, risk-management, multi-exchange, defi, bitcoin, ethereum, crypto-fund -->
 
@@ -24,11 +24,11 @@
 
 ---
 
-## What is ai-crypto-fund?
+## What is ai-fund?
 
-ai-crypto-fund is an open-source AI crypto hedge fund that runs 42 autonomous trading agents inside Claude Code — including 20 named personas inspired by legends like Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, and Stanley Druckenmiller. Each agent is a complete hedge fund persona — with a distinct personality, trading philosophy, risk framework, and measurable KPIs. You don't configure parameters. You **hire and fire** agents based on their performance, just like a real hedge fund.
+ai-fund is an open-source AI crypto hedge fund that runs 42 autonomous trading agents inside Claude Code — including 20 named personas inspired by legends like Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, and Stanley Druckenmiller. Each agent is a complete hedge fund persona — with a distinct personality, trading philosophy, risk framework, and measurable KPIs. You don't configure parameters. You **hire and fire** agents based on their performance, just like a real hedge fund.
 
-Unlike traditional crypto trading bots that run pre-built grid strategies, ai-crypto-fund gives you a team of specialists: a quant analyst who only trusts data, a risk manager who says "no" for a living, a market maker obsessed with inventory, an arbitrageur who scans every connected exchange for mispricings, and named personas who trade with the philosophy of the legends they're modeled after.
+Unlike traditional crypto trading bots that run pre-built grid strategies, ai-fund gives you a team of specialists: a quant analyst who only trusts data, a risk manager who says "no" for a living, a market maker obsessed with inventory, an arbitrageur who scans every connected exchange for mispricings, and named personas who trade with the philosophy of the legends they're modeled after.
 
 The more exchanges you connect, the smarter your desk gets. Cross-exchange arbitrage, smart order routing, multi-venue market making — strategies that were exclusive to institutional trading desks are now open to everyone.
 
@@ -66,8 +66,8 @@ Skills define personality and strategy. Connectors provide exchange access. Skil
 ## Quick Start
 
 ```bash
-git clone https://github.com/cubexch/ai-crypto-fund
-cd ai-crypto-fund
+git clone https://github.com/cubexch/ai-fund
+cd ai-fund
 npm install
 ```
 
@@ -98,7 +98,7 @@ Start working:
 
 ## Supported Exchanges
 
-ai-crypto-fund works with any exchange that has an MCP server. Connect one or connect ten.
+ai-fund works with any exchange that has an MCP server. Connect one or connect ten.
 
 | Exchange | Setup | Highlights |
 |----------|-------|------------|
@@ -240,7 +240,7 @@ Each agent includes:
 
 ## Comparison with Other AI Trading Tools
 
-| Feature | ai-crypto-fund | [ai-hedge-fund](https://github.com/virattt/ai-hedge-fund) | [Freqtrade](https://github.com/freqtrade/freqtrade) | [Hummingbot](https://github.com/hummingbot/hummingbot) |
+| Feature | ai-fund | [ai-hedge-fund](https://github.com/virattt/ai-hedge-fund) | [Freqtrade](https://github.com/freqtrade/freqtrade) | [Hummingbot](https://github.com/hummingbot/hummingbot) |
 |---------|---------------|---------------|-----------|------------|
 | AI-native (LLM-powered) | ✅ Claude Code | ✅ Multiple LLMs | ❌ | ❌ |
 | Built-in agents | 42 (22 roles + 20 personas) | 18 investor personas | User-defined | ~12 strategies |
@@ -325,7 +325,7 @@ Each agent includes:
 ## Architecture
 
 ```
-ai-crypto-fund/
+ai-fund/
 ├── connectors/              # Exchange connections
 │   ├── cube/                # Built-in: Cube Exchange (200μs, recommended)
 │   │   └── mcp-server/     # MCP server (Osmium WebSocket + Iridium REST)
@@ -344,28 +344,28 @@ ai-crypto-fund/
 
 ## FAQ
 
-### What is ai-crypto-fund?
-ai-crypto-fund is an open-source AI crypto trading framework with 42 autonomous hedge fund agents — including 20 named personas modeled after legends like Arthur Hayes, Jim Simons, George Soros, and Jesse Livermore — that run inside Claude Code. Each agent implements a different quantitative strategy and has measurable KPIs.
+### What is ai-fund?
+ai-fund is an open-source AI crypto trading framework with 42 autonomous hedge fund agents — including 20 named personas modeled after legends like Arthur Hayes, Jim Simons, George Soros, and Jesse Livermore — that run inside Claude Code. Each agent implements a different quantitative strategy and has measurable KPIs.
 
-### How many trading agents does ai-crypto-fund include?
-ai-crypto-fund includes 42 autonomous AI trading agents: 20 named personas (Arthur Hayes, Michael Saylor, Jim Simons, George Soros, Jesse Livermore, Stanley Druckenmiller, Ray Dalio, Paul Tudor Jones, Ed Thorp, Cathie Wood, Raoul Pal, CZ, PlanB, Willy Woo, GCR, Cobie, Ansem, Hsaka, Tetranode, Gwyneth Chen) plus 22 role-based agents across 6 desks — Active Traders (6), Execution (3), Research (5), Risk & Portfolio (3), Specialists (4), and Infrastructure (1).
+### How many trading agents does ai-fund include?
+ai-fund includes 42 autonomous AI trading agents: 20 named personas (Arthur Hayes, Michael Saylor, Jim Simons, George Soros, Jesse Livermore, Stanley Druckenmiller, Ray Dalio, Paul Tudor Jones, Ed Thorp, Cathie Wood, Raoul Pal, CZ, PlanB, Willy Woo, GCR, Cobie, Ansem, Hsaka, Tetranode, Gwyneth Chen) plus 22 role-based agents across 6 desks — Active Traders (6), Execution (3), Research (5), Risk & Portfolio (3), Specialists (4), and Infrastructure (1).
 
-### What exchanges does ai-crypto-fund support?
-ai-crypto-fund works with any exchange: Binance, Coinbase, Kraken, Robinhood, OKX, Cube, Bybit, and 100+ more via CCXT. Cube Exchange ships as a built-in connector with the fastest matching engine in crypto (200μs).
+### What exchanges does ai-fund support?
+ai-fund works with any exchange: Binance, Coinbase, Kraken, Robinhood, OKX, Cube, Bybit, and 100+ more via CCXT. Cube Exchange ships as a built-in connector with the fastest matching engine in crypto (200μs).
 
-### Is ai-crypto-fund free?
-Yes. ai-crypto-fund is fully open source under the MIT license. You need a Claude Pro or Team plan for Claude Code.
+### Is ai-fund free?
+Yes. ai-fund is fully open source under the MIT license. You need a Claude Pro or Team plan for Claude Code.
 
-### Can ai-crypto-fund trade across multiple exchanges at once?
+### Can ai-fund trade across multiple exchanges at once?
 Yes. This is a core feature. The Arbitrageur agent scans all connected exchanges for price differences. The Execution Trader routes orders to the best venue. The Market Maker quotes on multiple exchanges simultaneously.
 
-### How does ai-crypto-fund compare to virattt's ai-hedge-fund?
-virattt's ai-hedge-fund focuses on stock trading with investor personas (Warren Buffett, etc.). ai-crypto-fund is built for crypto with trader personas (Scalper, Market Maker, Arbitrageur, etc.) and supports any exchange. See the [comparison table](#comparison-with-other-ai-trading-tools).
+### How does ai-fund compare to virattt's ai-hedge-fund?
+virattt's ai-hedge-fund focuses on stock trading with investor personas (Warren Buffett, etc.). ai-fund is built for crypto with trader personas (Scalper, Market Maker, Arbitrageur, etc.) and supports any exchange. See the [comparison table](#comparison-with-other-ai-trading-tools).
 
-### Can I use ai-crypto-fund for live trading?
+### Can I use ai-fund for live trading?
 Yes, but all exchanges default to paper/demo/testnet mode. The Risk Manager agent reviews every trade. Write operations require explicit confirmation.
 
-### Can I use ai-crypto-fund for stocks?
+### Can I use ai-fund for stocks?
 Yes, if your exchange supports it. Kraken offers tokenized stocks. Robinhood and Alpaca support US equities.
 
 ### Can I add my own agents?
@@ -390,7 +390,7 @@ Every agent needs:
 
 If this project helps your trading, please ⭐ star the repo — it helps others find it.
 
-[![Star History Chart](https://api.star-history.com/svg?repos=cubexch/ai-crypto-fund&type=Date)](https://star-history.com/#cubexch/ai-crypto-fund&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=cubexch/ai-fund&type=Date)](https://star-history.com/#cubexch/ai-fund&Date)
 
 ---
 
@@ -402,7 +402,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). We welcome new agents, exchange connecto
 
 ## Disclaimer
 
-ai-crypto-fund is for educational and research purposes. It is not financial advice. Trading cryptocurrencies carries substantial risk of loss. Always use paper trading mode when testing. Past performance of backtests does not guarantee future results.
+ai-fund is for educational and research purposes. It is not financial advice. Trading cryptocurrencies carries substantial risk of loss. Always use paper trading mode when testing. Past performance of backtests does not guarantee future results.
 
 ---
 

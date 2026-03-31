@@ -1,6 +1,6 @@
 # Exchange Connectors
 
-ai-crypto-fund connects to exchanges via MCP (Model Context Protocol) servers. Each exchange has its own MCP server that exposes trading tools. The trading desk skills work with any exchange — they use generic capabilities (place orders, get prices, manage positions) that every exchange MCP provides.
+ai-fund connects to exchanges via MCP (Model Context Protocol) servers. Each exchange has its own MCP server that exposes trading tools. The trading desk skills work with any exchange — they use generic capabilities (place orders, get prices, manage positions) that every exchange MCP provides.
 
 ## Supported Exchanges
 
