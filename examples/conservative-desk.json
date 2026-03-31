@@ -1,0 +1,20 @@
+{
+  "name": "Conservative Desk",
+  "description": "Low-risk accumulation strategy. DCA into BTC and ETH with strict risk management.",
+  "agents": ["risk-manager", "dca-strategist", "performance-analyst"],
+  "risk_parameters": {
+    "max_position_size_pct": 5,
+    "max_portfolio_drawdown_pct": 10,
+    "max_leverage": 1,
+    "stop_loss_required": true
+  },
+  "dca_config": {
+    "assets": ["BTC", "ETH"],
+    "frequency": "weekly",
+    "allocation": {
+      "BTC": 60,
+      "ETH": 40
+    },
+    "amount_usd": 500
+  }
+}
