@@ -1,28 +1,164 @@
-import { getCredentials, getEnvironment } from './auth.js';
+import { generateSignature, getCredentials, getEnvironment } from './auth.js';
+import { ASSET_ICONS } from '../../../../../lib/format.js';
+
+// ── Asset Registry ────────────────────────────────────────
+
+export interface AssetInfo {
+  assetId: number;
+  symbol: string;
+  icon: string;
+}
+
+/**
+ * Maps assetId → symbol. Built from markets data on first access.
+ * Also supports symbol → assetId lookups.
+ */
+export class AssetRegistry {
+  private byId = new Map<number, AssetInfo>();
+  private bySymbol = new Map<string, AssetInfo>();
+
+  buildFromMarkets(markets: Market[]): void {
+    for (const m of markets) {
+      // Parse base/quote from symbol like "BTCUSDC"
+      // Cube tickers use format: parsed/tickers returns base_currency + quote_currency
+      // But markets only have symbol + assetIds — we need tickers to get the split
+      // Use a heuristic: quote is always USDC (or ends with known quote)
+      const symbol = m.symbol;
+      const quoteAssets = ['USDC', 'USDT'];
+      let base = symbol;
+      let quote = '';
+      for (const q of quoteAssets) {
+        if (symbol.endsWith(q) && symbol.length > q.length) {
+          base = symbol.slice(0, -q.length);
+          quote = q;
+          break;
+        }
+      }
+
+      if (base && !this.byId.has(m.baseAssetId)) {
+        const info: AssetInfo = {
+          assetId: m.baseAssetId,
+          symbol: base,
+          icon: ASSET_ICONS[base] ?? '',
+        };
+        this.byId.set(m.baseAssetId, info);
+        this.bySymbol.set(base, info);
+      }
+      if (quote && !this.byId.has(m.quoteAssetId)) {
+        const info: AssetInfo = {
+          assetId: m.quoteAssetId,
+          symbol: quote,
+          icon: ASSET_ICONS[quote] ?? '',
+        };
+        this.byId.set(m.quoteAssetId, info);
+        this.bySymbol.set(quote, info);
+      }
+    }
+  }
+
+  getById(assetId: number): AssetInfo | undefined {
+    return this.byId.get(assetId);
+  }
+
+  getBySymbol(symbol: string): AssetInfo | undefined {
+    return this.bySymbol.get(symbol.toUpperCase());
+  }
+
+  getSymbol(assetId: number): string {
+    return this.byId.get(assetId)?.symbol ?? `ASSET-${assetId}`;
+  }
+
+  allAssets(): AssetInfo[] {
+    return [...this.byId.values()];
+  }
+}
 
 /**
  * Iridium REST client for Cube Exchange.
- * Handles: markets, positions, balances, order history, fees.
+ *
+ * Two base URLs:
+ * - restUrl (/ir/v0): markets, klines, authenticated account endpoints
+ * - mdRestUrl (/md): parsed tickers, order book snapshots, recent trades
  */
 export class IridiumClient {
   private baseUrl: string;
+  private mdBaseUrl: string;
+  private osBaseUrl: string;
   private apiKey: string;
   private secretKey: string;
+  private _subaccountId: number | null = null;
+  private _subaccountPromise: Promise<number> | null = null;
+  private _assetRegistry: AssetRegistry | null = null;
+  private _assetRegistryPromise: Promise<AssetRegistry> | null = null;
 
   constructor() {
     const env = getEnvironment(process.env.CUBE_ENV);
     const creds = getCredentials();
     this.baseUrl = env.restUrl;
+    this.mdBaseUrl = env.mdRestUrl;
+    this.osBaseUrl = env.osRestUrl;
     this.apiKey = creds.apiKey;
     this.secretKey = creds.secretKey;
   }
 
-  private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
-    const url = `${this.baseUrl}${path}`;
+  /**
+   * Get or build the asset registry from markets data.
+   * Fetches once on first call, then caches.
+   */
+  async getAssetRegistry(): Promise<AssetRegistry> {
+    if (this._assetRegistry) return this._assetRegistry;
+
+    if (!this._assetRegistryPromise) {
+      this._assetRegistryPromise = this.getMarkets().then(markets => {
+        const registry = new AssetRegistry();
+        registry.buildFromMarkets(markets);
+        this._assetRegistry = registry;
+        return registry;
+      });
+    }
+
+    return this._assetRegistryPromise;
+  }
+
+  /**
+   * Auto-discover the default subaccount ID from the API.
+   * Fetches once on first authenticated call, then caches.
+   */
+  async getDefaultSubaccountId(): Promise<number> {
+    if (this._subaccountId !== null) return this._subaccountId;
+
+    if (!this._subaccountPromise) {
+      this._subaccountPromise = this.request<SubaccountIds>(
+        '/users/subaccounts', {}, { authenticated: true }
+      ).then(result => {
+        if (!result.ids || result.ids.length === 0) {
+          throw new Error('No subaccounts found for this API key.');
+        }
+        this._subaccountId = result.ids[0];
+        return this._subaccountId;
+      });
+    }
+
+    return this._subaccountPromise;
+  }
+
+  private async request<T>(
+    path: string,
+    options: RequestInit = {},
+    opts: { authenticated?: boolean; useMd?: boolean; useOs?: boolean } = {}
+  ): Promise<T> {
+    const base = opts.useOs ? this.osBaseUrl : opts.useMd ? this.mdBaseUrl : this.baseUrl;
+    const url = `${base}${path}`;
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'x-api-key': this.apiKey,
     };
+
+    if (opts.authenticated) {
+      const timestamp = Math.floor(Date.now() / 1000);
+      headers['x-api-key'] = this.apiKey;
+      headers['x-api-signature'] = generateSignature(this.secretKey, timestamp);
+      headers['x-api-timestamp'] = String(timestamp);
+    }
 
     const response = await fetch(url, {
       ...options,
@@ -31,48 +167,91 @@ export class IridiumClient {
 
     if (!response.ok) {
       const body = await response.text();
-      throw new Error(`Iridium ${response.status}: ${body}`);
+      throw new Error(`Cube ${response.status}: ${body}`);
     }
 
-    const json = await response.json();
-    return json.result ?? json;
+    const json = (await response.json()) as Record<string, unknown>;
+    return (json.result ?? json) as T;
   }
 
-  // ── Markets ──────────────────────────────────────────────
+  // ── Markets (public, /ir/v0) ────────────────────────────
 
   async getMarkets(): Promise<Market[]> {
-    return this.request<Market[]>('/markets');
+    const data = await this.request<{ markets: Market[] }>('/markets');
+    return data.markets;
   }
 
-  async getMarket(marketId: number): Promise<Market> {
-    return this.request<Market>(`/markets/${marketId}`);
-  }
-
-  // ── Tickers / Prices ─────────────────────────────────────
+  // ── Tickers (public, /md) ──────────────────────────────
 
   async getTickers(): Promise<Ticker[]> {
-    return this.request<Ticker[]>('/tickers');
+    const parsed = await this.request<ParsedTicker[]>('/parsed/tickers', {}, { useMd: true });
+    return parsed.map(t => ({
+      symbol: t.ticker_id,
+      baseAsset: t.base_currency,
+      baseIcon: ASSET_ICONS[t.base_currency] ?? '',
+      quoteAsset: t.quote_currency,
+      quoteIcon: ASSET_ICONS[t.quote_currency] ?? '',
+      lastPrice: t.last_price,
+      bidPrice: t.bid,
+      askPrice: t.ask,
+      baseVolume24h: t.base_volume,
+      quoteVolume24h: t.quote_volume,
+      high24h: t.high,
+      low24h: t.low,
+      open24h: t.open,
+      change24h: t.open && t.last_price
+        ? (((t.last_price - t.open) / t.open) * 100)
+        : null,
+      timestamp: t.timestamp,
+    }));
   }
+
+  // ── Order Book (public, /md) ────────────────────────────
+
+  async getOrderBook(marketSymbol: string): Promise<ParsedOrderBook> {
+    return this.request<ParsedOrderBook>(
+      `/parsed/book/${marketSymbol}/snapshot`, {}, { useMd: true }
+    );
+  }
+
+  // ── Recent Trades (public, /md) ─────────────────────────
+
+  async getRecentTrades(marketSymbol: string): Promise<ParsedRecentTrades> {
+    return this.request<ParsedRecentTrades>(
+      `/parsed/book/${marketSymbol}/recent-trades`, {}, { useMd: true }
+    );
+  }
+
+  // ── Price History (public, /ir/v0) ──────────────────────
 
   async getPriceHistory(marketId: number, interval: string = '1h', limit: number = 100): Promise<Kline[]> {
-    return this.request<Kline[]>(`/history/prices?marketId=${marketId}&interval=${interval}&limit=${limit}`);
+    const raw = await this.request<number[][]>(
+      `/history/klines?marketId=${marketId}&interval=${interval}&limit=${limit}`
+    );
+    return raw.map(k => ({
+      open: String(k[1]),
+      high: String(k[2]),
+      low: String(k[3]),
+      close: String(k[4]),
+      volume: String(k[5]),
+      startTime: k[0],
+      interval,
+    }));
   }
 
-  // ── Account ──────────────────────────────────────────────
+  // ── Account (authenticated, /ir/v0) ────────────────────
 
-  async getSubaccounts(): Promise<Subaccount[]> {
-    return this.request<Subaccount[]>('/users/subaccounts');
+  async getSubaccounts(): Promise<SubaccountIds> {
+    return this.request<SubaccountIds>('/users/subaccounts', {}, { authenticated: true });
   }
 
-  async getPositions(subaccountId: number): Promise<Position[]> {
-    return this.request<Position[]>(`/users/subaccount/${subaccountId}/positions`);
+  async getPositions(subaccountId: number): Promise<Record<string, PositionGroup>> {
+    return this.request<Record<string, PositionGroup>>(
+      `/users/subaccount/${subaccountId}/positions`, {}, { authenticated: true }
+    );
   }
 
-  async getBalances(subaccountId: number): Promise<Balance[]> {
-    return this.request<Balance[]>(`/users/subaccount/${subaccountId}/balances`);
-  }
-
-  // ── Order History ────────────────────────────────────────
+  // ── Order History (authenticated, /ir/v0) ───────────────
 
   async getOrderHistory(
     subaccountId: number,
@@ -82,7 +261,9 @@ export class IridiumClient {
     if (params.marketId) qs.set('marketId', String(params.marketId));
     if (params.limit) qs.set('limit', String(params.limit));
     const query = qs.toString() ? `?${qs}` : '';
-    return this.request<HistoricalOrder[]>(`/users/subaccount/${subaccountId}/orders${query}`);
+    return this.request<HistoricalOrder[]>(
+      `/users/subaccount/${subaccountId}/orders${query}`, {}, { authenticated: true }
+    );
   }
 
   async getFills(subaccountId: number, params: { marketId?: number; limit?: number } = {}): Promise<Fill[]> {
@@ -90,13 +271,193 @@ export class IridiumClient {
     if (params.marketId) qs.set('marketId', String(params.marketId));
     if (params.limit) qs.set('limit', String(params.limit));
     const query = qs.toString() ? `?${qs}` : '';
-    return this.request<Fill[]>(`/users/subaccount/${subaccountId}/fills${query}`);
+    return this.request<Fill[]>(
+      `/users/subaccount/${subaccountId}/fills${query}`, {}, { authenticated: true }
+    );
   }
 
-  // ── Fees ─────────────────────────────────────────────────
+  // ── Fees (authenticated, /ir/v0) ────────────────────────
 
-  async getEstimatedFees(marketId: number, side: string, quantity: string): Promise<FeeEstimate> {
-    return this.request<FeeEstimate>(`/fees/estimate?marketId=${marketId}&side=${side}&quantity=${quantity}`);
+  async getEstimatedFees(
+    subaccountId: number,
+    marketId: number,
+    side: string,
+    price: number,
+    postOnly: string = 'Disabled',
+    quantity?: number,
+    quoteQuantity?: number
+  ): Promise<FeeEstimate> {
+    const body: Record<string, unknown> = {
+      subaccountId,
+      marketId,
+      side,
+      price,
+      postOnly,
+    };
+    if (quantity != null) body.quantity = quantity;
+    if (quoteQuantity != null) body.quoteQuantity = quoteQuantity;
+
+    return this.request<FeeEstimate>(
+      '/users/fee-estimates',
+      { method: 'POST', body: JSON.stringify(body) },
+      { authenticated: true }
+    );
+  }
+
+  // ── Orders (authenticated, /os/v0) ─────────────────────
+
+  async placeOrderRest(params: RestOrderParams): Promise<RestOrderResponse> {
+    const subaccountId = params.subaccountId ?? await this.getDefaultSubaccountId();
+    const body = {
+      clientOrderId: params.clientOrderId ?? Date.now(),
+      requestId: params.requestId ?? Date.now() + 1,
+      marketId: params.marketId,
+      subaccountId,
+      side: params.side,       // 0 = BID, 1 = ASK
+      orderType: params.orderType ?? 0,  // 0 = LIMIT
+      price: params.price,
+      quantity: params.quantity,
+      timeInForce: params.timeInForce ?? 1,  // 1 = GFS
+      postOnly: params.postOnly ?? 0,
+      cancelOnDisconnect: params.cancelOnDisconnect ?? false,
+      ...(params.quoteQuantity !== undefined && { quoteQuantity: params.quoteQuantity }),
+      ...(params.stopPrice !== undefined && { stopPrice: params.stopPrice }),
+    };
+
+    return this.request<RestOrderResponse>(
+      '/order',
+      { method: 'POST', body: JSON.stringify(body) },
+      { authenticated: true, useOs: true }
+    );
+  }
+
+  async cancelOrderRest(params: { marketId: number; clientOrderId: number; subaccountId?: number }): Promise<unknown> {
+    const subaccountId = params.subaccountId ?? await this.getDefaultSubaccountId();
+    return this.request(
+      '/order',
+      {
+        method: 'DELETE',
+        body: JSON.stringify({
+          marketId: params.marketId,
+          clientOrderId: params.clientOrderId,
+          subaccountId,
+          requestId: Date.now(),
+        }),
+      },
+      { authenticated: true, useOs: true }
+    );
+  }
+
+  async modifyOrderRest(params: {
+    marketId: number;
+    clientOrderId: number;
+    newPrice?: number;
+    newQuantity: number;
+    subaccountId?: number;
+    postOnly?: number;
+  }): Promise<unknown> {
+    const subaccountId = params.subaccountId ?? await this.getDefaultSubaccountId();
+    return this.request(
+      '/order',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          marketId: params.marketId,
+          clientOrderId: params.clientOrderId,
+          subaccountId,
+          requestId: Date.now(),
+          newPrice: params.newPrice,
+          newQuantity: params.newQuantity,
+          postOnly: params.postOnly ?? 0,
+        }),
+      },
+      { authenticated: true, useOs: true }
+    );
+  }
+
+  async massCancelRest(params: { subaccountId?: number; marketId?: number; side?: number }): Promise<unknown> {
+    const subaccountId = params.subaccountId ?? await this.getDefaultSubaccountId();
+    return this.request(
+      '/orders',
+      {
+        method: 'DELETE',
+        body: JSON.stringify({
+          subaccountId,
+          requestId: Date.now(),
+          ...(params.marketId !== undefined && { marketId: params.marketId }),
+          ...(params.side !== undefined && { side: params.side }),
+        }),
+      },
+      { authenticated: true, useOs: true }
+    );
+  }
+
+  // ── DeFi Swap (authenticated, /ir/v0) ──────────────────
+
+  async getSwapEstimate(params: {
+    tokenIn: string;
+    tokenOut: string;
+    direction: 'in' | 'out';
+    amountIn?: string;
+    amountOut?: string;
+    sourceId?: number;
+  }): Promise<SwapEstimateResponse> {
+    const body: Record<string, unknown> = {
+      tokenIn: params.tokenIn,
+      tokenOut: params.tokenOut,
+      direction: params.direction,
+      sourceId: params.sourceId ?? 1,
+    };
+    if (params.amountIn != null) body.amountIn = params.amountIn;
+    if (params.amountOut != null) body.amountOut = params.amountOut;
+
+    return this.request<SwapEstimateResponse>(
+      '/wallet/solana/swap/estimate',
+      { method: 'POST', body: JSON.stringify(body) },
+      { authenticated: true }
+    );
+  }
+
+  async executeSwap(params: {
+    tokenIn: string;
+    tokenOut: string;
+    direction: 'in' | 'out';
+    amountIn?: string;
+    amountOut?: string;
+    slippageBps?: number;
+  }): Promise<unknown> {
+    const body: Record<string, unknown> = {
+      tokenIn: params.tokenIn,
+      tokenOut: params.tokenOut,
+      direction: params.direction,
+      ...(params.slippageBps !== undefined && { slippageBps: params.slippageBps }),
+    };
+    if (params.amountIn != null) body.amountIn = params.amountIn;
+    if (params.amountOut != null) body.amountOut = params.amountOut;
+
+    // Try the most likely execute endpoint
+    return this.request(
+      '/wallet/solana/swap/execute',
+      { method: 'POST', body: JSON.stringify(body) },
+      { authenticated: true }
+    );
+  }
+
+  // ── Token Search (public, cube.exchange) ───────────────
+
+  async searchTokens(query: string, limit: number = 10): Promise<TokenSearchResult[]> {
+    const url = `https://www.cube.exchange/api/markets/search?query=${encodeURIComponent(query)}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Token search failed: ${response.status}`);
+    const results = (await response.json()) as TokenSearchResult[];
+    return results.slice(0, limit);
+  }
+
+  async getTrendingTokens(): Promise<TokenSearchResult[]> {
+    const url = 'https://www.cube.exchange/api/solana/token/trending';
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Trending tokens failed: ${response.status}`);
+    return (await response.json()) as TokenSearchResult[];
   }
 }
 
@@ -107,25 +468,65 @@ export interface Market {
   symbol: string;
   baseAssetId: number;
   quoteAssetId: number;
-  baseSymbol: string;
-  quoteSymbol: string;
-  pricePrecision: number;
-  quantityPrecision: number;
-  minQuantity: string;
-  maxQuantity: string;
-  status: string;
+  baseLotSize: string;
+  quoteLotSize: string;
+  priceDisplayDecimals: number;
+  priceTickSize: string;
+  quantityTickSize: string;
+  status: number;
+}
+
+export interface ParsedTicker {
+  ticker_id: string;
+  base_currency: string;
+  quote_currency: string;
+  timestamp: number;
+  last_price: number | null;
+  base_volume: number;
+  quote_volume: number;
+  bid: number | null;
+  ask: number | null;
+  high: number | null;
+  low: number | null;
+  open: number | null;
 }
 
 export interface Ticker {
-  marketId: number;
   symbol: string;
-  lastPrice: string;
-  bidPrice: string;
-  askPrice: string;
-  volume24h: string;
-  high24h: string;
-  low24h: string;
-  change24h: string;
+  baseAsset: string;
+  baseIcon: string;
+  quoteAsset: string;
+  quoteIcon: string;
+  lastPrice: number | null;
+  bidPrice: number | null;
+  askPrice: number | null;
+  baseVolume24h: number;
+  quoteVolume24h: number;
+  high24h: number | null;
+  low24h: number | null;
+  open24h: number | null;
+  change24h: number | null;
+  timestamp: number;
+}
+
+export interface ParsedOrderBook {
+  ticker_id: string;
+  timestamp: number;
+  bids: [number, number][];
+  asks: [number, number][];
+}
+
+export interface ParsedRecentTrades {
+  ticker_id: string;
+  trades: ParsedTrade[];
+}
+
+export interface ParsedTrade {
+  id: number;
+  p: number;
+  q: number;
+  side: string;
+  ts: number;
 }
 
 export interface Kline {
@@ -138,23 +539,21 @@ export interface Kline {
   interval: string;
 }
 
-export interface Subaccount {
-  subaccountId: number;
+export interface SubaccountIds {
+  ids: number[];
+}
+
+export interface PositionEntry {
+  assetId: number;
+  accountingType: string;
+  amount: string;
+  receivedAmount: string;
+  pendingDeposits: string;
+}
+
+export interface PositionGroup {
   name: string;
-}
-
-export interface Position {
-  assetId: number;
-  symbol: string;
-  total: string;
-  available: string;
-}
-
-export interface Balance {
-  assetId: number;
-  symbol: string;
-  total: string;
-  available: string;
+  inner: PositionEntry[];
 }
 
 export interface HistoricalOrder {
@@ -188,4 +587,86 @@ export interface FeeEstimate {
   makerFee: string;
   takerFee: string;
   estimatedFee: string;
+}
+
+export interface TokenSearchResult {
+  assetId: number;
+  symbol: string;
+  decimals: number;
+  sourceId: number;
+  metadata: {
+    currencyName?: string;
+    mint?: string;
+    route?: 'cube' | 'defi';
+    liquidity?: number;
+    marketCapRank?: number;
+    snapshotPrice?: number;
+    logoURI?: string;
+    volume24hUSD?: number;
+    price24hChangePercent?: number;
+    [key: string]: unknown;
+  };
+}
+
+export interface SwapRouteStep {
+  programId: string;
+  pool: string;
+  amount: string;
+  price: string;
+  direction: string;
+}
+
+export interface SwapEstimateResponse {
+  fee?: { bps: number };
+  route?: {
+    amount: string;
+    steps: SwapRouteStep[];
+    allocations: Array<{ aIndex: number; bIndex: number; bps: string }>;
+    mints: Record<string, { owner: string; decimals: number }>;
+  };
+  metadata?: Array<{
+    address: string;
+    assetId: number;
+    currencyName: string;
+    defaultDisplayDecimals: number;
+    decimals: number;
+    metadataUri: string;
+    sourceId: number;
+    symbol: string;
+    usdRate: string;
+  }>;
+  error?: string;
+}
+
+// ── REST Order Types ────────────────────────────────────────
+
+export interface RestOrderParams {
+  marketId: number;
+  side: number;        // 0 = BID, 1 = ASK
+  price?: number;      // In lot units
+  quantity?: number;    // In lot units
+  orderType?: number;   // 0 = LIMIT, 1 = MARKET_LIMIT, 2 = MARKET_WITH_PROTECTION
+  timeInForce?: number; // 0 = IOC, 1 = GFS, 2 = FOK
+  postOnly?: number;    // 0 = disabled, 1 = enabled
+  cancelOnDisconnect?: boolean;
+  subaccountId?: number;
+  clientOrderId?: number;
+  requestId?: number;
+  quoteQuantity?: number;
+  stopPrice?: number;
+}
+
+export interface RestOrderResponse {
+  clientOrderId: number;
+  exchangeOrderId: number;
+  marketId: number;
+  price: number;
+  quantity: number;
+  side: number;
+  timeInForce: number;
+  orderType: number;
+  subaccountId: number;
+  requestId: number;
+  transactTime: number;
+  msgSeqNum: number;
 }

@@ -7,16 +7,21 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "login": "tsx src/cli/login.ts"
   },
   "dependencies": {
     "@cubexch/client": "^1.14.2",
     "@modelcontextprotocol/sdk": "^1.12.1",
+    "open": "^10.0.0",
     "ws": "^8.20.0"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",
     "tsx": "^4.19.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "vitest": "^4.1.2"
   }
 }

@@ -1,20 +1,20 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { getCredentials } from '../client/auth.js';
+
 import type { IridiumClient } from '../client/iridium.js';
 
 export function registerAccountTools(server: McpServer, iridium: IridiumClient) {
-  const defaultSubaccountId = () => getCredentials().subaccountId;
+  const defaultSubaccountId = () => iridium.getDefaultSubaccountId();
 
   server.tool(
     'get_positions',
-    'Get all current positions (asset holdings) for the trading subaccount. Shows total and available balances for each asset.',
+    'Get all current positions (asset holdings) for the trading subaccount. Shows amounts per asset grouped by accounting type.',
     {
       subaccountId: z.number().optional().describe('Subaccount ID (defaults to configured subaccount)'),
     },
     async params => {
       try {
-        const positions = await iridium.getPositions(params.subaccountId ?? defaultSubaccountId());
+        const positions = await iridium.getPositions(params.subaccountId ?? await defaultSubaccountId());
         return {
           content: [
             {
@@ -34,18 +34,69 @@ export function registerAccountTools(server: McpServer, iridium: IridiumClient) 
 
   server.tool(
     'get_balances',
-    'Get asset balances for the trading subaccount. Shows total balance and available (not locked in orders) for each asset.',
+    'Get human-readable asset balances with symbols, amounts, and USD values for the trading subaccount.',
     {
       subaccountId: z.number().optional().describe('Subaccount ID (defaults to configured subaccount)'),
     },
     async params => {
       try {
-        const balances = await iridium.getBalances(params.subaccountId ?? defaultSubaccountId());
+        const subId = params.subaccountId ?? await defaultSubaccountId();
+        const [positionGroups, tickers, registry] = await Promise.all([
+          iridium.getPositions(subId),
+          iridium.getTickers(),
+          iridium.getAssetRegistry(),
+        ]);
+
+        const tickerMap = new Map(tickers.map(t => [t.symbol, t]));
+        let totalValue = 0;
+
+        const balances: {
+          symbol: string;
+          icon: string;
+          amount: number;
+          usdPrice: number | null;
+          usdValue: number;
+        }[] = [];
+
+        for (const [, group] of Object.entries(positionGroups)) {
+          for (const entry of group.inner) {
+            const amt = parseFloat(entry.amount);
+            if (amt <= 0) continue;
+
+            const asset = registry.getById(entry.assetId);
+            const symbol = asset?.symbol ?? `ASSET-${entry.assetId}`;
+            const icon = asset?.icon ?? '';
+            const isStable = ['USDC', 'USDT'].includes(symbol);
+            const ticker = tickerMap.get(`${symbol}USDC`);
+            const usdPrice = isStable ? 1 : (ticker?.lastPrice ?? null);
+            const usdValue = usdPrice !== null ? amt * usdPrice : 0;
+            totalValue += usdValue;
+
+            balances.push({ symbol, icon, amount: amt, usdPrice, usdValue });
+          }
+        }
+
+        // Sort by USD value descending
+        balances.sort((a, b) => b.usdValue - a.usdValue);
+
         return {
           content: [
             {
               type: 'text' as const,
-              text: JSON.stringify(balances, null, 2),
+              text: JSON.stringify(
+                {
+                  totalValue: `$${totalValue.toFixed(2)}`,
+                  balances: balances.map(b => ({
+                    asset: b.icon ? `${b.icon} ${b.symbol}` : b.symbol,
+                    symbol: b.symbol,
+                    amount: b.amount,
+                    usdPrice: b.usdPrice !== null ? `$${b.usdPrice.toFixed(2)}` : 'N/A',
+                    usdValue: `$${b.usdValue.toFixed(2)}`,
+                  })),
+                },
+                null,
+                2
+              ),
             },
           ],
         };
@@ -68,7 +119,7 @@ export function registerAccountTools(server: McpServer, iridium: IridiumClient) 
     },
     async params => {
       try {
-        const orders = await iridium.getOrderHistory(params.subaccountId ?? defaultSubaccountId(), {
+        const orders = await iridium.getOrderHistory(params.subaccountId ?? await defaultSubaccountId(), {
           marketId: params.marketId,
           limit: params.limit,
         });
@@ -99,7 +150,7 @@ export function registerAccountTools(server: McpServer, iridium: IridiumClient) 
     },
     async params => {
       try {
-        const fills = await iridium.getFills(params.subaccountId ?? defaultSubaccountId(), {
+        const fills = await iridium.getFills(params.subaccountId ?? await defaultSubaccountId(), {
           marketId: params.marketId,
           limit: params.limit,
         });

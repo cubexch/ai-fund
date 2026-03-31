@@ -73,6 +73,61 @@ export function signedValue(value: number, formatter: (v: number) => string = us
 }
 
 /**
+ * Unicode icons for crypto assets. Used in terminal dashboards and tool output.
+ */
+export const ASSET_ICONS: Record<string, string> = {
+  BTC:      '₿',
+  ETH:      'Ξ',
+  SOL:      '◎',
+  USDC:     '◉',
+  USDT:     '₮',
+  DOGE:     'Ð',
+  LTC:      'Ł',
+  XRP:      '✕',
+  ADA:      '₳',
+  DOT:      '●',
+  AVAX:     'Ⓐ',
+  MATIC:    '⬡',
+  ATOM:     '⚛',
+  LINK:     '⬡',
+  UNI:      '🦄',
+  AAVE:     '👻',
+  APT:      '❖',
+  SUI:      '💧',
+  TAO:      'τ',
+  BONK:     '🐕',
+  PENGU:    '🐧',
+  TRUMP:    '🇺🇸',
+  FARTCOIN: '💨',
+  JUP:      '♃',
+  PYTH:     '🔮',
+  RAY:      '☀',
+  HNT:      '📡',
+  ORCA:     '🐋',
+  DEEP:     '🌊',
+  WAL:      '🐘',
+  CHZ:      '⚽',
+  VCHF:     '🇨🇭',
+  VGBP:     '🇬🇧',
+  VEUR:     '🇪🇺',
+};
+
+/**
+ * Get the Unicode icon for an asset symbol, or empty string if none.
+ */
+export function assetIcon(symbol: string): string {
+  return ASSET_ICONS[symbol.toUpperCase()] ?? '';
+}
+
+/**
+ * Format asset symbol with its Unicode icon prefix: "₿ BTC", "◎ SOL", etc.
+ */
+export function labelAsset(symbol: string): string {
+  const icon = assetIcon(symbol);
+  return icon ? `${icon} ${symbol}` : symbol;
+}
+
+/**
  * Grade letter from score (0-100).
  */
 export function grade(score: number): string {

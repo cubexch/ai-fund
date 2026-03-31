@@ -1,10 +1,9 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { getCredentials } from '../client/auth.js';
 import type { IridiumClient } from '../client/iridium.js';
 
 export function registerRiskTools(server: McpServer, iridium: IridiumClient) {
-  const defaultSubaccountId = () => getCredentials().subaccountId;
+  const defaultSubaccountId = () => iridium.getDefaultSubaccountId();
 
   server.tool(
     'get_portfolio_summary',
@@ -14,28 +13,47 @@ export function registerRiskTools(server: McpServer, iridium: IridiumClient) {
     },
     async params => {
       try {
-        const subId = params.subaccountId ?? defaultSubaccountId();
-        const [positions, tickers] = await Promise.all([iridium.getPositions(subId), iridium.getTickers()]);
+        const subId = params.subaccountId ?? await defaultSubaccountId();
+        const [positionGroups, tickers, registry] = await Promise.all([
+          iridium.getPositions(subId),
+          iridium.getTickers(),
+          iridium.getAssetRegistry(),
+        ]);
 
         const tickerMap = new Map(tickers.map(t => [t.symbol, t]));
         let totalValue = 0;
 
-        const enriched = positions
-          .filter(p => parseFloat(p.total) > 0)
-          .map(position => {
-            const ticker = tickerMap.get(`${position.symbol}-USD`) ?? tickerMap.get(`${position.symbol}-USDC`);
-            const price = ticker ? parseFloat(ticker.lastPrice) : 0;
-            const value = parseFloat(position.total) * price;
-            totalValue += value;
+        // Flatten position groups and resolve assetId → symbol via registry
+        const flatPositions: { symbol: string; assetId: number; amount: number; icon: string }[] = [];
+        for (const [, group] of Object.entries(positionGroups)) {
+          for (const entry of group.inner) {
+            const amt = parseFloat(entry.amount);
+            if (amt > 0) {
+              const asset = registry.getById(entry.assetId);
+              const symbol = asset?.symbol ?? `ASSET-${entry.assetId}`;
+              const icon = asset?.icon ?? '';
+              flatPositions.push({ symbol, assetId: entry.assetId, amount: amt, icon });
+            }
+          }
+        }
 
-            return {
-              asset: position.symbol,
-              total: position.total,
-              available: position.available,
-              price: price || 'N/A',
-              value: value.toFixed(2),
-            };
-          });
+        const enriched = flatPositions.map(position => {
+          // Stablecoins are worth $1 — no ticker lookup needed
+          const isStable = ['USDC', 'USDT'].includes(position.symbol);
+          const ticker = tickerMap.get(`${position.symbol}USDC`);
+          const price = isStable ? 1 : (ticker?.lastPrice ?? 0);
+          const value = position.amount * price;
+          totalValue += value;
+
+          return {
+            asset: position.symbol,
+            icon: position.icon,
+            label: position.icon ? `${position.icon} ${position.symbol}` : position.symbol,
+            amount: position.amount,
+            price: price || 'N/A',
+            value: value.toFixed(2),
+          };
+        });
 
         const summary = enriched.map(p => ({
           ...p,

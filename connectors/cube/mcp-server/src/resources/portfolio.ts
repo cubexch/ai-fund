@@ -1,5 +1,4 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getCredentials } from '../client/auth.js';
 import type { IridiumClient } from '../client/iridium.js';
 
 export function registerPortfolioResources(server: McpServer, iridium: IridiumClient) {
@@ -11,11 +10,10 @@ export function registerPortfolioResources(server: McpServer, iridium: IridiumCl
       mimeType: 'application/json',
     },
     async () => {
-      const subId = getCredentials().subaccountId;
+      const subId = await iridium.getDefaultSubaccountId();
 
-      const [positions, balances, orders] = await Promise.all([
-        iridium.getPositions(subId).catch(() => []),
-        iridium.getBalances(subId).catch(() => []),
+      const [positions, orders] = await Promise.all([
+        iridium.getPositions(subId).catch(() => ({})),
         iridium.getOrderHistory(subId, { limit: 10 }).catch(() => []),
       ]);
 
@@ -28,7 +26,6 @@ export function registerPortfolioResources(server: McpServer, iridium: IridiumCl
               {
                 subaccountId: subId,
                 positions,
-                balances,
                 recentOrders: orders,
               },
               null,

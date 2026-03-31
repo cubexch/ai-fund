@@ -1,26 +1,75 @@
 import { WebSocket } from 'ws';
-import { generateSignature, getCredentials, getEnvironment } from './auth.js';
+import { generateSignature, getCredentials, getEnvironment, getSigningCredentials, getSigningKey } from './auth.js';
+import { signMessage, fromHex } from './signing.js';
+import {
+  CredentialsMethods,
+  OrderRequestMethods,
+  OrderResponseMethods,
+  BootstrapMethods,
+} from '@cubexch/client/lib/methods/trade.js';
+import {
+  WalletRequestMethods,
+  WalletEventMethods,
+} from '@cubexch/client/lib/methods/wallet.js';
+import {
+  Side,
+  TimeInForce,
+  OrderType,
+  PostOnly,
+} from '@cubexch/client/lib/trade.js';
+import type {
+  Credentials,
+  OrderResponse,
+} from '@cubexch/client/lib/trade.js';
+import type {
+  WalletEvent,
+  NewIntent,
+} from '@cubexch/client/lib/wallet.js';
+
+// ── Side/TIF/OrderType string → enum mappings ────────────
+
+const SIDE_MAP: Record<string, Side> = {
+  BID: Side.BID,
+  ASK: Side.ASK,
+};
+
+const TIF_MAP: Record<string, TimeInForce> = {
+  IOC: TimeInForce.IMMEDIATE_OR_CANCEL,
+  GFS: TimeInForce.GOOD_FOR_SESSION,
+  FOK: TimeInForce.FILL_OR_KILL,
+};
+
+const ORDER_TYPE_MAP: Record<string, OrderType> = {
+  LIMIT: OrderType.LIMIT,
+  MARKET_LIMIT: OrderType.MARKET_LIMIT,
+  MARKET_WITH_PROTECTION: OrderType.MARKET_WITH_PROTECTION,
+  STOP_LOSS: OrderType.STOP_LOSS,
+  STOP_LIMIT: OrderType.STOP_LIMIT,
+};
 
 /**
  * Osmium WebSocket client for Cube Exchange.
- * Handles: real-time order submission, cancellation, modification,
- * market data streaming, and position updates via protobuf.
- *
- * For the MCP server, we use a simplified JSON-message approach
- * that wraps the protobuf client for tool-level interactions.
+ * Uses binary protobuf via @cubexch/client for correct wire format.
  */
 export class OsmiumClient {
   private ws: WebSocket | null = null;
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
   private requestIdCounter = 1n;
   private clientOrderIdCounter = BigInt(Date.now()) * 1000n;
-  private pendingRequests = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+  private pendingRequests = new Map<bigint, { resolve: (v: any) => void; reject: (e: Error) => void; timeout: ReturnType<typeof setTimeout> }>();
   private connected = false;
-  private subaccountId: number;
+  private connecting: Promise<void> | null = null;
+  private subaccountId: number | null = null;
 
-  constructor() {
-    const creds = getCredentials();
-    this.subaccountId = creds.subaccountId;
+  setSubaccountId(id: number): void {
+    this.subaccountId = id;
+  }
+
+  private getSubaccountId(): bigint {
+    if (this.subaccountId === null) {
+      throw new Error('Subaccount ID not set. Call setSubaccountId() or wait for auto-discovery.');
+    }
+    return BigInt(this.subaccountId);
   }
 
   get isConnected(): boolean {
@@ -29,54 +78,104 @@ export class OsmiumClient {
 
   async connect(): Promise<void> {
     if (this.connected) return;
+    // Deduplicate concurrent connect attempts
+    if (this.connecting) return this.connecting;
 
+    this.connecting = this._connect();
+    try {
+      await this.connecting;
+    } finally {
+      this.connecting = null;
+    }
+  }
+
+  private _connect(): Promise<void> {
     const env = getEnvironment(process.env.CUBE_ENV);
     const creds = getCredentials();
     const timestamp = Math.floor(Date.now() / 1000);
     const signature = generateSignature(creds.secretKey, timestamp);
 
     return new Promise((resolve, reject) => {
+      // Clean up any previous socket
+      if (this.ws) {
+        try { this.ws.close(); } catch { /* ignore */ }
+        this.ws = null;
+      }
+
+      const connectTimeout = setTimeout(() => {
+        reject(new Error('WebSocket connect timed out after 10s'));
+        if (this.ws) {
+          try { this.ws.close(); } catch { /* ignore */ }
+          this.ws = null;
+        }
+      }, 10_000);
+
       this.ws = new WebSocket(env.wsTradeUrl);
+      this.ws.binaryType = 'arraybuffer';
 
       this.ws.on('open', () => {
-        // Send credentials
-        this.ws!.send(
-          JSON.stringify({
-            type: 'credentials',
-            accessKeyId: creds.apiKey,
-            signature,
-            timestamp,
-          })
-        );
+        // Send protobuf-encoded Credentials
+        const credMsg: Credentials = {
+          accessKeyId: creds.apiKey,
+          signature,
+          timestamp: BigInt(timestamp),
+          flags: 0n,
+        };
+        const encoded = CredentialsMethods.encode(credMsg).finish();
+        this.ws!.send(encoded);
       });
 
-      this.ws.on('message', (data: Buffer) => {
-        try {
-          const msg = JSON.parse(data.toString());
-          this.handleMessage(msg);
+      this.ws.on('message', (data: ArrayBuffer | Buffer) => {
+        const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
 
-          if (msg.type === 'bootstrap' && msg.done) {
-            this.connected = true;
-            this.startHeartbeat();
-            resolve();
+        // Try to decode as Bootstrap first (during connection phase)
+        if (!this.connected) {
+          try {
+            const bootstrap = BootstrapMethods.decode(bytes);
+            if (bootstrap.done) {
+              clearTimeout(connectTimeout);
+              this.connected = true;
+              this.startHeartbeat();
+              resolve();
+              return;
+            }
+          } catch {
+            // Not a bootstrap message, try as OrderResponse
           }
+          return;
+        }
+
+        // After connected, decode as OrderResponse
+        try {
+          const response = OrderResponseMethods.decode(bytes);
+          this.handleResponse(response);
         } catch {
-          // Binary protobuf message — skip in JSON mode
+          // Unknown message type — skip
         }
       });
 
       this.ws.on('error', (err: Error) => {
-        if (!this.connected) reject(err);
+        if (!this.connected) {
+          clearTimeout(connectTimeout);
+          reject(err);
+        }
       });
 
       this.ws.on('close', (code: number, reason: Buffer) => {
+        clearTimeout(connectTimeout);
         this.connected = false;
         this.stopHeartbeat();
+
         // Reject all pending requests
         for (const [, pending] of this.pendingRequests) {
-          pending.reject(new Error(`WebSocket closed: ${code} ${reason}`));
+          clearTimeout(pending.timeout);
+          pending.reject(new Error(`WebSocket closed: ${code} ${reason?.toString()}`));
         }
         this.pendingRequests.clear();
+
+        if (!this.connected) {
+          reject(new Error(`WebSocket closed during connect: ${code} ${reason?.toString()}`));
+        }
       });
     });
   }
@@ -97,70 +196,341 @@ export class OsmiumClient {
     const requestId = this.nextRequestId();
     const clientOrderId = this.nextClientOrderId();
 
-    const msg = {
-      type: 'newOrder',
-      requestId: requestId.toString(),
-      clientOrderId: clientOrderId.toString(),
-      marketId: params.marketId,
-      side: params.side,
-      orderType: params.orderType || 'LIMIT',
-      timeInForce: params.timeInForce || 'GFS',
-      price: params.price,
-      quantity: params.quantity,
-      postOnly: params.postOnly || false,
-      subaccountId: this.subaccountId,
-      cancelOnDisconnect: params.cancelOnDisconnect ?? true,
-    };
+    const msg = OrderRequestMethods.encode({
+      new: {
+        clientOrderId,
+        requestId,
+        marketId: BigInt(params.marketId),
+        price: params.price !== undefined ? BigInt(params.price) : undefined,
+        quantity: params.quantity !== undefined ? BigInt(params.quantity) : undefined,
+        side: SIDE_MAP[params.side] ?? Side.BID,
+        timeInForce: TIF_MAP[params.timeInForce ?? 'GFS'] ?? TimeInForce.GOOD_FOR_SESSION,
+        orderType: ORDER_TYPE_MAP[params.orderType ?? 'LIMIT'] ?? OrderType.LIMIT,
+        subaccountId: this.getSubaccountId(),
+        postOnly: params.postOnly ? PostOnly.ENABLED : PostOnly.DISABLED,
+        cancelOnDisconnect: params.cancelOnDisconnect ?? true,
+        quoteQuantity: params.quoteQuantity !== undefined ? BigInt(params.quoteQuantity) : undefined,
+        stopPrice: params.stopPrice !== undefined ? BigInt(params.stopPrice) : undefined,
+      },
+    }).finish();
 
-    return this.sendAndWait<OrderResult>(requestId.toString(), msg);
+    this.ws!.send(msg);
+
+    return this.waitForResponse<OrderResult>(requestId, clientOrderId, 30_000);
   }
 
   async cancelOrder(params: CancelOrderParams): Promise<CancelResult> {
     await this.ensureConnected();
     const requestId = this.nextRequestId();
 
-    const msg = {
-      type: 'cancelOrder',
-      requestId: requestId.toString(),
-      marketId: params.marketId,
-      clientOrderId: params.clientOrderId,
-      subaccountId: this.subaccountId,
-    };
+    const msg = OrderRequestMethods.encode({
+      cancel: {
+        marketId: BigInt(params.marketId),
+        clientOrderId: BigInt(params.clientOrderId),
+        requestId,
+        subaccountId: this.getSubaccountId(),
+      },
+    }).finish();
 
-    return this.sendAndWait<CancelResult>(requestId.toString(), msg);
+    this.ws!.send(msg);
+
+    return this.waitForResponse<CancelResult>(requestId, BigInt(params.clientOrderId), 30_000);
   }
 
   async modifyOrder(params: ModifyOrderParams): Promise<OrderResult> {
     await this.ensureConnected();
     const requestId = this.nextRequestId();
 
-    const msg = {
-      type: 'modifyOrder',
-      requestId: requestId.toString(),
-      marketId: params.marketId,
-      clientOrderId: params.clientOrderId,
-      newPrice: params.newPrice,
-      newQuantity: params.newQuantity,
-      subaccountId: this.subaccountId,
-      postOnly: params.postOnly || false,
-    };
+    const msg = OrderRequestMethods.encode({
+      modify: {
+        marketId: BigInt(params.marketId),
+        clientOrderId: BigInt(params.clientOrderId),
+        requestId,
+        subaccountId: this.getSubaccountId(),
+        newPrice: params.newPrice !== undefined ? BigInt(params.newPrice) : undefined,
+        newQuantity: BigInt(params.newQuantity),
+        postOnly: params.postOnly ? PostOnly.ENABLED : PostOnly.DISABLED,
+      },
+    }).finish();
 
-    return this.sendAndWait<OrderResult>(requestId.toString(), msg);
+    this.ws!.send(msg);
+
+    return this.waitForResponse<OrderResult>(requestId, BigInt(params.clientOrderId), 30_000);
   }
 
   async massCancel(params: MassCancelParams): Promise<MassCancelResult> {
     await this.ensureConnected();
     const requestId = this.nextRequestId();
 
-    const msg = {
-      type: 'massCancel',
-      requestId: requestId.toString(),
-      subaccountId: this.subaccountId,
-      marketId: params.marketId,
-      side: params.side,
+    const msg = OrderRequestMethods.encode({
+      mc: {
+        subaccountId: this.getSubaccountId(),
+        marketId: params.marketId !== undefined ? BigInt(params.marketId) : undefined,
+        side: params.side !== undefined ? (SIDE_MAP[params.side] ?? undefined) : undefined,
+        requestId,
+      },
+    }).finish();
+
+    this.ws!.send(msg);
+
+    return this.waitForResponse<MassCancelResult>(requestId, 0n, 30_000);
+  }
+
+  // ── Wallet WebSocket (DeFi intents) ──────────────────────
+
+  private walletWs: WebSocket | null = null;
+  private walletConnected = false;
+  private walletConnecting: Promise<void> | null = null;
+  private walletHeartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  private walletPendingIntents = new Map<bigint, {
+    resolve: (v: IntentResult) => void;
+    reject: (e: Error) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  }>();
+  private intentIdCounter = BigInt(Date.now()) * 1000n;
+
+  get isWalletConnected(): boolean {
+    return this.walletConnected;
+  }
+
+  /**
+   * Connect to the wallet WebSocket for DeFi intent submission.
+   * Uses the same HMAC credentials as the trade WebSocket.
+   */
+  async connectWallet(): Promise<void> {
+    if (this.walletConnected) return;
+    if (this.walletConnecting) return this.walletConnecting;
+
+    this.walletConnecting = this._connectWallet();
+    try {
+      await this.walletConnecting;
+    } finally {
+      this.walletConnecting = null;
+    }
+  }
+
+  private _connectWallet(): Promise<void> {
+    const env = getEnvironment(process.env.CUBE_ENV);
+    const creds = getCredentials();
+    const timestamp = Math.floor(Date.now() / 1000);
+    const signature = generateSignature(creds.secretKey, timestamp);
+    const wsUrl = env.wsTradeUrl.replace('/os', '/os/wallet');
+
+    return new Promise((resolve, reject) => {
+      if (this.walletWs) {
+        try { this.walletWs.close(); } catch { /* ignore */ }
+        this.walletWs = null;
+      }
+
+      const connectTimeout = setTimeout(() => {
+        reject(new Error('Wallet WebSocket connect timed out after 10s'));
+        if (this.walletWs) {
+          try { this.walletWs.close(); } catch { /* ignore */ }
+          this.walletWs = null;
+        }
+      }, 10_000);
+
+      this.walletWs = new WebSocket(wsUrl);
+      this.walletWs.binaryType = 'arraybuffer';
+
+      this.walletWs.on('open', () => {
+        const credMsg: Credentials = {
+          accessKeyId: creds.apiKey,
+          signature,
+          timestamp: BigInt(timestamp),
+          flags: 0n,
+        };
+        const encoded = CredentialsMethods.encode(credMsg).finish();
+        this.walletWs!.send(encoded);
+      });
+
+      this.walletWs.on('message', (data: ArrayBuffer | Buffer) => {
+        const bytes = data instanceof ArrayBuffer
+          ? new Uint8Array(data)
+          : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+
+        // During connection, look for bootstrap/positions (initial state)
+        if (!this.walletConnected) {
+          try {
+            const event = WalletEventMethods.decode(bytes);
+            // positions message signals bootstrap complete
+            if (event.positions) {
+              clearTimeout(connectTimeout);
+              this.walletConnected = true;
+              this.startWalletHeartbeat();
+              resolve();
+              return;
+            }
+          } catch {
+            // Not a wallet event yet — might be bootstrap
+          }
+          return;
+        }
+
+        // After connected, decode as WalletEvent
+        try {
+          const event = WalletEventMethods.decode(bytes);
+          this.handleWalletEvent(event);
+        } catch {
+          // Unknown message
+        }
+      });
+
+      this.walletWs.on('error', (err: Error) => {
+        if (!this.walletConnected) {
+          clearTimeout(connectTimeout);
+          reject(err);
+        }
+      });
+
+      this.walletWs.on('close', (code: number, reason: Buffer) => {
+        clearTimeout(connectTimeout);
+        this.walletConnected = false;
+        this.stopWalletHeartbeat();
+
+        for (const [, pending] of this.walletPendingIntents) {
+          clearTimeout(pending.timeout);
+          pending.reject(new Error(`Wallet WebSocket closed: ${code} ${reason?.toString()}`));
+        }
+        this.walletPendingIntents.clear();
+
+        if (!this.walletConnected) {
+          reject(new Error(`Wallet WebSocket closed during connect: ${code} ${reason?.toString()}`));
+        }
+      });
+    });
+  }
+
+  disconnectWallet(): void {
+    this.stopWalletHeartbeat();
+    if (this.walletWs) {
+      this.walletWs.close();
+      this.walletWs = null;
+    }
+    this.walletConnected = false;
+  }
+
+  /**
+   * Submit a signed intent via the wallet WebSocket.
+   */
+  async submitIntent(params: SubmitIntentParams): Promise<IntentResult> {
+    await this.ensureWalletConnected();
+
+    const signingKey = await getSigningKey();
+    const signingCreds = await getSigningCredentials();
+    if (!signingKey || !signingCreds) {
+      throw new Error('No signing credentials. Run `npm run login` first.');
+    }
+
+    const clientOrderId = this.intentIdCounter++;
+    const timestamp = BigInt(Math.floor(Date.now() / 1000));
+    const verificationKey = new Uint8Array(Buffer.from(signingCreds.verificationKey, 'base64'));
+
+    // Sign the intent bytes
+    const sig = await signMessage(params.intentBytes, signingKey);
+
+    const intent: NewIntent = {
+      subaccountId: BigInt(params.subaccountId),
+      timestamp,
+      sourceId: params.sourceId,
+      intentType: params.intentType,
+      intentBytes: params.intentBytes,
+      verificationKey,
+      signature: sig,
+      clientOrderId,
     };
 
-    return this.sendAndWait<MassCancelResult>(requestId.toString(), msg);
+    const msg = WalletRequestMethods.encode({ newIntent: intent }).finish();
+    this.walletWs!.send(msg);
+
+    return this.waitForIntent(clientOrderId, 60_000);
+  }
+
+  private async ensureWalletConnected(): Promise<void> {
+    if (!this.walletConnected) {
+      await this.connectWallet();
+    }
+  }
+
+  private startWalletHeartbeat(): void {
+    // Wallet WS may not need heartbeats, but send them for safety
+    this.walletHeartbeatInterval = setInterval(() => {
+      if (this.walletWs && this.walletConnected) {
+        // Send empty wallet request as heartbeat
+        const msg = WalletRequestMethods.encode({}).finish();
+        this.walletWs.send(msg);
+      }
+    }, 25_000);
+  }
+
+  private stopWalletHeartbeat(): void {
+    if (this.walletHeartbeatInterval) {
+      clearInterval(this.walletHeartbeatInterval);
+      this.walletHeartbeatInterval = null;
+    }
+  }
+
+  private handleWalletEvent(event: WalletEvent): void {
+    // Intent preflight ack
+    if (event.preflightIntentAck) {
+      const ack = event.preflightIntentAck;
+      const pending = this.walletPendingIntents.get(ack.clientOrderId);
+      if (pending) {
+        // Don't resolve yet — wait for the full intent result
+        // But store the intentId for tracking
+      }
+    }
+
+    // Intent preflight reject
+    if (event.preflightIntentReject) {
+      const reject = event.preflightIntentReject;
+      const pending = this.walletPendingIntents.get(reject.clientOrderId);
+      if (pending) {
+        this.walletPendingIntents.delete(reject.clientOrderId);
+        clearTimeout(pending.timeout);
+        pending.reject(new Error(`Intent rejected: ${reject.preflightFailureReason ?? 'unknown'}`));
+      }
+    }
+
+    // Full intent status update
+    if (event.intent) {
+      const intent = event.intent;
+      const pending = this.walletPendingIntents.get(intent.clientOrderId);
+      if (pending) {
+        // Resolve on success or failure
+        if (intent.success !== undefined || intent.failureReason !== undefined) {
+          this.walletPendingIntents.delete(intent.clientOrderId);
+          clearTimeout(pending.timeout);
+
+          if (intent.success) {
+            pending.resolve({
+              status: 'success',
+              intentId: intent.intentId.toString(),
+              txnHash: intent.txnHash,
+              deltas: intent.deltas.map(d => ({
+                assetId: Number(d.assetId),
+                delta: d.delta ? d.delta.word0.toString() : '0',
+              })),
+            });
+          } else {
+            pending.reject(new Error(
+              `Intent failed: ${intent.failureReason} ${intent.failureContext ?? ''}`
+            ));
+          }
+        }
+      }
+    }
+  }
+
+  private waitForIntent(clientOrderId: bigint, timeoutMs: number): Promise<IntentResult> {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.walletPendingIntents.delete(clientOrderId);
+        reject(new Error('Intent timed out after 60s'));
+      }, timeoutMs);
+
+      this.walletPendingIntents.set(clientOrderId, { resolve, reject, timeout });
+    });
   }
 
   // ── Internals ────────────────────────────────────────────
@@ -182,13 +552,13 @@ export class OsmiumClient {
   private startHeartbeat(): void {
     this.heartbeatInterval = setInterval(() => {
       if (this.ws && this.connected) {
-        this.ws.send(
-          JSON.stringify({
-            type: 'heartbeat',
-            requestId: this.nextRequestId().toString(),
-            timestamp: Math.floor(Date.now() / 1000).toString(),
-          })
-        );
+        const msg = OrderRequestMethods.encode({
+          heartbeat: {
+            requestId: this.nextRequestId(),
+            timestamp: BigInt(Math.floor(Date.now() / 1000)),
+          },
+        }).finish();
+        this.ws.send(msg);
       }
     }, 25_000); // Every 25s (server requires < 30s)
   }
@@ -200,40 +570,113 @@ export class OsmiumClient {
     }
   }
 
-  private handleMessage(msg: any): void {
-    if (msg.requestId && this.pendingRequests.has(msg.requestId)) {
-      const pending = this.pendingRequests.get(msg.requestId)!;
-      this.pendingRequests.delete(msg.requestId);
+  private handleResponse(response: OrderResponse): void {
+    // Extract requestId from any ack/reject
+    let requestId: bigint | undefined;
 
-      if (msg.type?.includes('Reject')) {
-        pending.reject(new Error(`Order rejected: ${msg.reason}`));
-      } else {
-        pending.resolve(msg);
-      }
+    if (response.newAck) {
+      requestId = response.newAck.requestId;
+    } else if (response.cancelAck) {
+      requestId = response.cancelAck.requestId;
+    } else if (response.modifyAck) {
+      requestId = response.modifyAck.requestId;
+    } else if (response.massCancelAck) {
+      requestId = response.massCancelAck.requestId;
+    } else if (response.newReject) {
+      requestId = response.newReject.requestId;
+    } else if (response.cancelReject) {
+      requestId = response.cancelReject.requestId;
+    } else if (response.modifyReject) {
+      requestId = response.modifyReject.requestId;
+    }
+    // Fill messages and heartbeats don't have a pending request
+
+    if (requestId === undefined) return;
+
+    const pending = this.pendingRequests.get(requestId);
+    if (!pending) return;
+
+    this.pendingRequests.delete(requestId);
+    clearTimeout(pending.timeout);
+
+    // Rejects
+    if (response.newReject) {
+      pending.reject(new Error(`Order rejected: reason=${response.newReject.reason}`));
+      return;
+    }
+    if (response.cancelReject) {
+      pending.reject(new Error(`Cancel rejected: reason=${response.cancelReject.reason}`));
+      return;
+    }
+    if (response.modifyReject) {
+      pending.reject(new Error(`Modify rejected: reason=${response.modifyReject.reason}`));
+      return;
+    }
+
+    // Acks
+    if (response.newAck) {
+      const ack = response.newAck;
+      pending.resolve({
+        type: 'newOrderAck',
+        clientOrderId: ack.clientOrderId.toString(),
+        exchangeOrderId: ack.exchangeOrderId.toString(),
+        marketId: Number(ack.marketId),
+        status: 'placed',
+        price: ack.price?.toString() ?? '',
+        quantity: ack.quantity.toString(),
+        side: ack.side === Side.BID ? 'BID' : 'ASK',
+        transactTime: ack.transactTime.toString(),
+      } satisfies OrderResult);
+      return;
+    }
+
+    if (response.cancelAck) {
+      const ack = response.cancelAck;
+      pending.resolve({
+        type: 'cancelOrderAck',
+        clientOrderId: ack.clientOrderId.toString(),
+        reason: String(ack.reason),
+        marketId: Number(ack.marketId),
+        baseQuantityCanceled: ack.baseQuantityCanceled.toString(),
+      } satisfies CancelResult);
+      return;
+    }
+
+    if (response.modifyAck) {
+      const ack = response.modifyAck;
+      pending.resolve({
+        type: 'modifyOrderAck',
+        clientOrderId: ack.clientOrderId.toString(),
+        exchangeOrderId: '',
+        marketId: Number(ack.marketId),
+        status: 'modified',
+        price: ack.price?.toString() ?? '',
+        quantity: ack.remainingQuantity.toString(),
+        side: '',
+        transactTime: ack.transactTime.toString(),
+      } satisfies OrderResult);
+      return;
+    }
+
+    if (response.massCancelAck) {
+      const ack = response.massCancelAck;
+      pending.resolve({
+        type: 'massCancelAck',
+        totalAffectedOrders: Number(ack.totalAffectedOrders),
+        reason: String(ack.reason),
+      } satisfies MassCancelResult);
+      return;
     }
   }
 
-  private sendAndWait<T>(requestId: string, msg: any): Promise<T> {
+  private waitForResponse<T>(requestId: bigint, _clientOrderId: bigint, timeoutMs: number): Promise<T> {
     return new Promise((resolve, reject) => {
-      this.pendingRequests.set(requestId, { resolve, reject });
-
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(requestId);
         reject(new Error('Request timed out after 30s'));
-      }, 30_000);
+      }, timeoutMs);
 
-      this.pendingRequests.set(requestId, {
-        resolve: v => {
-          clearTimeout(timeout);
-          resolve(v);
-        },
-        reject: e => {
-          clearTimeout(timeout);
-          reject(e);
-        },
-      });
-
-      this.ws!.send(JSON.stringify(msg));
+      this.pendingRequests.set(requestId, { resolve, reject, timeout });
     });
   }
 }
@@ -243,13 +686,16 @@ export class OsmiumClient {
 export interface PlaceOrderParams {
   marketId: number;
   side: 'BID' | 'ASK';
+  /** Price in lot units (e.g. human_price / priceTickSize) */
   price?: string;
-  quantity: string;
+  /** Quantity in lot units (e.g. human_qty / quantityTickSize) */
+  quantity?: string;
   orderType?: 'LIMIT' | 'MARKET_LIMIT' | 'MARKET_WITH_PROTECTION' | 'STOP_LOSS' | 'STOP_LIMIT';
   timeInForce?: 'IOC' | 'GFS' | 'FOK';
   postOnly?: boolean;
   cancelOnDisconnect?: boolean;
   stopPrice?: string;
+  quoteQuantity?: string;
 }
 
 export interface CancelOrderParams {
@@ -294,4 +740,20 @@ export interface MassCancelResult {
   type: string;
   totalAffectedOrders: number;
   reason: string;
+}
+
+// ── Wallet/Intent Types ───────────────────────────────────
+
+export interface SubmitIntentParams {
+  subaccountId: number;
+  sourceId: number;       // 3 = Solana
+  intentType: number;     // Swap intent type TBD
+  intentBytes: Uint8Array;
+}
+
+export interface IntentResult {
+  status: 'success' | 'failed';
+  intentId: string;
+  txnHash?: string;
+  deltas: Array<{ assetId: number; delta: string }>;
 }
