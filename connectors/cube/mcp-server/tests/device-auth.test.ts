@@ -37,15 +37,15 @@ const MOCK_DEVICE_CODE_RESPONSE: DeviceCodeResponse = {
   deviceCode: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
   authorizeUrl: 'https://cube.exchange/agent/authorize?code=a1b2c3d4',
   expiresIn: 600,
-  interval: 5,
+  interval: 0,
 };
 
 const MOCK_HEADLESS_CODE_RESPONSE: DeviceCodeResponse = {
   deviceCode: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-  userCode: 'CUBE-A3X7',
-  authorizeUrl: 'https://cube.exchange/agent/CUBE-A3X7',
+  userCode: 'brave-solar-mint-echo',
+  authorizeUrl: 'https://cube.exchange/agent/brave-solar-mint-echo',
   expiresIn: 600,
-  interval: 5,
+  interval: 0,
 };
 
 const MOCK_TOKEN_RESPONSE: DeviceTokenResponse = {
@@ -66,7 +66,7 @@ describe('requestDeviceCode', () => {
       'https://api.cube.exchange/ir/v0',
       {
         verificationKey: 'base64key==',
-        clientName: 'AI Crypto Fund',
+        clientName: 'AI Fund',
         callbackUrl: 'http://localhost:9876/callback',
       },
       fetchFn,
@@ -76,10 +76,10 @@ describe('requestDeviceCode', () => {
       'https://api.cube.exchange/ir/v0/agent/device/code',
       expect.objectContaining({
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'User-Agent': 'cube-cli' },
         body: JSON.stringify({
           verificationKey: 'base64key==',
-          clientName: 'AI Crypto Fund',
+          clientName: 'AI Fund',
           callbackUrl: 'http://localhost:9876/callback',
         }),
       }),
@@ -95,14 +95,14 @@ describe('requestDeviceCode', () => {
       'https://api.cube.exchange/ir/v0',
       {
         verificationKey: 'base64key==',
-        clientName: 'AI Crypto Fund',
+        clientName: 'AI Fund',
       },
       fetchFn,
     );
 
     const body = JSON.parse((fetchFn as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
     expect(body.callbackUrl).toBeUndefined();
-    expect(result.userCode).toBe('CUBE-A3X7');
+    expect(result.userCode).toBe('brave-solar-mint-echo');
   });
 
   it('throws DeviceAuthError on invalid_verification_key', async () => {
@@ -289,7 +289,7 @@ describe('pollForToken', () => {
     expect(result.verificationKeyId).toBe(MOCK_TOKEN_RESPONSE.verificationKeyId);
     // The second call should have been delayed longer (interval went from 0 to 5)
     expect(fetchFn).toHaveBeenCalledTimes(2);
-  });
+  }, 10_000);
 
   it('throws on access_denied without retrying', async () => {
     const fetchFn = mockFetch([
@@ -397,7 +397,7 @@ describe('startCallbackServer', () => {
     server = await startCallbackServer(19878);
 
     const tokenPromise = server.waitForCallback();
-    await fetch(`http://127.0.0.1:${server.port}/callback?token=my-secret-token`).catch(() => {});
+    await fetch(`http://127.0.0.1:${server.port}/callback?token=my-secret-token`).catch(() => { });
 
     const token = await tokenPromise;
     expect(token).toBe('my-secret-token');
@@ -410,7 +410,7 @@ describe('startCallbackServer', () => {
     const tokenPromise = server.waitForCallback();
     const caughtPromise = tokenPromise.catch((err) => err);
 
-    await fetch(`http://127.0.0.1:${server.port}/callback`).catch(() => {});
+    await fetch(`http://127.0.0.1:${server.port}/callback`).catch(() => { });
 
     const err = await caughtPromise;
     expect(err).toBeInstanceOf(Error);
@@ -506,9 +506,9 @@ describe('deviceAuthFlow', () => {
         callbackPort = parseInt(new URL(body.callbackUrl).port, 10);
 
         return mockResponse(200, {
-            ...MOCK_DEVICE_CODE_RESPONSE,
-            authorizeUrl: `https://cube.exchange/agent/authorize?code=test`,
-          });
+          ...MOCK_DEVICE_CODE_RESPONSE,
+          authorizeUrl: `https://cube.exchange/agent/authorize?code=test`,
+        });
       }
 
       if (urlStr.includes('/agent/device/token')) {
@@ -532,7 +532,7 @@ describe('deviceAuthFlow', () => {
 
     const result = await deviceAuthFlow({
       apiBase: 'https://api.cube.exchange/ir/v0',
-      clientName: 'AI Crypto Fund',
+      clientName: 'AI Fund',
       headless: false,
       callbackPort: 19890,
       openBrowser,
@@ -553,7 +553,7 @@ describe('deviceAuthFlow', () => {
 
     const codeCallBody = JSON.parse(fetchFn.mock.calls[0][1]?.body as string);
     expect(codeCallBody.callbackUrl).toContain('localhost');
-    expect(codeCallBody.clientName).toBe('AI Crypto Fund');
+    expect(codeCallBody.clientName).toBe('AI Fund');
     expect(codeCallBody.verificationKey).toBeTruthy();
 
     const tokenCallBody = JSON.parse(fetchFn.mock.calls[1][1]?.body as string);
@@ -591,7 +591,7 @@ describe('deviceAuthFlow', () => {
 
     const result = await deviceAuthFlow({
       apiBase: 'https://api.cube.exchange/ir/v0',
-      clientName: 'AI Crypto Fund',
+      clientName: 'AI Fund',
       headless: true,
       openBrowser: vi.fn(),
       log: (msg) => logs.push(msg),
@@ -639,7 +639,7 @@ describe('deviceAuthFlow', () => {
     // Use an invalid port range to force server failure -> headless fallback
     const result = await deviceAuthFlow({
       apiBase: 'https://api.cube.exchange/ir/v0',
-      clientName: 'AI Crypto Fund',
+      clientName: 'AI Fund',
       headless: false,
       callbackPort: -1, // will fail to bind
       callbackPortRetries: 0,
@@ -688,7 +688,7 @@ describe('deviceAuthFlow', () => {
 
     const result = await deviceAuthFlow({
       apiBase: 'https://api.cube.exchange/ir/v0',
-      clientName: 'AI Crypto Fund',
+      clientName: 'AI Fund',
       headless: false,
       callbackPort: 19892,
       openBrowser,

@@ -63,7 +63,8 @@ async function main() {
   // 2. Encode as VerificationKey protobuf
   const expiresAt = Math.floor(Date.now() / 1000) + KEY_EXPIRY_SECONDS;
   const vkBytes = encodeVerificationKey(keyPair.publicKey, expiresAt);
-  const vkBase64 = Buffer.from(vkBytes).toString('base64');
+  // Cube backend uses STANDARD_NO_PAD base64
+  const vkBase64 = Buffer.from(vkBytes).toString('base64').replace(/=+$/, '');
 
   // 3. Get CSRF token from NextAuth
   console.log('Getting CSRF token...');

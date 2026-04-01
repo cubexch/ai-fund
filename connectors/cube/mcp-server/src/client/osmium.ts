@@ -92,6 +92,7 @@ export class OsmiumClient {
   private _connect(): Promise<void> {
     const env = getEnvironment(process.env.CUBE_ENV);
     const creds = getCredentials();
+    if (!creds) throw new Error('No HMAC credentials available for WebSocket. Set CUBE_API_KEY + CUBE_SECRET_KEY.');
     const timestamp = Math.floor(Date.now() / 1000);
     const signature = generateSignature(creds.secretKey, timestamp);
 
@@ -312,6 +313,7 @@ export class OsmiumClient {
   private _connectWallet(): Promise<void> {
     const env = getEnvironment(process.env.CUBE_ENV);
     const creds = getCredentials();
+    if (!creds) throw new Error('No HMAC credentials available for WebSocket. Set CUBE_API_KEY + CUBE_SECRET_KEY.');
     const timestamp = Math.floor(Date.now() / 1000);
     const signature = generateSignature(creds.secretKey, timestamp);
     const wsUrl = env.wsTradeUrl.replace('/os', '/os/wallet');

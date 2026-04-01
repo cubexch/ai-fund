@@ -1,13 +1,16 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import {
+  loadCredentials as _loadCredentials,
+  saveCredentials as _saveCredentials,
+  deleteCredentials,
+  getBackendName,
+  CREDENTIALS_FILE,
+} from './credential-store.js';
 
-// ── Credentials Path ──────────────────────────────────────
-
-const CREDENTIALS_DIR = join(homedir(), '.cube');
-const CREDENTIALS_PATH = join(CREDENTIALS_DIR, 'credentials.json');
-
-export { CREDENTIALS_PATH };
+// ── Credentials Path (re-exported for backward compat) ───
+const CREDENTIALS_PATH = CREDENTIALS_FILE;
+export { CREDENTIALS_PATH, deleteCredentials, getBackendName };
 
 // ── Ed25519 Key Management ────────────────────────────────
 
@@ -193,32 +196,15 @@ export interface SigningCredentials {
 }
 
 /**
- * Load signing credentials from ~/.cube/credentials.json.
- * Returns null if file doesn't exist or credentials are expired.
+ * Load signing credentials from the best available store (keychain → secret-tool → file).
+ * Returns null if missing or expired (with 5-minute buffer).
  */
-export async function loadCredentials(): Promise<SigningCredentials | null> {
-  try {
-    const data = await readFile(CREDENTIALS_PATH, 'utf-8');
-    const creds = JSON.parse(data) as SigningCredentials;
-
-    // Check expiry (with 5 min buffer)
-    if (creds.expiresAt && creds.expiresAt < Math.floor(Date.now() / 1000) + 300) {
-      return null; // Expired or about to expire
-    }
-
-    return creds;
-  } catch {
-    return null;
-  }
-}
+export const loadCredentials = _loadCredentials;
 
 /**
- * Save signing credentials to ~/.cube/credentials.json with restricted permissions.
+ * Save signing credentials to the best available store.
  */
-export async function saveCredentials(creds: SigningCredentials): Promise<void> {
-  await mkdir(CREDENTIALS_DIR, { recursive: true });
-  await writeFile(CREDENTIALS_PATH, JSON.stringify(creds, null, 2), { mode: 0o600 });
-}
+export const saveCredentials = _saveCredentials;
 
 // ── Helpers ───────────────────────────────────────────────
 

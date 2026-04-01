@@ -10,6 +10,7 @@
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { generateKeyPair, encodeVerificationKey, saveCredentials, toHex, type Ed25519KeyPair } from './signing.js';
+import { CUBE_HOST, rewriteUrl } from './auth.js';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -36,8 +37,9 @@ export interface DeviceTokenResponse {
   verificationKeyId: string;
   publicKey: string;
   expiresAt: number;
-  subaccountId: number;
+  subaccountId?: number;
   registrationMethod: string;
+  externalProvider?: string;
 }
 
 export interface DeviceTokenError {
@@ -52,7 +54,7 @@ export type DeviceAuthEvent =
   | { type: 'browser_opened'; url: string }
   | { type: 'browser_failed'; url: string }
   | { type: 'polling'; elapsed: number }
-  | { type: 'approved'; verificationKeyId: string; expiresAt: number; subaccountId: number }
+  | { type: 'approved'; verificationKeyId: string; expiresAt: number; subaccountId?: number }
   | { type: 'denied' }
   | { type: 'credentials_saved'; path: string };
 
@@ -65,17 +67,19 @@ export interface DeviceAuthOptions {
   callbackPortRetries?: number;
   openBrowser?: (url: string) => Promise<void>;
   /** Structured event callback for UI rendering. Falls back to console.log if not provided. */
-  onEvent?: (event: DeviceAuthEvent) => void;
+  onEvent?: (event: DeviceAuthEvent) => void | Promise<void>;
   /** @deprecated Use onEvent instead. Simple log callback for backward compat / tests. */
   log?: (message: string) => void;
   fetch?: typeof globalThis.fetch;
+  /** Reuse an existing keypair instead of generating a new one. */
+  existingKeyPair?: Ed25519KeyPair;
 }
 
 export interface DeviceAuthResult {
   verificationKeyId: string;
   publicKey: string;
   expiresAt: number;
-  subaccountId: number;
+  subaccountId?: number;
   keyPair: Ed25519KeyPair;
   verificationKeyBase64: string;
 }
@@ -217,7 +221,7 @@ export async function requestDeviceCode(
 ): Promise<DeviceCodeResponse> {
   const res = await fetchFn(`${apiBase}/agent/device/code`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'User-Agent': 'cube-cli' },
     body: JSON.stringify(request),
   });
 
@@ -226,7 +230,8 @@ export async function requestDeviceCode(
     throw new DeviceAuthError(errorCode, res.status);
   }
 
-  return await res.json() as DeviceCodeResponse;
+  const json = await res.json() as Record<string, unknown>;
+  return (json.result ?? json) as DeviceCodeResponse;
 }
 
 /**
@@ -239,7 +244,7 @@ export async function requestDeviceToken(
 ): Promise<DeviceTokenResponse> {
   const res = await fetchFn(`${apiBase}/agent/device/token`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'User-Agent': 'cube-cli' },
     body: JSON.stringify(request),
   });
 
@@ -248,7 +253,8 @@ export async function requestDeviceToken(
     throw new DeviceAuthError(errorCode, res.status);
   }
 
-  return await res.json() as DeviceTokenResponse;
+  const json = await res.json() as Record<string, unknown>;
+  return (json.result ?? json) as DeviceTokenResponse;
 }
 
 // ── Polling ──────────────────────────────────────────────────
@@ -366,9 +372,9 @@ export async function deviceAuthFlow(options: DeviceAuthOptions): Promise<Device
     fetch: fetchFn = globalThis.fetch,
   } = options;
 
-  const emit = (event: DeviceAuthEvent) => {
+  const emit = async (event: DeviceAuthEvent) => {
     if (onEvent) {
-      onEvent(event);
+      await onEvent(event);
     } else {
       // Fallback: use log for backward compat
       switch (event.type) {
@@ -385,15 +391,16 @@ export async function deviceAuthFlow(options: DeviceAuthOptions): Promise<Device
     }
   };
 
-  // 1. Generate Ed25519 keypair
-  const keyPair = await generateKeyPair();
+  // 1. Generate or reuse Ed25519 keypair
+  const keyPair = options.existingKeyPair ?? await generateKeyPair();
   const pubKeyHex = toHex(keyPair.publicKey);
-  emit({ type: 'keypair_generated', publicKeyHex: pubKeyHex });
+  await emit({ type: 'keypair_generated', publicKeyHex: pubKeyHex });
 
   // 2. Encode as VerificationKey protobuf
   const expiresAt = Math.floor(Date.now() / 1000) + keyExpirySeconds;
   const vkBytes = encodeVerificationKey(keyPair.publicKey, expiresAt);
-  const vkBase64 = Buffer.from(vkBytes).toString('base64');
+  // Cube backend uses STANDARD_NO_PAD base64 — strip trailing '='
+  const vkBase64 = Buffer.from(vkBytes).toString('base64').replace(/=+$/, '');
 
   let callbackServer: CallbackServer | null = null;
   let useHeadless = headless;
@@ -402,9 +409,9 @@ export async function deviceAuthFlow(options: DeviceAuthOptions): Promise<Device
   if (!useHeadless) {
     try {
       callbackServer = await startCallbackServer(callbackPort, callbackPortRetries);
-      emit({ type: 'callback_server_started', port: callbackServer.port });
+      await emit({ type: 'callback_server_started', port: callbackServer.port });
     } catch {
-      emit({ type: 'callback_server_failed', fallbackHeadless: true });
+      await emit({ type: 'callback_server_failed', fallbackHeadless: true });
       useHeadless = true;
     }
   }
@@ -418,9 +425,16 @@ export async function deviceAuthFlow(options: DeviceAuthOptions): Promise<Device
     };
 
     const codeResponse = await requestDeviceCode(apiBase, codeRequest, fetchFn);
-    emit({
+
+    // Rewrite authorizeUrl host when CUBE_HOST is set (browser page, not API — no /api prefix)
+    let authorizeUrl = codeResponse.authorizeUrl;
+    if (CUBE_HOST) {
+      authorizeUrl = authorizeUrl.replace(/\/\/[^/]+/, `//${CUBE_HOST}`);
+    }
+
+    await emit({
       type: 'device_code_received',
-      authorizeUrl: codeResponse.authorizeUrl,
+      authorizeUrl,
       userCode: codeResponse.userCode,
       expiresIn: codeResponse.expiresIn,
     });
@@ -428,10 +442,10 @@ export async function deviceAuthFlow(options: DeviceAuthOptions): Promise<Device
     // 5. Open browser or print URL
     if (!useHeadless) {
       try {
-        await openBrowser(codeResponse.authorizeUrl);
-        emit({ type: 'browser_opened', url: codeResponse.authorizeUrl });
+        await openBrowser(authorizeUrl);
+        await emit({ type: 'browser_opened', url: authorizeUrl });
       } catch {
-        emit({ type: 'browser_failed', url: codeResponse.authorizeUrl });
+        await emit({ type: 'browser_failed', url: authorizeUrl });
       }
     }
 
@@ -459,7 +473,7 @@ export async function deviceAuthFlow(options: DeviceAuthOptions): Promise<Device
       });
     }
 
-    emit({
+    await emit({
       type: 'approved',
       verificationKeyId: tokenResponse.verificationKeyId,
       expiresAt: tokenResponse.expiresAt,
@@ -477,7 +491,7 @@ export async function deviceAuthFlow(options: DeviceAuthOptions): Promise<Device
       provider: 'device',
     });
 
-    emit({ type: 'credentials_saved', path: '~/.cube/credentials.json' });
+    await emit({ type: 'credentials_saved', path: '~/.cube/credentials.json' });
 
     return {
       verificationKeyId: tokenResponse.verificationKeyId,
@@ -516,7 +530,19 @@ async function extractErrorCode(res: Response): Promise<string> {
     const text = await res.text();
     try {
       const json = JSON.parse(text);
-      if (typeof json.error === 'string') return json.error;
+      // Backend format: { error: { code, reason } } or { error: "string" }
+      // Next.js proxy may double-wrap: { error: "{\"error\":{...}}" }
+      let err = json.error;
+      if (typeof err === 'string') {
+        try { err = JSON.parse(err); } catch { return err; }
+      }
+      if (typeof err === 'object' && err !== null) {
+        // Unwrap nested { error: { code, reason } }
+        const inner = (err as Record<string, unknown>).error ?? err;
+        if (typeof inner === 'object' && inner !== null && 'reason' in inner) {
+          return (inner as Record<string, string>).reason;
+        }
+      }
       if (typeof json.message === 'string') return json.message;
     } catch {
       // Not JSON — could be HTML 404 page etc.

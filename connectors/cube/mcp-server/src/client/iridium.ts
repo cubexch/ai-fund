@@ -1,4 +1,4 @@
-import { generateSignature, getCredentials, getEnvironment } from './auth.js';
+import { buildAuthHeaders, getEnvironment, resetAuth } from './auth.js';
 import { ASSET_ICONS } from '../../../../../lib/format.js';
 
 // ── Asset Registry ────────────────────────────────────────
@@ -84,8 +84,6 @@ export class IridiumClient {
   private baseUrl: string;
   private mdBaseUrl: string;
   private osBaseUrl: string;
-  private apiKey: string;
-  private secretKey: string;
   private _subaccountId: number | null = null;
   private _subaccountPromise: Promise<number> | null = null;
   private _assetRegistry: AssetRegistry | null = null;
@@ -93,12 +91,11 @@ export class IridiumClient {
 
   constructor() {
     const env = getEnvironment(process.env.CUBE_ENV);
-    const creds = getCredentials();
     this.baseUrl = env.restUrl;
     this.mdBaseUrl = env.mdRestUrl;
     this.osBaseUrl = env.osRestUrl;
-    this.apiKey = creds.apiKey;
-    this.secretKey = creds.secretKey;
+    // Reset auth cache so env vars set after import are picked up
+    resetAuth();
   }
 
   /**
@@ -154,10 +151,15 @@ export class IridiumClient {
     };
 
     if (opts.authenticated) {
-      const timestamp = Math.floor(Date.now() / 1000);
-      headers['x-api-key'] = this.apiKey;
-      headers['x-api-signature'] = generateSignature(this.secretKey, timestamp);
-      headers['x-api-timestamp'] = String(timestamp);
+      const authHeaders = await buildAuthHeaders();
+      if (Object.keys(authHeaders).length === 0) {
+        throw new Error(
+          'No credentials available. Run `npm run login` to authenticate, ' +
+          'or set CUBE_API_KEY + CUBE_SECRET_KEY, ' +
+          'or set CUBE_SIGNING_KEY + CUBE_VERIFICATION_KEY_ID.'
+        );
+      }
+      Object.assign(headers, authHeaders);
     }
 
     const response = await fetch(url, {

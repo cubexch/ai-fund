@@ -7,101 +7,98 @@
  *   npx tsx src/cli/device-login.ts --headless    # Headless (polling with user code)
  */
 
-import { loadCredentials, CREDENTIALS_PATH } from '../client/signing.js';
+import { loadCredentials, getBackendName, importPrivateKey, type Ed25519KeyPair } from '../client/signing.js';
 import { getEnvironment } from '../client/auth.js';
 import { deviceAuthFlow, DeviceAuthError, type DeviceAuthEvent } from '../client/device-auth.js';
+import { execFile } from 'node:child_process';
 
 // ── ANSI helpers (no dependencies) ───────────────────────────
 
 const isColorSupported = process.stdout.isTTY && !process.env.NO_COLOR;
 const c = {
-  reset:   isColorSupported ? '\x1b[0m' : '',
-  bold:    isColorSupported ? '\x1b[1m' : '',
-  dim:     isColorSupported ? '\x1b[2m' : '',
-  cyan:    isColorSupported ? '\x1b[36m' : '',
-  green:   isColorSupported ? '\x1b[32m' : '',
-  yellow:  isColorSupported ? '\x1b[33m' : '',
-  red:     isColorSupported ? '\x1b[31m' : '',
+  reset: isColorSupported ? '\x1b[0m' : '',
+  bold: isColorSupported ? '\x1b[1m' : '',
+  dim: isColorSupported ? '\x1b[2m' : '',
+  cyan: isColorSupported ? '\x1b[36m' : '',
+  green: isColorSupported ? '\x1b[32m' : '',
+  yellow: isColorSupported ? '\x1b[33m' : '',
+  red: isColorSupported ? '\x1b[31m' : '',
   magenta: isColorSupported ? '\x1b[35m' : '',
-  white:   isColorSupported ? '\x1b[37m' : '',
-  gray:    isColorSupported ? '\x1b[90m' : '',
+  white: isColorSupported ? '\x1b[37m' : '',
+  gray: isColorSupported ? '\x1b[90m' : '',
 };
 
-// ── ASCII Art — Impossible font (patorjk.com/software/taag) ──
+// ── Clipboard ───────────────────────────────────────────────
+
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    const cmd = process.platform === 'darwin' ? 'pbcopy'
+      : process.platform === 'win32' ? 'clip'
+        : 'xclip';
+    const args = process.platform === 'linux' ? ['-selection', 'clipboard'] : [];
+
+    await new Promise<void>((resolve, reject) => {
+      const proc = execFile(cmd, args, { timeout: 3000 }, (err) => {
+        if (err) return reject(err);
+        resolve();
+      });
+      proc.stdin?.write(text);
+      proc.stdin?.end();
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ── Cube Logo Mark — 2×2 grid of C·U·B·E ──────────────────
 //
-// Adaptive: full "CUBE Exchange" on wide terminals (>=185 cols),
-// "CUBE" + subtitle on standard terminals (>=62 cols),
-// compact fallback on narrow terminals.
+// Based on the Cube Exchange geometric logo SVG: four thick
+// letter-forms arranged in a square mark. Adaptive sizing.
 
-// Full "CUBE Exchange" — Impossible font, single row (170 cols)
+// Large mark (27 cols)
 const LOGO_FULL = [
-  "          _       _                  _               _               _     _      _               _             _       _    _                   _             _              _",
-  "        /\\ \\     /\\_\\               / /\\            /\\ \\            /\\ \\ /_/\\    /\\ \\           /\\ \\           / /\\    / /\\ / /\\                /\\ \\     _    /\\ \\           /\\ \\",
-  "       /  \\ \\   / / /         _    / /  \\          /  \\ \\          /  \\ \\\\ \\ \\   \\ \\_\\         /  \\ \\         / / /   / / // /  \\              /  \\ \\   /\\_\\ /  \\ \\         /  \\ \\",
-  "      / /\\ \\ \\  \\ \\ \\__      /\\_\\ / / /\\ \\        / /\\ \\ \\        / /\\ \\ \\\\ \\ \\__/ / /        / /\\ \\ \\       / /_/   / / // / /\\ \\            / /\\ \\ \\_/ / // /\\ \\_\\       / /\\ \\ \\",
-  "     / / /\\ \\ \\  \\ \\___\\    / / // / /\\ \\ \\      / / /\\ \\_\\      / / /\\ \\_\\\\ \\__ \\/_/        / / /\\ \\ \\     / /\\ \\__/ / // / /\\ \\ \\          / / /\\ \\___/ // / /\\/_/      / / /\\ \\_\\",
-  "    / / /  \\ \\_\\  \\__  /   / / // / /\\ \\_\\ \\    / /_/_ \\/_/     / /_/_ \\/_/ \\/_/\\__/\\       / / /  \\ \\_\\   / /\\ \\___\\/ // / /  \\ \\ \\        / / /  \\/____// / / ______   / /_/_ \\/_/",
-  "   / / /    \\/_/  / / /   / / // / /\\ \\ \\___\\  / /____/\\       / /____/\\     _/\\/__\\ \\     / / /    \\/_/  / / /\\/___/ // / /___/ /\\ \\      / / /    / / // / / /\\_____\\ / /____/\\",
-  "  / / /          / / /   / / // / /  \\ \\ \\__/ / /\\____\\/      / /\\____\\/    / _/_/\\ \\ \\   / / /          / / /   / / // / /_____/ /\\ \\    / / /    / / // / /  \\/____ // /\\____\\/",
-  " / / /________  / / /___/ / // / /____\\_\\ \\  / / /______     / / /______   / / /   \\ \\ \\ / / /________  / / /   / / // /_________/\\ \\ \\  / / /    / / // / /_____/ / // / /______",
-  "/ / /_________\\/ / /____\\/ // / /__________\\/ / /_______\\   / / /_______\\ / / /    /_/ // / /_________\\/ / /   / / // / /_       __\\ \\_\\/ / /    / / // / /______\\/ // / /_______\\",
-  "\\/____________/\\/_________/ \\/_____________/\\/__________/   \\/__________/ \\/_/     \\_\\/ \\/____________/\\/_/    \\/_/ \\_\\___\\     /____/_/\\/_/     \\/_/ \\/___________/ \\/__________/",
+  " ████████   ██       ██",
+  "██      ██  ██       ██",
+  "██          ██       ██",
+  "██      ██  ██       ██",
+  "  ███████     ███████",
+  "",
+  "█████████     █████████",
+  "██       ██  ██",
+  "█████████    ██████████",
+  "██       ██  ██",
+  "█████████     █████████",
 ];
 
-// "CUBE" only — Impossible font (60 cols)
-const LOGO_CUBE = [
-  "          _       _                  _               _",
-  "        /\\ \\     /\\_\\               / /\\            /\\ \\",
-  "       /  \\ \\   / / /         _    / /  \\          /  \\ \\",
-  "      / /\\ \\ \\  \\ \\ \\__      /\\_\\ / / /\\ \\        / /\\ \\ \\",
-  "     / / /\\ \\ \\  \\ \\___\\    / / // / /\\ \\ \\      / / /\\ \\_\\",
-  "    / / /  \\ \\_\\  \\__  /   / / // / /\\ \\_\\ \\    / /_/_ \\/_/",
-  "   / / /    \\/_/  / / /   / / // / /\\ \\ \\___\\  / /____/\\",
-  "  / / /          / / /   / / // / /  \\ \\ \\__/ / /\\____\\/",
-  " / / /________  / / /___/ / // / /____\\_\\ \\  / / /______",
-  "/ / /_________\\/ / /____\\/ // / /__________\\/ / /_______\\",
-  "\\/____________/\\/_________/ \\/_____________/\\/__________/",
-];
-
-// Compact fallback — ANSI Regular (32 cols)
+// Compact mark (23 cols)
 const LOGO_COMPACT = [
-  ` ██████ ██    ██ ██████  ███████`,
-  `██      ██    ██ ██   ██ ██`,
-  `██      ██    ██ ██████  █████`,
-  `██      ██    ██ ██   ██ ██`,
-  ` ██████  ██████  ██████  ███████`,
+  "     ████████   ██       ██",
+  "    ██      ██  ██       ██",
+  "    ██          ██       ██",
+  "    ██      ██  ██       ██",
+  "      ███████     ███████",
+  "",
+  "    █████████     █████████",
+  "    ██       ██  ██",
+  "    █████████    ██████████",
+  "    ██       ██  ██",
+  "    █████████     █████████",
 ];
 
 function centerPad(line: string, width: number): string {
-  // Strip ANSI codes to measure visible length
   const visible = line.replace(/\x1b\[[0-9;]*m/g, '');
   const pad = Math.max(0, Math.floor((width - visible.length) / 2));
   return ' '.repeat(pad) + line;
 }
 
 function renderLogo(): string {
-  const cols = process.stdout.columns || 80;
-  let lines: string[];
-  let subtitle: string;
+  const pad = '      ';
+  const lines = LOGO_FULL;
+  const subtitle = `${c.dim}e  x  c  h  a  n  g  e${c.reset}`;
 
-  if (cols >= 185) {
-    lines = LOGO_FULL;
-    subtitle = '';
-  } else if (cols >= 62) {
-    lines = LOGO_CUBE;
-    subtitle = `${c.dim}e  x  c  h  a  n  g  e${c.reset}`;
-  } else {
-    lines = LOGO_COMPACT;
-    subtitle = `${c.dim}exchange${c.reset}`;
-  }
-
-  // Compute padding from the widest line so all lines share the same left margin
-  const maxWidth = Math.max(...lines.map(l => l.length));
-  const blockPad = Math.max(0, Math.floor((cols - maxWidth) / 2));
-  const padStr = ' '.repeat(blockPad);
-
-  const art = lines.map(l => `${padStr}${c.cyan}${l}${c.reset}`).join('\n');
-  const sub = subtitle ? '\n' + centerPad(subtitle, cols) : '';
+  const art = lines.map(l => `${pad}${c.cyan}${l}${c.reset}`).join('\n');
+  const sub = `\n${pad} ${subtitle}`;
 
   return `\n${art}${sub}\n`;
 }
@@ -113,17 +110,50 @@ const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', 
 class Spinner {
   private frame = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private countdownTimer: ReturnType<typeof setInterval> | null = null;
   private text = '';
+  private prefix = '';
+  private deadlineMs = 0;
 
   start(text: string) {
     this.text = text;
+    this.prefix = '';
+    this.deadlineMs = 0;
     if (!process.stdout.isTTY) {
       process.stdout.write(`  ${text}\n`);
       return;
     }
+    this.startRender();
+  }
+
+  /** Start spinner with a live countdown: "Waiting for approval... 9:42" */
+  startCountdown(prefix: string, expiresInSecs: number) {
+    this.prefix = prefix;
+    this.deadlineMs = Date.now() + expiresInSecs * 1000;
+    this.text = this.buildCountdownText();
+    if (!process.stdout.isTTY) {
+      process.stdout.write(`  ${this.text}\n`);
+      return;
+    }
+    // Update countdown text every second
+    this.countdownTimer = setInterval(() => {
+      this.text = this.buildCountdownText();
+    }, 1000);
+    this.startRender();
+  }
+
+  private buildCountdownText(): string {
+    const remaining = Math.max(0, Math.ceil((this.deadlineMs - Date.now()) / 1000));
+    const mins = Math.floor(remaining / 60);
+    const secs = remaining % 60;
+    const timeStr = `${mins}:${String(secs).padStart(2, '0')}`;
+    return `${this.prefix} ${c.dim}${timeStr}${c.reset}`;
+  }
+
+  private startRender() {
     this.timer = setInterval(() => {
       const spinner = `${c.cyan}${SPINNER_FRAMES[this.frame]}${c.reset}`;
-      process.stdout.write(`\r  ${spinner} ${this.text}`);
+      process.stdout.write(`\r\x1b[K  ${spinner} ${this.text}`);
       this.frame = (this.frame + 1) % SPINNER_FRAMES.length;
     }, 80);
   }
@@ -134,22 +164,22 @@ class Spinner {
 
   succeed(text: string) {
     this.stop();
-    process.stdout.write(`\r  ${c.green}✓${c.reset} ${text}\n`);
+    process.stdout.write(`\r\x1b[K  ${c.green}✓${c.reset} ${text}\n`);
   }
 
   fail(text: string) {
     this.stop();
-    process.stdout.write(`\r  ${c.red}✗${c.reset} ${text}\n`);
+    process.stdout.write(`\r\x1b[K  ${c.red}✗${c.reset} ${text}\n`);
   }
 
   info(text: string) {
     this.stop();
-    process.stdout.write(`\r  ${c.cyan}●${c.reset} ${text}\n`);
+    process.stdout.write(`\r\x1b[K  ${c.cyan}●${c.reset} ${text}\n`);
   }
 
   warn(text: string) {
     this.stop();
-    process.stdout.write(`\r  ${c.yellow}!${c.reset} ${text}\n`);
+    process.stdout.write(`\r\x1b[K  ${c.yellow}!${c.reset} ${text}\n`);
   }
 
   private stop() {
@@ -157,47 +187,99 @@ class Spinner {
       clearInterval(this.timer);
       this.timer = null;
     }
+    if (this.countdownTimer) {
+      clearInterval(this.countdownTimer);
+      this.countdownTimer = null;
+    }
     if (process.stdout.isTTY) {
-      process.stdout.write('\r\x1b[K'); // clear line
+      process.stdout.write('\r\x1b[K');
     }
   }
+}
+
+// ── Verification Code Display ────────────────────────────────
+
+/**
+ * Print the pairing code in GitHub CLI / Stripe CLI style:
+ *   ! Verify this code in your browser
+ *
+ *     decide - purpose - lunch - hybrid
+ *
+ *     Open: https://...
+ */
+function printVerificationCode(code: string, url?: string) {
+  // Style each word bold white, separated by dim dashes
+  const words = code.split('-');
+  const styled = words
+    .map(w => `${c.bold}${c.white}${w}${c.reset}`)
+    .join(` ${c.dim}-${c.reset} `);
+
+  console.log('');
+  console.log(`  ${c.yellow}!${c.reset} Verify this code in your browser`);
+  console.log('');
+  console.log(`    ${styled}`);
+
+  if (url) {
+    console.log('');
+    console.log(`    ${c.dim}Open:${c.reset} ${c.cyan}${url}${c.reset}`);
+  }
+  console.log('');
+}
+
+// ── Single-key prompt ───────────────────────────────────────
+
+/** Wait for a single keypress and return the character. */
+function waitForKey(): Promise<string> {
+  return new Promise(resolve => {
+    if (!process.stdin.isTTY) { resolve('n'); return; }
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.once('data', (key: Buffer) => {
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+      resolve(String.fromCharCode(key[0]));
+    });
+  });
 }
 
 // ── Main ─────────────────────────────────────────────────────
 
 async function main() {
-  const headless = process.argv.includes('--headless');
+  const args = process.argv.slice(2);
+  const headless = args.includes('--headless');
   const env = getEnvironment(process.env.CUBE_ENV);
 
   // Header
   console.log(renderLogo());
 
-  // Check for existing valid credentials
+  // Check for existing keypair — offer to reuse
+  let existingKeyPair: Ed25519KeyPair | undefined;
   const existing = await loadCredentials();
   if (existing) {
-    const expiresIn = existing.expiresAt - Math.floor(Date.now() / 1000);
-    const days = Math.floor(expiresIn / 86400);
-    const hours = Math.floor((expiresIn % 86400) / 3600);
-    const timeStr = days > 0 ? `${days}d ${hours}h` : `${hours}h`;
-
-    console.log(`  ${c.green}✓${c.reset} Already logged in ${c.dim}(expires in ${timeStr})${c.reset}`);
+    const pubShort = existing.ed25519PublicKey.slice(0, 12);
+    console.log(`  ${c.dim}Existing keypair found${c.reset} ${c.dim}${pubShort}...${c.reset}`);
+    process.stdout.write(`  Reuse existing keypair? ${c.dim}[y/n]${c.reset} `);
+    const key = await waitForKey();
+    console.log(key);
+    if (key === 'y' || key === 'Y') {
+      const seed = Uint8Array.from(Buffer.from(existing.ed25519PrivateKey, 'hex'));
+      const publicKey = Uint8Array.from(Buffer.from(existing.ed25519PublicKey, 'hex'));
+      const privateKey = await importPrivateKey(seed);
+      existingKeyPair = { publicKey, privateKey, privateKeyRaw: seed };
+    }
     console.log('');
-    console.log(`    ${c.dim}Key${c.reset}       ${existing.ed25519PublicKey.slice(0, 16)}...`);
-    console.log(`    ${c.dim}Provider${c.reset}  ${existing.provider}`);
-    console.log(`    ${c.dim}Stored${c.reset}    ${CREDENTIALS_PATH}`);
-    console.log('');
-    console.log(`  ${c.dim}To re-login, delete ${CREDENTIALS_PATH}${c.reset}`);
-    console.log('');
-    process.exit(0);
   }
 
   const spinner = new Spinner();
+  let codeExpiresIn = 600; // default 10 min, updated from device_code_received
+  let deviceUserCode = '';  // stored for browser_opened/browser_failed display
+  let authUrl = '';         // stored for display after browser opens
 
   // Event handler — renders the polished CLI output
-  const handleEvent = (event: DeviceAuthEvent) => {
+  const handleEvent = async (event: DeviceAuthEvent) => {
     switch (event.type) {
       case 'keypair_generated':
-        spinner.succeed(`Generated Ed25519 keypair ${c.dim}${event.publicKeyHex.slice(0, 12)}...${c.reset}`);
+        spinner.succeed(`${existingKeyPair ? 'Reusing' : 'Generated'} Ed25519 keypair ${c.dim}${event.publicKeyHex.slice(0, 12)}...${c.reset}`);
         break;
 
       case 'callback_server_started':
@@ -209,75 +291,123 @@ async function main() {
         break;
 
       case 'device_code_received':
-        if (event.userCode) {
-          // Headless: show the big URL + code
+        codeExpiresIn = event.expiresIn;
+        deviceUserCode = event.userCode ?? '';
+
+        if (headless || !event.userCode) {
+          // Headless: show code + URL, start countdown
+          printVerificationCode(deviceUserCode, event.authorizeUrl);
+          const copied = await copyToClipboard(event.authorizeUrl);
+          if (copied) {
+            console.log(`  ${c.dim}       Copied to clipboard${c.reset}`);
+          }
           console.log('');
-          console.log(`  Open this URL in any browser:`);
-          console.log('');
-          console.log(`    ${c.bold}${c.cyan}${event.authorizeUrl}${c.reset}`);
-          console.log('');
-          spinner.start(`Waiting for approval... ${c.dim}(expires in ${Math.floor(event.expiresIn / 60)}m)${c.reset}`);
+          spinner.startCountdown('Waiting for approval...', event.expiresIn);
+          console.log(`  ${c.dim}Press c to cancel${c.reset}`);
         } else {
-          // Interactive: opening browser
+          // Interactive: browser will open — just copy URL for now
+          authUrl = event.authorizeUrl;
+          await copyToClipboard(event.authorizeUrl);
           spinner.start('Opening browser...');
         }
         break;
 
       case 'browser_opened':
         spinner.succeed('Browser opened');
-        spinner.start(`Waiting for approval in browser... ${c.dim}(approve in the tab that just opened)${c.reset}`);
+        // Show code so user can verify in the browser tab
+        if (deviceUserCode) {
+          printVerificationCode(deviceUserCode);
+        }
+        if (authUrl) {
+          console.log(`    ${c.dim}Open:${c.reset} ${c.cyan}${authUrl}${c.reset}`);
+          console.log('');
+        }
+        spinner.startCountdown('Approve in the browser tab...', codeExpiresIn);
+        console.log(`  ${c.dim}Press c to cancel${c.reset}`);
         break;
 
-      case 'browser_failed':
-        spinner.warn('Could not open browser automatically');
+      case 'browser_failed': {
+        spinner.warn('Could not open browser');
+        // Show code + URL since user needs to open manually
+        printVerificationCode(deviceUserCode, event.url);
+        const copied = await copyToClipboard(event.url);
+        if (copied) {
+          console.log(`  ${c.dim}       Copied to clipboard${c.reset}`);
+        }
         console.log('');
-        console.log(`  Open this URL manually:`);
-        console.log('');
-        console.log(`    ${c.bold}${c.cyan}${event.url}${c.reset}`);
-        console.log('');
-        spinner.start('Waiting for approval...');
-        break;
-
-      case 'polling': {
-        const mins = Math.floor(event.elapsed / 60);
-        const secs = event.elapsed % 60;
-        const elapsed = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-        spinner.update(`Waiting for approval... ${c.dim}${elapsed} elapsed${c.reset}`);
+        spinner.startCountdown('Waiting for approval...', codeExpiresIn);
+        console.log(`  ${c.dim}Press c to cancel${c.reset}`);
         break;
       }
 
-      case 'approved': {
+      case 'polling':
+        // Countdown timer handles the display — no-op
+        break;
+
+      case 'approved':
         spinner.succeed('Approved');
         break;
-      }
 
-      case 'credentials_saved': {
-        // Shown in the summary below
+      case 'credentials_saved':
         break;
-      }
     }
   };
 
-  spinner.start('Generating keypair...');
+  // Listen for 'c' to cancel
+  const abortController = new AbortController();
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.on('data', (key: Buffer) => {
+      if (key[0] === 0x63 /* c */ || key[0] === 0x03 /* Ctrl-C */) {
+        abortController.abort();
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        console.log('');
+        console.log(`  ${c.yellow}Cancelled${c.reset}`);
+        console.log('');
+        process.exit(0);
+      }
+    });
+  }
+  spinner.start(existingKeyPair ? 'Reusing keypair...' : 'Generating keypair...');
 
   const result = await deviceAuthFlow({
     apiBase: env.restUrl,
-    clientName: 'AI Crypto Fund',
+    clientName: 'AI Fund',
     headless,
     onEvent: handleEvent,
+    existingKeyPair,
   });
 
-  // Final summary
+  // Stop listening for cancel
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(false);
+    process.stdin.pause();
+  }
+
+  // ── Post-login summary ──
+  const backend = await getBackendName();
   const expiryDate = new Date(result.expiresAt * 1000);
-  const expiryStr = expiryDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const expiryStr = expiryDate.toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+  const expiresIn = result.expiresAt - Math.floor(Date.now() / 1000);
+  const days = Math.floor(expiresIn / 86400);
 
   console.log('');
-  console.log(`  ${c.green}${c.bold}✓ Successfully logged in.${c.reset}`);
+  console.log(`  ${c.green}${c.bold}Done!${c.reset} Cube Exchange CLI is now configured.`);
   console.log('');
-  console.log(`    ${c.dim}Key ID${c.reset}      ${result.verificationKeyId}`);
-  console.log(`    ${c.dim}Subaccount${c.reset}  ${result.subaccountId}`);
-  console.log(`    ${c.dim}Expires${c.reset}     ${expiryStr}`);
-  console.log(`    ${c.dim}Saved to${c.reset}    ~/.cube/credentials.json`);
+  console.log(`    ${c.dim}Key ID${c.reset}       ${result.verificationKeyId}`);
+  if (result.subaccountId) {
+    console.log(`    ${c.dim}Subaccount${c.reset}   ${result.subaccountId}`);
+  }
+  console.log(`    ${c.dim}Public Key${c.reset}   ${result.keyPair ? Buffer.from(result.keyPair.publicKey).toString('hex').slice(0, 16) + '...' : '—'}`);
+  console.log(`    ${c.dim}Expires${c.reset}      ${expiryStr}`);
+  console.log(`    ${c.dim}Stored in${c.reset}    ${backend === 'keychain' ? 'macOS Keychain' : backend === 'secret-tool' ? 'System keyring' : '~/.cube/credentials.json'}`);
+  console.log('');
+  console.log(`  ${c.dim}Note: this key will expire in ${days} days. Re-run to re-authenticate.${c.reset}`);
   console.log('');
 }
 

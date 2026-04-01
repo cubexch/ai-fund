@@ -11,7 +11,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "login": "tsx src/cli/device-login.ts",
-    "login:legacy": "tsx src/cli/login.ts"
+    "login:legacy": "tsx src/cli/login.ts",
+    "status": "tsx src/cli/status.ts",
+    "logout": "tsx src/cli/logout.ts"
   },
   "dependencies": {
     "@cubexch/client": "^1.14.2",
