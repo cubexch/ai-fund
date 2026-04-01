@@ -10,7 +10,8 @@
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "login": "tsx src/cli/login.ts"
+    "login": "tsx src/cli/device-login.ts",
+    "login:legacy": "tsx src/cli/login.ts"
   },
   "dependencies": {
     "@cubexch/client": "^1.14.2",
