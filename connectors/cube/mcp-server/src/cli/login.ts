@@ -189,6 +189,17 @@ async function main() {
         console.log(`  Public key: ${pubKeyHex.slice(0, 16)}...`);
         console.log(`  Expires: ${expiryDate.toISOString()}`);
         console.log(`  Saved to: ${CREDENTIALS_PATH}\n`);
+        console.log('Login successful. Press Enter to continue…');
+
+        // Wait for Enter before continuing
+        await new Promise<void>(resolve => {
+          if (!process.stdin.isTTY) { resolve(); return; }
+          process.stdin.resume();
+          process.stdin.once('data', () => {
+            process.stdin.pause();
+            resolve();
+          });
+        });
         break;
       }
 

@@ -409,6 +409,18 @@ async function main() {
   console.log('');
   console.log(`  ${c.dim}Note: this key will expire in ${days} days. Re-run to re-authenticate.${c.reset}`);
   console.log('');
+  console.log(`  ${c.green}Login successful.${c.reset} Press Enter to continue…`);
+
+  // Wait for Enter before exiting
+  await new Promise<void>(resolve => {
+    if (!process.stdin.isTTY) { resolve(); return; }
+    process.stdin.setRawMode(false);
+    process.stdin.resume();
+    process.stdin.once('data', () => {
+      process.stdin.pause();
+      resolve();
+    });
+  });
 }
 
 main().catch(err => {

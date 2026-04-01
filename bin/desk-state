@@ -1,0 +1,184 @@
+#!/usr/bin/env node
+
+// Desk state management — single command for all .desk/ file operations
+// Usage:
+//   desk-state hire <agent-slug>
+//   desk-state fire <agent-slug> [reason]
+//   desk-state update <agent-slug> <key> <value>
+//   desk-state show
+
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const DESK = path.join(__dirname, '..', '.desk');
+const STATE = path.join(DESK, 'state.json');
+const RISK = path.join(DESK, 'risk.json');
+const BRIEFINGS = path.join(DESK, 'briefings');
+
+function ensureDirs() {
+  fs.mkdirSync(DESK, { recursive: true });
+  fs.mkdirSync(BRIEFINGS, { recursive: true });
+}
+
+function readState() {
+  try {
+    return JSON.parse(fs.readFileSync(STATE, 'utf8'));
+  } catch {
+    return {
+      desk: { created: today(), last_session: today(), mode: 'paper' },
+      agents: {},
+      exchanges: {}
+    };
+  }
+}
+
+function writeState(state) {
+  state.desk.last_session = today();
+  fs.writeFileSync(STATE, JSON.stringify(state, null, 2) + '\n');
+}
+
+function readRisk() {
+  try {
+    return JSON.parse(fs.readFileSync(RISK, 'utf8'));
+  } catch {
+    return { risk_manager_hired: false, parameters: {}, warnings: [] };
+  }
+}
+
+function writeRisk(risk) {
+  fs.writeFileSync(RISK, JSON.stringify(risk, null, 2) + '\n');
+}
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function hire(slug) {
+  ensureDirs();
+  const state = readState();
+  const briefingPath = `.desk/briefings/${slug}.md`;
+  const briefingFull = path.join(DESK, 'briefings', `${slug}.md`);
+  const skillPath = `skills/${slug}/SKILL.md`;
+
+  // Check if skill exists
+  const skillFull = path.join(__dirname, '..', skillPath);
+  if (!fs.existsSync(skillFull)) {
+    console.error(`Error: No skill found at ${skillPath}`);
+    process.exit(1);
+  }
+
+  const wasActive = state.agents[slug]?.status === 'active';
+
+  // Update agent state
+  state.agents[slug] = {
+    ...state.agents[slug],
+    status: 'active',
+    hired: state.agents[slug]?.hired || today(),
+    skill: skillPath,
+    briefing: briefingPath,
+    assets_covered: state.agents[slug]?.assets_covered || [],
+    last_action: wasActive
+      ? state.agents[slug]?.last_action
+      : 'Hired — awaiting first assignment'
+  };
+  writeState(state);
+
+  // Create briefing if it doesn't exist
+  const isNew = !fs.existsSync(briefingFull);
+  if (isNew) {
+    const name = slug.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
+    fs.writeFileSync(briefingFull, `# ${name} — Briefing Book\n\n## Status\n- **Hired:** ${today()}\n\n## Analyses\n_No analyses yet._\n\n## Open Questions\n_None._\n`);
+  }
+
+  // Update risk.json if hiring risk-manager
+  if (slug === 'risk-manager') {
+    const risk = readRisk();
+    risk.risk_manager_hired = true;
+    writeRisk(risk);
+  }
+
+  // Output summary as JSON for Claude to use
+  const result = {
+    action: 'hired',
+    agent: slug,
+    returning: !isNew,
+    briefing_exists: !isNew,
+    briefing_path: briefingPath,
+    skill_path: skillPath,
+    active_agents: Object.entries(state.agents)
+      .filter(([, a]) => a.status === 'active')
+      .map(([k]) => k),
+    risk_manager_active: state.agents['risk-manager']?.status === 'active'
+  };
+  console.log(JSON.stringify(result, null, 2));
+}
+
+function fire(slug, reason) {
+  const state = readState();
+  if (!state.agents[slug] || state.agents[slug].status !== 'active') {
+    console.error(`Error: ${slug} is not currently active`);
+    process.exit(1);
+  }
+
+  state.agents[slug].status = 'fired';
+  state.agents[slug].fired_date = today();
+  state.agents[slug].fire_reason = reason || 'underperformance';
+  writeState(state);
+
+  // Update risk.json if firing risk-manager
+  if (slug === 'risk-manager') {
+    const risk = readRisk();
+    risk.risk_manager_hired = false;
+    writeRisk(risk);
+  }
+
+  const tradingAgents = Object.entries(state.agents)
+    .filter(([k, a]) => a.status === 'active' && k !== 'risk-manager');
+
+  const result = {
+    action: 'fired',
+    agent: slug,
+    reason: reason || 'underperformance',
+    remaining_agents: Object.entries(state.agents)
+      .filter(([, a]) => a.status === 'active')
+      .map(([k]) => k),
+    warning: slug === 'risk-manager' && tradingAgents.length > 0
+      ? `Risk Manager fired with ${tradingAgents.length} trading agents still active!`
+      : null
+  };
+  console.log(JSON.stringify(result, null, 2));
+}
+
+function update(slug, key, value) {
+  const state = readState();
+  if (!state.agents[slug]) {
+    console.error(`Error: ${slug} not found`);
+    process.exit(1);
+  }
+  // Try to parse JSON values
+  try { value = JSON.parse(value); } catch {}
+  state.agents[slug][key] = value;
+  writeState(state);
+  console.log(JSON.stringify({ action: 'updated', agent: slug, [key]: value }));
+}
+
+function show() {
+  const state = readState();
+  console.log(JSON.stringify(state, null, 2));
+}
+
+// CLI
+const [,, cmd, ...args] = process.argv;
+switch (cmd) {
+  case 'hire':  hire(args[0]); break;
+  case 'fire':  fire(args[0], args.slice(1).join(' ')); break;
+  case 'update': update(args[0], args[1], args.slice(2).join(' ')); break;
+  case 'show':  show(); break;
+  default:
+    console.error('Usage: desk-state <hire|fire|update|show> [args]');
+    process.exit(1);
+}
