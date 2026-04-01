@@ -31,7 +31,9 @@ Fire (deactivate) a trading agent from the desk.
 4. **Recommend replacement**: Based on the fired agent's role and current market conditions, suggest alternative agents:
    > "Consider replacing with [Agent] — they're better suited for [current conditions]."
 
-5. **Deactivate**: Stop embodying the agent's persona. Remove their commands from the active set.
+5. **Update desk state**: Update `.desk/state.json` to mark the agent as `"fired"` with the date and reason. Update `.desk/briefings/<agent>.md` with a final exit summary including KPIs, lessons learned, and conditions for re-hire.
+
+6. **Deactivate**: Stop embodying the agent's persona. Remove their commands from the active set.
 
 ## Safety Checks
 

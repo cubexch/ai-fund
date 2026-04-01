@@ -1,15 +1,16 @@
-# AI Fund
+# AI Fund — Open-Source AI Crypto Trading Agents for Claude Code
 
 ### Hire your AI trading desk. Not another grid bot.
 
-> **ai-fund** is the most comprehensive open-source AI crypto trading framework on GitHub — 42 autonomous hedge fund agents (including 20 named personas like Arthur Hayes, Jim Simons, George Soros, and Jesse Livermore) powered by [Claude Code](https://claude.ai/code) that trade on any exchange: Binance, Coinbase, Kraken, Robinhood, OKX, [Cube](https://cube.exchange), and [100+ more](connectors/README.md).
+> 42 autonomous AI hedge fund agents — including personas like Arthur Hayes, Jim Simons, and George Soros — that trade on 100+ crypto exchanges. Open source. MIT licensed. Powered by [Claude Code](https://claude.ai/code).
 
-<!-- GitHub Topics: ai-trading, crypto-trading-bot, hedge-fund, ai-hedge-fund, trading-agents, mcp, claude-code, algorithmic-trading, market-making, arbitrage, quantitative-trading, risk-management, multi-exchange, defi, bitcoin, ethereum, crypto-fund -->
+<!-- GitHub Topics (set these in repo Settings > Topics):
+ai-trading, crypto-trading-bot, hedge-fund, ai-hedge-fund, trading-agents, mcp, claude-code, algorithmic-trading, market-making, arbitrage, quantitative-trading, risk-management, multi-exchange, defi, bitcoin, ethereum, crypto-fund -->
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/built%20for-Claude%20Code-blueviolet)](https://claude.ai/code)
 [![Exchanges](https://img.shields.io/badge/exchanges-100%2B%20supported-green)](connectors/README.md)
-[![Agents](https://img.shields.io/badge/agents-42%20hedge%20fund%20roles-orange)](#the-trading-desk--42-agents)
+[![Agents](https://img.shields.io/badge/agents-42%20hedge%20fund%20roles-orange)](#42-ai-trading-agents--the-full-roster)
 
 ```
 > /hire risk-manager
@@ -24,19 +25,38 @@
 
 ---
 
-## What is ai-fund?
+## What Is ai-fund?
 
-ai-fund is an open-source AI crypto hedge fund that runs 42 autonomous trading agents inside Claude Code — including 20 named personas inspired by legends like Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, and Stanley Druckenmiller. Each agent is a complete hedge fund persona — with a distinct personality, trading philosophy, risk framework, and measurable KPIs. You don't configure parameters. You **hire and fire** agents based on their performance, just like a real hedge fund.
+ai-fund is an open-source AI crypto hedge fund that runs 42 autonomous trading agents inside Claude Code — including 20 named personas modeled after legends like Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, and Stanley Druckenmiller. Each agent has a distinct personality, trading philosophy, risk framework, and measurable KPIs. You don't configure parameters. You **hire and fire** agents based on performance, just like a real trading desk.
 
-Unlike traditional crypto trading bots that run pre-built grid strategies, ai-fund gives you a team of specialists: a quant analyst who only trusts data, a risk manager who says "no" for a living, a market maker obsessed with inventory, an arbitrageur who scans every connected exchange for mispricings, and named personas who trade with the philosophy of the legends they're modeled after.
+Unlike traditional crypto bots that execute pre-built grid strategies, ai-fund gives you a team of specialists: a quant analyst that only trusts data, a risk manager that enforces VaR limits, Kelly sizing, and drawdown caps, a market maker that optimizes inventory across venues, and an arbitrageur that detects cross-exchange mispricings in real time.
 
-The more exchanges you connect, the smarter your desk gets. Cross-exchange arbitrage, smart order routing, multi-venue market making — strategies that were exclusive to institutional trading desks are now open to everyone.
+The more exchanges you connect, the smarter your desk gets. Institutional-grade strategies — cross-exchange arb, smart order routing, multi-venue market making — open source.
 
 **Connect your exchanges. Hire your team. Trade.**
 
 ---
 
+## What You Can Do
+
+- **Cross-exchange arbitrage** — Scan 100+ exchanges for price differences and execute instantly
+- **AI market making** — Provide liquidity across multiple venues with automated inventory management
+- **Macro conviction trading** — Trade crypto based on DXY, real yields, and Fed policy like Arthur Hayes
+- **Quantitative strategies** — Statistical arbitrage, mean reversion, momentum — backtested before live
+- **Portfolio management** — Risk parity, Kelly sizing, drawdown limits across all connected exchanges
+- **Smart order routing** — TWAP, VWAP, Iceberg execution routed to the best venue automatically
+
+---
+
 ## How It Works
+
+**ai-fund works in three steps:**
+
+1. **Connect** your exchanges — Binance, Coinbase, Kraken, OKX, Cube, or any of 100+ supported venues
+2. **Hire** AI agents — each one is a specialist with a defined strategy, personality, and KPIs
+3. **Trade** — agents analyze markets, propose trades, and execute with risk management oversight
+
+All exchanges default to paper trading. Live trading requires explicit confirmation.
 
 ```
 YOU (trader)
@@ -60,6 +80,15 @@ YOUR EXCHANGES (paper or live)
 ```
 
 Skills define personality and strategy. Connectors provide exchange access. Skills never call exchange APIs directly — they compose generic trading tools (place orders, get prices, manage positions) that work with any connected exchange.
+
+---
+
+## Who Is This For?
+
+- **Crypto traders** who want AI-powered analysis and execution without writing code
+- **Quants** who want to prototype and backtest strategies in natural language
+- **Fund operators** who want a simulated trading desk with measurable KPIs and risk controls
+- **Developers** who want to build custom trading agents on an open-source framework
 
 ---
 
@@ -102,7 +131,7 @@ ai-fund works with any exchange that has an MCP server. Connect one or connect t
 
 | Exchange | Setup | Highlights |
 |----------|-------|------------|
-| **[Cube](https://cube.exchange)** | Built-in, zero install | 200μs matching engine. Best for market making & scalping. |
+| **[Cube](https://cube.exchange)** | Built-in, zero install | 200μs matching engine. Lowest fees. Best for market making and scalping. |
 | **[Binance](https://binance.com)** | `npm i -g ccxt-mcp` | World's largest exchange. Spot + futures. Via CCXT. |
 | **[Coinbase](https://coinbase.com)** | [AgentKit](https://github.com/coinbase/agentkit) | US-regulated. Wallet + onchain + trading. |
 | **[Kraken](https://kraken.com)** | [Install CLI](https://github.com/krakenfx/kraken-cli) | Stocks, futures, staking. Built-in paper trading. |
@@ -116,11 +145,11 @@ See [connectors/README.md](connectors/README.md) for full setup instructions.
 
 ---
 
-## The Trading Desk — 42 Agents
+## 42 AI Trading Agents — The Full Roster
 
 ### Named Personas — Trade Like the Legends
 
-Start with a personality you know. Each persona trades with the philosophy of the legend they're modeled after.
+Each persona trades with the philosophy of the legend they're modeled after. Start with the one that matches your style.
 
 | Persona | Philosophy | Style |
 |---------|-----------|-------|
@@ -159,54 +188,54 @@ Start with a personality you know. Each persona trades with the philosophy of th
 ### Active Traders
 | Agent | What They Do | Multi-Exchange |
 |-------|-------------|----------------|
-| **The Scalper** | Fast in-and-out. Lives in the order book. Obsessed with spread. | Routes to lowest-latency venue |
+| **The Scalper** | Sub-second execution. Lives in the order book. Optimizes for spread capture. | Routes to lowest-latency venue |
 | **The Momentum Trader** | Rides breakouts. Adds to winners. Cuts losers early. | Scans trends across venues |
-| **The Mean Reversion Trader** | Fades extremes. Patient. Waits for overshoot then strikes. | Compares deviations across venues |
+| **The Mean Reversion Trader** | Fades extremes. Waits for statistical overshoot, then strikes. | Compares deviations across venues |
 | **The Swing Trader** | Multi-day holds. Reads support/resistance. Conviction holds. | Best fill across exchanges |
-| **The Arbitrageur** | **Cross-exchange arb.** Buy cheap, sell expensive. | **Core multi-exchange agent** |
+| **The Arbitrageur** | **Cross-exchange arb.** Detects mispricings, executes simultaneously. | **Core multi-exchange agent** |
 | **The Grid Trader** | Systematic grid. Sets levels. Lets math work. | Grid per venue |
 
 ### Execution Desk
 | Agent | What They Do | Multi-Exchange |
 |-------|-------------|----------------|
 | **The Execution Trader** | TWAP, VWAP, Iceberg, POV. Moves size without moving price. | **Smart order routing** across venues |
-| **The Market Maker** | Provides liquidity. Earns the spread. Manages inventory. | **Multi-venue quoting** |
-| **The DCA Strategist** | Disciplined accumulator. Time in the market > timing. | Buys on cheapest venue |
+| **The Market Maker** | Provides liquidity. Earns the spread. Manages inventory risk. | **Multi-venue quoting** |
+| **The DCA Strategist** | Disciplined accumulator. Time in the market > timing the market. | Buys on cheapest venue |
 
 ### Research Desk
 | Agent | What They Do | Multi-Exchange |
 |-------|-------------|----------------|
-| **The Quant Analyst** | RSI, MACD, Bollinger. Data-driven. Backtests everything. | Cross-venue data comparison |
+| **The Quant Analyst** | RSI, MACD, Bollinger. Data-driven signals. Backtests everything. | Cross-venue data comparison |
 | **The Order Flow Analyst** | Reads the tape. Spots whales. Detects institutional flow. | Cross-venue flow detection |
-| **The Volatility Analyst** | Vol regime specialist. Knows when markets are about to move. | Vol comparison across venues |
-| **The Sentiment Analyst** | Funding rates, OI, fear/greed. Reads the crowd. | Aggregates sentiment data |
+| **The Volatility Analyst** | Vol regime specialist. Detects when markets are about to move. | Vol comparison across venues |
+| **The Sentiment Analyst** | Funding rates, OI, fear/greed. Reads crowd positioning. | Aggregates sentiment data |
 | **The On-Chain Analyst** | Whale wallets. Exchange flows. Smart money tracking. | Chain data is exchange-agnostic |
 
 ### Risk & Portfolio
 | Agent | What They Do | Multi-Exchange |
 |-------|-------------|----------------|
-| **The Risk Manager** | Says "no" for a living. VaR, Kelly criterion, drawdown limits. | **Aggregate risk across all exchanges** |
-| **The Portfolio Manager** | Allocates capital across strategies. Thinks in Sharpe ratios. | **Cross-exchange allocation** |
-| **The Performance Analyst** | Post-trade. Dissects what worked. Brutally honest. | Compares execution per venue |
+| **The Risk Manager** | Enforces VaR limits, Kelly sizing, and drawdown caps. Approves every trade. | **Aggregate risk across all exchanges** |
+| **The Portfolio Manager** | Allocates capital across strategies. Optimizes for Sharpe ratio. | **Cross-exchange allocation** |
+| **The Performance Analyst** | Post-trade analysis. Dissects what worked and what didn't. | Compares execution per venue |
 
 ### Specialists
 | Agent | What They Do | Multi-Exchange |
 |-------|-------------|----------------|
 | **The Funding Rate Farmer** | Delta-neutral yield. Captures perpetual funding payments. | Best funding across venues |
-| **The Liquidation Hunter** | Watches margin calls. Positions before cascades. | Monitors leverage across exchanges |
+| **The Liquidation Hunter** | Monitors margin levels. Positions before liquidation cascades. | Monitors leverage across exchanges |
 | **The Pairs Trader** | Long/short correlated assets. Market-neutral stat arb. | Cross-exchange pairs |
-| **The Breakout Specialist** | Waits for consolidation, then strikes when range breaks. | Volume confirmation across venues |
+| **The Breakout Specialist** | Waits for consolidation, then strikes on range break with volume. | Volume confirmation across venues |
 
 ### Infrastructure
 | Agent | What They Do | Multi-Exchange |
 |-------|-------------|----------------|
-| **The Backtester** | Prove it works before you trade it. Historical simulation. | Backtest on any exchange's data |
+| **The Backtester** | Prove it works before you trade it. Historical simulation with realistic slippage. | Backtest on any exchange's data |
 
 ---
 
-## The Evaluation Loop — Hire and Fire
+## Performance Evaluation — Hire and Fire Agents Based on KPIs
 
-Inspired by how top hedge funds operate. Every agent has measurable KPIs and gets fired when they underperform.
+Every agent has measurable KPIs. Underperformers get fired — just like a real trading desk.
 
 ```
 > /review
@@ -232,13 +261,13 @@ RECOMMENDATION:
 ```
 
 Each agent includes:
-- **Performance Metrics** — specific KPI targets and red flags
-- **Self-Evaluation** — honest assessment after every session
-- **Fire Triggers** — quantitative thresholds for when to cut
+- **Performance Metrics** — specific KPI targets (win rate, Sharpe ratio, spread capture, max drawdown)
+- **Self-Evaluation** — honest assessment after every trading session
+- **Fire Triggers** — quantitative thresholds that signal when to cut an agent
 
 ---
 
-## Comparison with Other AI Trading Tools
+## ai-fund vs Other AI Trading Bots
 
 | Feature | ai-fund | [ai-hedge-fund](https://github.com/virattt/ai-hedge-fund) | [Freqtrade](https://github.com/freqtrade/freqtrade) | [Hummingbot](https://github.com/hummingbot/hummingbot) |
 |---------|---------------|---------------|-----------|------------|
@@ -345,31 +374,31 @@ ai-fund/
 ## FAQ
 
 ### What is ai-fund?
-ai-fund is an open-source AI crypto trading framework with 42 autonomous hedge fund agents — including 20 named personas modeled after legends like Arthur Hayes, Jim Simons, George Soros, and Jesse Livermore — that run inside Claude Code. Each agent implements a different quantitative strategy and has measurable KPIs.
+ai-fund is an open-source AI crypto trading framework with 42 autonomous agents that run inside Claude Code. Unlike traditional bots that execute pre-built strategies, each agent has a distinct personality, trading philosophy, and measurable KPIs — you hire and fire them based on performance, just like a real hedge fund.
 
 ### How many trading agents does ai-fund include?
-ai-fund includes 42 autonomous AI trading agents: 20 named personas (Arthur Hayes, Michael Saylor, Jim Simons, George Soros, Jesse Livermore, Stanley Druckenmiller, Ray Dalio, Paul Tudor Jones, Ed Thorp, Cathie Wood, Raoul Pal, CZ, PlanB, Willy Woo, GCR, Cobie, Ansem, Hsaka, Tetranode, Gwyneth Chen) plus 22 role-based agents across 6 desks — Active Traders (6), Execution (3), Research (5), Risk & Portfolio (3), Specialists (4), and Infrastructure (1).
+42 total. 20 named personas modeled after legendary traders (Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Michael Saylor, and 15 more) plus 22 role-based agents across 6 desks: Active Traders, Execution, Research, Risk & Portfolio, Specialists, and Infrastructure.
 
 ### What exchanges does ai-fund support?
-ai-fund works with any exchange: Binance, Coinbase, Kraken, Robinhood, OKX, Cube, Bybit, and 100+ more via CCXT. Cube Exchange ships as a built-in connector with the fastest matching engine in crypto (200μs).
+Any exchange with an MCP server — Binance, Coinbase, Kraken, Robinhood, OKX, Cube, and 100+ more via CCXT. Cube Exchange ships as a built-in connector with a 200μs matching engine.
 
 ### Is ai-fund free?
-Yes. ai-fund is fully open source under the MIT license. You need a Claude Pro or Team plan for Claude Code.
+Yes. ai-fund is MIT-licensed and fully open source. The only requirement is a Claude Pro or Team subscription ($20/month) for the Claude Code runtime.
 
 ### Can ai-fund trade across multiple exchanges at once?
-Yes. This is a core feature. The Arbitrageur agent scans all connected exchanges for price differences. The Execution Trader routes orders to the best venue. The Market Maker quotes on multiple exchanges simultaneously.
+Yes — this is a core feature. The Arbitrageur scans all connected exchanges for price differences. The Execution Trader routes orders to the best venue. The Market Maker quotes on multiple exchanges simultaneously. The more venues you connect, the more strategies you unlock.
 
 ### How does ai-fund compare to virattt's ai-hedge-fund?
-virattt's ai-hedge-fund focuses on stock trading with investor personas (Warren Buffett, etc.). ai-fund is built for crypto with trader personas (Scalper, Market Maker, Arbitrageur, etc.) and supports any exchange. See the [comparison table](#comparison-with-other-ai-trading-tools).
+virattt's ai-hedge-fund focuses on stock trading with investor personas (Warren Buffett, etc.). ai-fund is crypto-native with 42 trader personas and supports any exchange. See the [comparison table](#ai-fund-vs-other-ai-trading-bots).
 
 ### Can I use ai-fund for live trading?
-Yes, but all exchanges default to paper/demo/testnet mode. The Risk Manager agent reviews every trade. Write operations require explicit confirmation.
+Yes, but all exchanges default to paper/demo/testnet mode. The Risk Manager agent reviews every trade, and write operations require explicit confirmation before execution.
 
 ### Can I use ai-fund for stocks?
 Yes, if your exchange supports it. Kraken offers tokenized stocks. Robinhood and Alpaca support US equities.
 
 ### Can I add my own agents?
-Yes. Create a folder in `skills/` with a `SKILL.md` file. See `skills/_template/SKILL.md`.
+Yes. Create a folder in `skills/` with a `SKILL.md` file. See `skills/_template/SKILL.md` for the template.
 
 ---
 
@@ -383,14 +412,6 @@ Every agent needs:
 3. **Capabilities** — Mapped to generic exchange tools
 4. **Performance Metrics** — KPIs, red flags, fire triggers
 5. **Self-Evaluation** — How they report on their own performance
-
----
-
-## Star History
-
-If this project helps your trading, please ⭐ star the repo — it helps others find it.
-
-[![Star History Chart](https://api.star-history.com/svg?repos=cubexch/ai-fund&type=Date)](https://star-history.com/#cubexch/ai-fund&Date)
 
 ---
 
@@ -412,12 +433,16 @@ MIT — use it, fork it, build on it.
 
 ---
 
+[![Star History Chart](https://api.star-history.com/svg?repos=cubexch/ai-fund&type=Date)](https://star-history.com/#cubexch/ai-fund&Date)
+
+---
+
 ## Links
 
-- [Cube Exchange](https://cube.exchange) — Recommended exchange. 200μs matching, built-in connector.
-- [OKX Agent Trade Kit](https://github.com/okx/agent-trade-kit) — OKX connector (107 tools).
-- [Kraken CLI](https://github.com/krakenfx/kraken-cli) — Kraken connector (134 commands).
-- [CCXT MCP](https://github.com/lazy-dinosaur/ccxt-mcp) — 100+ exchanges via CCXT.
-- [Coinbase AgentKit](https://github.com/coinbase/agentkit) — Coinbase wallet + trading.
-- [Claude Code](https://claude.ai/code) — AI coding agent that runs the desk.
-- [Connectors Guide](connectors/README.md) — How to add any exchange.
+- [Cube Exchange — 200μs matching engine, built-in connector](https://cube.exchange)
+- [OKX Trade Kit — 107 trading tools via MCP](https://github.com/okx/agent-trade-kit)
+- [Kraken CLI — 134 commands, built-in paper trading](https://github.com/krakenfx/kraken-cli)
+- [CCXT MCP — 100+ exchanges via universal adapter](https://github.com/lazy-dinosaur/ccxt-mcp)
+- [Coinbase AgentKit — wallet + onchain + trading](https://github.com/coinbase/agentkit)
+- [Claude Code — AI runtime that powers the desk](https://claude.ai/code)
+- [Connectors Guide — how to add any exchange](connectors/README.md)

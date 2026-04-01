@@ -45,12 +45,38 @@ When only one exchange is connected, tools are used directly. When multiple are 
 | Robinhood | `ccxt-mcp` or Alpaca MCP | Stocks + crypto |
 | 100+ more | `ccxt-mcp` | Any CCXT-supported exchange |
 
+## Desk State (`.desk/`)
+
+Agent state, briefing books, and trade history persist between sessions in the `.desk/` directory (gitignored — per-user, per-account state).
+
+```
+.desk/
+├── state.json          # Hired agents, exchange status, last session
+├── orders.json         # Trade log (proposed, submitted, filled, rejected)
+├── risk.json           # Risk parameters set by Risk Manager
+└── briefings/          # Compacted conversation history per agent
+    ├── cz.md           # CZ's evaluations, scores, recommendations
+    ├── jesse-livermore.md  # Livermore's pivot setups, tape reads, trade plans
+    └── ...
+```
+
+### Briefing Books (`.desk/briefings/<agent>.md`)
+
+Each agent's briefing book is a **compacted summary** — not a full transcript. It contains:
+- Agent status and hire date
+- Key analyses with scores, prices, and dates
+- Active recommendations and trade proposals with status
+- Open questions and unresolved items
+- Exit summary (if fired)
+
+On `/hire`, the agent reads its briefing book and acknowledges prior context. On `/fire`, the briefing is updated with a final exit summary. After any significant analysis or trade, the briefing should be updated.
+
 ## Commands
 
 - `/setup` — Configure exchanges and API keys
-- `/desk` — Show active agents with KPI dashboard
-- `/hire <role>` — Activate a trading agent
-- `/fire <role>` — Deactivate an underperforming agent
+- `/desk` — Show active agents with KPI dashboard (loads `.desk/state.json`)
+- `/hire <role>` — Activate a trading agent (reads/writes `.desk/`)
+- `/fire <role>` — Deactivate an underperforming agent (updates `.desk/`)
 - `/review` — Run desk-wide performance evaluation
 - `/backtest` — Test a strategy on historical data
 

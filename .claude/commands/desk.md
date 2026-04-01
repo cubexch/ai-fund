@@ -8,6 +8,14 @@ Show a comprehensive dashboard of the trader's current desk.
 
 ## What to Display
 
+### 0. Load Desk State
+- Read `.desk/state.json` to load previously hired agents and their status
+- Read `.desk/orders.json` to load pending/recent order history
+- Read `.desk/risk.json` to load risk parameters
+- For each active agent, read `.desk/briefings/<agent>.md` to load their briefing book
+- Show a "Returning desk" summary if agents were previously hired:
+  > "Loaded desk from last session (2026-03-31). 4 agents active. 4 orders in log."
+
 ### 1. Connected Exchanges
 - Check `.mcp.json` to see which exchanges are enabled
 - For each enabled exchange, try a read-only call to verify connection
