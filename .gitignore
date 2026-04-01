@@ -20,6 +20,9 @@ dist/
 *.swp
 *.swo
 
+# Desk state (per-user, per-session)
+.desk/
+
 # OS
 .DS_Store
 Thumbs.db
