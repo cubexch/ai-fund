@@ -84,7 +84,7 @@ function renderLogo(): string {
   let lines: string[];
   let subtitle: string;
 
-  if (cols >= 185) {
+  if (cols >= 175) {
     lines = LOGO_FULL;
     subtitle = '';
   } else if (cols >= 62) {
