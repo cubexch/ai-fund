@@ -13,23 +13,27 @@ The default and recommended exchange connector for ai-fund.
 ## Setup
 
 1. Create an account at [cube.exchange](https://cube.exchange)
-2. Go to Settings → API Keys → Create a new key
-3. Edit `.mcp.json` in the repo root:
+2. Run the device login to authenticate:
+
+```bash
+cd connectors/cube/mcp-server && npm run login
+```
+
+This opens your browser, authenticates via Google/Apple, and saves an Ed25519 verification key to `~/.cube/credentials.json`. No API keys needed.
+
+3. Set `CUBE_ENV` in `.mcp.json` to `staging` for paper trading (default) or `production` for live trading:
 
 ```json
 {
   "cube": {
     "env": {
-      "CUBE_API_KEY": "your-api-key-uuid",
-      "CUBE_SECRET_KEY": "your-secret-key-hex",
-      "CUBE_SUBACCOUNT_ID": "1",
       "CUBE_ENV": "staging"
     }
   }
 }
 ```
 
-4. Set `CUBE_ENV` to `staging` for paper trading (default) or `production` for live trading.
+**Never put API keys in `.mcp.json`** — they show up in terminal output. Use `npm run login` instead, or set `CUBE_API_KEY` / `CUBE_SECRET_KEY` in your shell profile if you need HMAC auth.
 
 ## Available Tools
 
@@ -57,9 +61,12 @@ mcp-server/
 ├── src/
 │   ├── index.ts                # MCP server entry point (stdio transport)
 │   ├── client/
+│   │   ├── mendelev.ts         # WebSocket — real-time market data (no auth)
 │   │   ├── osmium.ts           # WebSocket — real-time order management
-│   │   ├── iridium.ts          # REST — account data, market data, history
-│   │   └── auth.ts             # HMAC-SHA256 API authentication
+│   │   ├── iridium.ts          # REST — account data, market data, orders, DeFi
+│   │   ├── auth.ts             # Auth resolution: verification key > HMAC > credential store
+│   │   ├── signing.ts          # Ed25519 keypair management
+│   │   └── device-auth.ts      # Device login flow (browser-based auth)
 │   ├── tools/
 │   │   ├── orders.ts           # place, cancel, modify, mass cancel
 │   │   ├── market-data.ts      # markets, tickers, candles, fees

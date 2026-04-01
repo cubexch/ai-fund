@@ -16,8 +16,8 @@ describe.skipIf(SKIP)('REST Order Placement (integration)', () => {
 
   it('reaches the order endpoint and gets a structured response', async () => {
     process.env.CUBE_ENV = 'production';
-    process.env.CUBE_API_KEY = '32af925e-1cb8-bfa4-cf67-5b2c3c42c591';
-    process.env.CUBE_SECRET_KEY = '6203b1c7291ed69f5f171a1ec77eaf0a4db0e7b096a59b3e9f92683c7efa6649';
+    // Auth resolved from ~/.cube/credentials.json (device login) or env vars
+    // Never hardcode real secrets — set CUBE_API_KEY + CUBE_SECRET_KEY in your shell if needed
 
     client = new IridiumClient();
 

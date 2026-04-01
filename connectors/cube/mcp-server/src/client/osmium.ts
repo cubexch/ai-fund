@@ -1,6 +1,6 @@
 import { WebSocket } from 'ws';
-import { generateSignature, getCredentials, getEnvironment, getSigningCredentials, getSigningKey } from './auth.js';
-import { signMessage, fromHex } from './signing.js';
+import { fetchAccessToken, getEnvironment, getSigningCredentials, getSigningKey, hasAuth } from './auth.js';
+import { signMessage } from './signing.js';
 import {
   CredentialsMethods,
   OrderRequestMethods,
@@ -50,6 +50,13 @@ const ORDER_TYPE_MAP: Record<string, OrderType> = {
 /**
  * Osmium WebSocket client for Cube Exchange.
  * Uses binary protobuf via @cubexch/client for correct wire format.
+ *
+ * Authentication:
+ * - HMAC env vars (CUBE_API_KEY + CUBE_SECRET_KEY): generates HMAC directly
+ * - Verification key (npm run login): fetches HMAC from Iridium /users/hmac,
+ *   then uses the returned {apiKey, signature, timestamp} for WebSocket auth
+ *
+ * Both paths produce the same Credentials protobuf message on the wire.
  */
 export class OsmiumClient {
   private ws: WebSocket | null = null;
@@ -76,9 +83,16 @@ export class OsmiumClient {
     return this.connected;
   }
 
+  /**
+   * Check if any credentials are available for WebSocket trading.
+   * Supports both HMAC env vars and verification key (from npm run login).
+   */
+  static async canUseWebSocket(): Promise<boolean> {
+    return hasAuth();
+  }
+
   async connect(): Promise<void> {
     if (this.connected) return;
-    // Deduplicate concurrent connect attempts
     if (this.connecting) return this.connecting;
 
     this.connecting = this._connect();
@@ -89,15 +103,15 @@ export class OsmiumClient {
     }
   }
 
-  private _connect(): Promise<void> {
+  private async _connect(): Promise<void> {
     const env = getEnvironment(process.env.CUBE_ENV);
-    const creds = getCredentials();
-    if (!creds) throw new Error('No HMAC credentials available for WebSocket. Set CUBE_API_KEY + CUBE_SECRET_KEY.');
-    const timestamp = Math.floor(Date.now() / 1000);
-    const signature = generateSignature(creds.secretKey, timestamp);
+
+    // Fetch access token via the best available auth method:
+    // - HMAC env vars → generates signature locally
+    // - Verification key → calls Iridium /users/hmac to get HMAC credentials
+    const accessToken = await fetchAccessToken();
 
     return new Promise((resolve, reject) => {
-      // Clean up any previous socket
       if (this.ws) {
         try { this.ws.close(); } catch { /* ignore */ }
         this.ws = null;
@@ -115,11 +129,11 @@ export class OsmiumClient {
       this.ws.binaryType = 'arraybuffer';
 
       this.ws.on('open', () => {
-        // Send protobuf-encoded Credentials
+        // Send protobuf-encoded Credentials using HMAC from access token
         const credMsg: Credentials = {
-          accessKeyId: creds.apiKey,
-          signature,
-          timestamp: BigInt(timestamp),
+          accessKeyId: accessToken.apiKey,
+          signature: accessToken.signature,
+          timestamp: BigInt(accessToken.timestamp),
           flags: 0n,
         };
         const encoded = CredentialsMethods.encode(credMsg).finish();
@@ -164,6 +178,7 @@ export class OsmiumClient {
 
       this.ws.on('close', (code: number, reason: Buffer) => {
         clearTimeout(connectTimeout);
+        const wasConnected = this.connected;
         this.connected = false;
         this.stopHeartbeat();
 
@@ -174,7 +189,7 @@ export class OsmiumClient {
         }
         this.pendingRequests.clear();
 
-        if (!this.connected) {
+        if (!wasConnected) {
           reject(new Error(`WebSocket closed during connect: ${code} ${reason?.toString()}`));
         }
       });
@@ -296,7 +311,7 @@ export class OsmiumClient {
 
   /**
    * Connect to the wallet WebSocket for DeFi intent submission.
-   * Uses the same HMAC credentials as the trade WebSocket.
+   * Uses the same access token flow as the trade WebSocket.
    */
   async connectWallet(): Promise<void> {
     if (this.walletConnected) return;
@@ -310,12 +325,9 @@ export class OsmiumClient {
     }
   }
 
-  private _connectWallet(): Promise<void> {
+  private async _connectWallet(): Promise<void> {
     const env = getEnvironment(process.env.CUBE_ENV);
-    const creds = getCredentials();
-    if (!creds) throw new Error('No HMAC credentials available for WebSocket. Set CUBE_API_KEY + CUBE_SECRET_KEY.');
-    const timestamp = Math.floor(Date.now() / 1000);
-    const signature = generateSignature(creds.secretKey, timestamp);
+    const accessToken = await fetchAccessToken();
     const wsUrl = env.wsTradeUrl.replace('/os', '/os/wallet');
 
     return new Promise((resolve, reject) => {
@@ -337,9 +349,9 @@ export class OsmiumClient {
 
       this.walletWs.on('open', () => {
         const credMsg: Credentials = {
-          accessKeyId: creds.apiKey,
-          signature,
-          timestamp: BigInt(timestamp),
+          accessKeyId: accessToken.apiKey,
+          signature: accessToken.signature,
+          timestamp: BigInt(accessToken.timestamp),
           flags: 0n,
         };
         const encoded = CredentialsMethods.encode(credMsg).finish();
@@ -351,11 +363,9 @@ export class OsmiumClient {
           ? new Uint8Array(data)
           : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
 
-        // During connection, look for bootstrap/positions (initial state)
         if (!this.walletConnected) {
           try {
             const event = WalletEventMethods.decode(bytes);
-            // positions message signals bootstrap complete
             if (event.positions) {
               clearTimeout(connectTimeout);
               this.walletConnected = true;
@@ -364,12 +374,11 @@ export class OsmiumClient {
               return;
             }
           } catch {
-            // Not a wallet event yet — might be bootstrap
+            // Not a wallet event yet
           }
           return;
         }
 
-        // After connected, decode as WalletEvent
         try {
           const event = WalletEventMethods.decode(bytes);
           this.handleWalletEvent(event);
@@ -387,6 +396,7 @@ export class OsmiumClient {
 
       this.walletWs.on('close', (code: number, reason: Buffer) => {
         clearTimeout(connectTimeout);
+        const wasConnected = this.walletConnected;
         this.walletConnected = false;
         this.stopWalletHeartbeat();
 
@@ -396,7 +406,7 @@ export class OsmiumClient {
         }
         this.walletPendingIntents.clear();
 
-        if (!this.walletConnected) {
+        if (!wasConnected) {
           reject(new Error(`Wallet WebSocket closed during connect: ${code} ${reason?.toString()}`));
         }
       });
@@ -428,7 +438,6 @@ export class OsmiumClient {
     const timestamp = BigInt(Math.floor(Date.now() / 1000));
     const verificationKey = new Uint8Array(Buffer.from(signingCreds.verificationKey, 'base64'));
 
-    // Sign the intent bytes
     const sig = await signMessage(params.intentBytes, signingKey);
 
     const intent: NewIntent = {
@@ -455,10 +464,8 @@ export class OsmiumClient {
   }
 
   private startWalletHeartbeat(): void {
-    // Wallet WS may not need heartbeats, but send them for safety
     this.walletHeartbeatInterval = setInterval(() => {
       if (this.walletWs && this.walletConnected) {
-        // Send empty wallet request as heartbeat
         const msg = WalletRequestMethods.encode({}).finish();
         this.walletWs.send(msg);
       }
@@ -473,17 +480,10 @@ export class OsmiumClient {
   }
 
   private handleWalletEvent(event: WalletEvent): void {
-    // Intent preflight ack
     if (event.preflightIntentAck) {
-      const ack = event.preflightIntentAck;
-      const pending = this.walletPendingIntents.get(ack.clientOrderId);
-      if (pending) {
-        // Don't resolve yet — wait for the full intent result
-        // But store the intentId for tracking
-      }
+      // Don't resolve yet — wait for the full intent result
     }
 
-    // Intent preflight reject
     if (event.preflightIntentReject) {
       const reject = event.preflightIntentReject;
       const pending = this.walletPendingIntents.get(reject.clientOrderId);
@@ -494,12 +494,10 @@ export class OsmiumClient {
       }
     }
 
-    // Full intent status update
     if (event.intent) {
       const intent = event.intent;
       const pending = this.walletPendingIntents.get(intent.clientOrderId);
       if (pending) {
-        // Resolve on success or failure
         if (intent.success !== undefined || intent.failureReason !== undefined) {
           this.walletPendingIntents.delete(intent.clientOrderId);
           clearTimeout(pending.timeout);
@@ -562,7 +560,7 @@ export class OsmiumClient {
         }).finish();
         this.ws.send(msg);
       }
-    }, 25_000); // Every 25s (server requires < 30s)
+    }, 25_000);
   }
 
   private stopHeartbeat(): void {
@@ -573,7 +571,6 @@ export class OsmiumClient {
   }
 
   private handleResponse(response: OrderResponse): void {
-    // Extract requestId from any ack/reject
     let requestId: bigint | undefined;
 
     if (response.newAck) {
@@ -591,7 +588,6 @@ export class OsmiumClient {
     } else if (response.modifyReject) {
       requestId = response.modifyReject.requestId;
     }
-    // Fill messages and heartbeats don't have a pending request
 
     if (requestId === undefined) return;
 
@@ -688,9 +684,7 @@ export class OsmiumClient {
 export interface PlaceOrderParams {
   marketId: number;
   side: 'BID' | 'ASK';
-  /** Price in lot units (e.g. human_price / priceTickSize) */
   price?: string;
-  /** Quantity in lot units (e.g. human_qty / quantityTickSize) */
   quantity?: string;
   orderType?: 'LIMIT' | 'MARKET_LIMIT' | 'MARKET_WITH_PROTECTION' | 'STOP_LOSS' | 'STOP_LIMIT';
   timeInForce?: 'IOC' | 'GFS' | 'FOK';
@@ -748,8 +742,8 @@ export interface MassCancelResult {
 
 export interface SubmitIntentParams {
   subaccountId: number;
-  sourceId: number;       // 3 = Solana
-  intentType: number;     // Swap intent type TBD
+  sourceId: number;
+  intentType: number;
   intentBytes: Uint8Array;
 }
 

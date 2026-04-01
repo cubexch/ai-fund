@@ -30,12 +30,13 @@ The trading desk skills understand this. When you `/hire arbitrageur`, it can sc
 
 ### 1. Cube Exchange (default, recommended)
 
-Cube ships built-in. Just add your API keys:
+Cube ships built-in. Authenticate with device login (no API keys needed):
 
 ```bash
-# Get keys at https://cube.exchange → Settings → API Keys
-# Edit .mcp.json and fill in CUBE_API_KEY and CUBE_SECRET_KEY
+cd connectors/cube/mcp-server && npm run login
 ```
+
+This opens your browser, authenticates via Google/Apple, and saves credentials to `~/.cube/credentials.json`.
 
 ### 2. Add OKX
 

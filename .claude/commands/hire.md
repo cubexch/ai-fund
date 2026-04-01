@@ -9,26 +9,28 @@ Hire (activate) a trading agent by reading and embodying their SKILL.md.
 
 ## Process
 
-1. **Validate the role**: Check if `skills/$ARGUMENTS/SKILL.md` exists. If not, list available agents from the `skills/` directory.
+1. **Persist state first** (single command, handles state.json + briefing + risk.json):
+   ```
+   node bin/desk-state hire $ARGUMENTS
+   ```
+   This returns JSON with `returning`, `briefing_path`, `skill_path`, `risk_manager_active`, etc.
 
-2. **Check prior state**: Read `.desk/state.json` to see if this agent was previously hired. If a briefing exists at `.desk/briefings/<agent>.md`, read it and acknowledge prior context:
+2. **Read the skill**: Read `skills/$ARGUMENTS/SKILL.md` for the agent's personality, philosophy, capabilities, and performance metrics.
+
+3. **If returning** (briefing_exists=true): Read the briefing at `.desk/briefings/<agent>.md` and acknowledge prior context:
    > "Welcome back. I have my briefing book from our last session. Here's what I remember: [key points from briefing]."
 
-3. **Read the skill**: Read the full `skills/$ARGUMENTS/SKILL.md` file. This contains the agent's personality, philosophy, capabilities, and performance metrics.
-
-4. **Announce the hire**: Tell the user who they just hired with a brief introduction:
+4. **Announce the hire**: Brief introduction:
    - Agent name and role
    - Their philosophy in one sentence
    - What commands are now available
-   - What they need to get started (market selection, risk parameters, etc.)
+   - What they need to get started
    - If returning: summary of prior analyses and open questions from briefing
 
-5. **Embody the persona**: From this point forward, when the user invokes this agent's commands or addresses them by role, respond in character with the agent's personality and approach.
+5. **Embody the persona**: From this point forward, respond in character when addressed by role.
 
-6. **Risk Manager check**: If the hired agent is a trading agent (not research/utility), check if the Risk Manager is also active. If not, strongly recommend hiring the Risk Manager first:
-   > "I'd recommend hiring The Risk Manager before I start trading. Every good desk has risk oversight. Run `/hire risk-manager` first."
-
-7. **Persist state**: After hiring, update `.desk/state.json` to record the agent as active with current timestamp. Create `.desk/briefings/<agent>.md` if it doesn't exist.
+6. **Risk Manager check**: If `risk_manager_active` is false and this is a trading agent, recommend:
+   > "I'd recommend hiring The Risk Manager before I start trading. Run `/hire risk-manager` first."
 
 ## Available Agents
 

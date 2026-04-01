@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { IridiumClient, Market } from '../client/iridium.js';
+import type { OsmiumClient } from '../client/osmium.js';
 
 /**
  * Convert a human-readable price/quantity to lot units using market tick sizes.
@@ -31,7 +32,7 @@ const ORDER_TYPE_MAP: Record<string, number> = {
   STOP_LIMIT: 4,
 };
 
-export function registerOrderTools(server: McpServer, _osmium: unknown, iridium: IridiumClient) {
+export function registerOrderTools(server: McpServer, osmium: OsmiumClient | null, iridium: IridiumClient) {
   // Cache markets for lot size lookups
   let marketsCache: Market[] | null = null;
   let marketsCacheTime = 0;
@@ -50,7 +51,7 @@ export function registerOrderTools(server: McpServer, _osmium: unknown, iridium:
 
   server.tool(
     'place_order',
-    'Place a new order on Cube Exchange. Prices and quantities are in human-readable units (e.g. price=83.69, quantity=0.0119). Supports LIMIT, MARKET, STOP_LOSS, and STOP_LIMIT order types. Always confirm with the user before placing live orders.',
+    'Place a new order on Cube Exchange. Prices and quantities are in human-readable units (e.g. price=83.69, quantity=0.0119). Supports LIMIT, MARKET, STOP_LOSS, and STOP_LIMIT order types. Uses WebSocket when available for faster execution, falls back to REST. Always confirm with the user before placing live orders. Requires login.',
     {
       marketId: z.number().describe('Market ID to trade on'),
       side: z.enum(['BID', 'ASK']).describe('BID (buy) or ASK (sell)'),
@@ -80,6 +81,54 @@ export function registerOrderTools(server: McpServer, _osmium: unknown, iridium:
           ? toLots(params.stopPrice, market.priceTickSize)
           : undefined;
 
+        // Try WebSocket (Osmium) first for faster execution
+        if (osmium) {
+          try {
+            // Auto-discover subaccount if needed
+            if (!osmium.isConnected) {
+              const subId = await iridium.getDefaultSubaccountId();
+              osmium.setSubaccountId(subId);
+            }
+
+            const wsResult = await osmium.placeOrder({
+              marketId: params.marketId,
+              side: params.side,
+              price: priceLots !== undefined ? String(priceLots) : undefined,
+              quantity: String(quantityLots),
+              orderType: params.orderType,
+              timeInForce: params.timeInForce,
+              postOnly: params.postOnly,
+              cancelOnDisconnect: false,
+              stopPrice: stopPriceLots !== undefined ? String(stopPriceLots) : undefined,
+            });
+
+            const humanPrice = wsResult.price ? fromLots(Number(wsResult.price), market.priceTickSize) : params.price;
+            const humanQty = fromLots(Number(wsResult.quantity), market.quantityTickSize);
+
+            return {
+              content: [{
+                type: 'text' as const,
+                text: JSON.stringify({
+                  status: 'placed',
+                  via: 'websocket',
+                  clientOrderId: wsResult.clientOrderId,
+                  exchangeOrderId: wsResult.exchangeOrderId,
+                  market: market.symbol,
+                  marketId: wsResult.marketId,
+                  side: wsResult.side,
+                  price: humanPrice,
+                  quantity: humanQty,
+                  orderType: params.orderType,
+                  transactTime: wsResult.transactTime,
+                }, null, 2),
+              }],
+            };
+          } catch (wsError: any) {
+            // WebSocket failed — fall through to REST
+          }
+        }
+
+        // REST fallback via Iridium → Osmium REST API
         const result = await iridium.placeOrderRest({
           marketId: params.marketId,
           side: SIDE_MAP[params.side],
@@ -92,7 +141,6 @@ export function registerOrderTools(server: McpServer, _osmium: unknown, iridium:
           stopPrice: stopPriceLots,
         });
 
-        // Convert lot values back to human-readable for the response
         const humanPrice = result.price ? fromLots(result.price, market.priceTickSize) : params.price;
         const humanQty = fromLots(result.quantity, market.quantityTickSize);
 
@@ -103,6 +151,7 @@ export function registerOrderTools(server: McpServer, _osmium: unknown, iridium:
               text: JSON.stringify(
                 {
                   status: 'placed',
+                  via: 'rest',
                   clientOrderId: result.clientOrderId,
                   exchangeOrderId: result.exchangeOrderId,
                   market: market.symbol,
@@ -135,13 +184,31 @@ export function registerOrderTools(server: McpServer, _osmium: unknown, iridium:
 
   server.tool(
     'cancel_order',
-    'Cancel a specific resting order by its client order ID.',
+    'Cancel a specific resting order by its client order ID. Requires login.',
     {
       marketId: z.number().describe('Market ID the order is on'),
       clientOrderId: z.number().describe('Client-assigned order ID to cancel'),
     },
     async params => {
       try {
+        // Try WebSocket first
+        if (osmium?.isConnected) {
+          try {
+            const wsResult = await osmium.cancelOrder({
+              marketId: params.marketId,
+              clientOrderId: String(params.clientOrderId),
+            });
+            return {
+              content: [{
+                type: 'text' as const,
+                text: JSON.stringify({ status: 'cancelled', via: 'websocket', ...wsResult }, null, 2),
+              }],
+            };
+          } catch {
+            // Fall through to REST
+          }
+        }
+
         const result = await iridium.cancelOrderRest({
           marketId: params.marketId,
           clientOrderId: params.clientOrderId,
@@ -151,7 +218,7 @@ export function registerOrderTools(server: McpServer, _osmium: unknown, iridium:
           content: [
             {
               type: 'text' as const,
-              text: JSON.stringify({ status: 'cancelled', ...result as object }, null, 2),
+              text: JSON.stringify({ status: 'cancelled', via: 'rest', ...result as object }, null, 2),
             },
           ],
         };
@@ -171,7 +238,7 @@ export function registerOrderTools(server: McpServer, _osmium: unknown, iridium:
 
   server.tool(
     'modify_order',
-    "Modify an existing resting order's price and/or quantity. Values in human-readable units.",
+    "Modify an existing resting order's price and/or quantity. Values in human-readable units. Requires login.",
     {
       marketId: z.number().describe('Market ID the order is on'),
       clientOrderId: z.number().describe('Client-assigned order ID to modify'),
@@ -182,6 +249,29 @@ export function registerOrderTools(server: McpServer, _osmium: unknown, iridium:
     async params => {
       try {
         const market = await getMarket(params.marketId);
+
+        // Try WebSocket first
+        if (osmium?.isConnected) {
+          try {
+            const wsResult = await osmium.modifyOrder({
+              marketId: params.marketId,
+              clientOrderId: String(params.clientOrderId),
+              newPrice: params.newPrice !== undefined
+                ? String(toLots(params.newPrice, market.priceTickSize))
+                : undefined,
+              newQuantity: String(toLots(params.newQuantity, market.quantityTickSize)),
+              postOnly: params.postOnly,
+            });
+            return {
+              content: [{
+                type: 'text' as const,
+                text: JSON.stringify({ ...wsResult, status: 'modified', via: 'websocket' }, null, 2),
+              }],
+            };
+          } catch {
+            // Fall through to REST
+          }
+        }
 
         const result = await iridium.modifyOrderRest({
           marketId: params.marketId,
@@ -197,7 +287,7 @@ export function registerOrderTools(server: McpServer, _osmium: unknown, iridium:
           content: [
             {
               type: 'text' as const,
-              text: JSON.stringify({ status: 'modified', ...result as object }, null, 2),
+              text: JSON.stringify({ status: 'modified', via: 'rest', ...result as object }, null, 2),
             },
           ],
         };
@@ -217,13 +307,37 @@ export function registerOrderTools(server: McpServer, _osmium: unknown, iridium:
 
   server.tool(
     'mass_cancel',
-    'Cancel all resting orders. Optionally filter by market and/or side.',
+    'Cancel all resting orders. Optionally filter by market and/or side. Requires login.',
     {
       marketId: z.number().optional().describe('Market ID to cancel on (omit for all markets)'),
       side: z.enum(['BID', 'ASK']).optional().describe('Side to cancel (omit for both sides)'),
     },
     async params => {
       try {
+        // Try WebSocket first
+        if (osmium?.isConnected) {
+          try {
+            const wsResult = await osmium.massCancel({
+              marketId: params.marketId,
+              side: params.side,
+            });
+            return {
+              content: [{
+                type: 'text' as const,
+                text: JSON.stringify({
+                  status: 'mass_cancelled',
+                  via: 'websocket',
+                  marketId: params.marketId ?? 'all',
+                  side: params.side ?? 'both',
+                  ...wsResult,
+                }, null, 2),
+              }],
+            };
+          } catch {
+            // Fall through to REST
+          }
+        }
+
         const result = await iridium.massCancelRest({
           marketId: params.marketId,
           side: params.side !== undefined ? SIDE_MAP[params.side] : undefined,
@@ -236,6 +350,7 @@ export function registerOrderTools(server: McpServer, _osmium: unknown, iridium:
               text: JSON.stringify(
                 {
                   status: 'mass_cancelled',
+                  via: 'rest',
                   marketId: params.marketId ?? 'all',
                   side: params.side ?? 'both',
                   ...result as object,

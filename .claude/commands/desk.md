@@ -9,9 +9,9 @@ Show a comprehensive dashboard of the trader's current desk.
 ## What to Display
 
 ### 0. Load Desk State
-- Read `.desk/state.json` to load previously hired agents and their status
-- Read `.desk/orders.json` to load pending/recent order history
-- Read `.desk/risk.json` to load risk parameters
+- Run `node bin/desk-state show` to load all desk state in one call
+- Read `.desk/orders.json` for pending/recent order history
+- Read `.desk/risk.json` for risk parameters
 - For each active agent, read `.desk/briefings/<agent>.md` to load their briefing book
 - Show a "Returning desk" summary if agents were previously hired:
   > "Loaded desk from last session (2026-03-31). 4 agents active. 4 orders in log."

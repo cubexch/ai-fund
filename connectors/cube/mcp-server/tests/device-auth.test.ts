@@ -11,6 +11,7 @@ import {
   type DeviceTokenResponse,
   type CallbackServer,
 } from '../src/client/device-auth.js';
+import { generateKeyPair } from '../src/client/signing.js';
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -160,6 +161,56 @@ describe('requestDeviceCode', () => {
       }, fetchFn),
     ).rejects.toThrow(DeviceAuthError);
   });
+
+  it('extracts error from nested { error: { error: { reason } } } format', async () => {
+    const fetchFn = mockFetch([{
+      status: 400,
+      body: { error: { error: { reason: 'invalid_verification_key' } } },
+    }]);
+
+    try {
+      await requestDeviceCode('https://api.cube.exchange/ir/v0', {
+        verificationKey: 'garbage',
+        clientName: 'Test',
+      }, fetchFn);
+      expect.fail('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DeviceAuthError);
+      expect((err as DeviceAuthError).code).toBe('invalid_verification_key');
+    }
+  });
+
+  it('extracts error from double-wrapped JSON string format', async () => {
+    const fetchFn = mockFetch([{
+      status: 400,
+      body: { error: JSON.stringify({ error: { reason: 'invalid_client_name' } }) },
+    }]);
+
+    try {
+      await requestDeviceCode('https://api.cube.exchange/ir/v0', {
+        verificationKey: 'base64key==',
+        clientName: '',
+      }, fetchFn);
+      expect.fail('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DeviceAuthError);
+      expect((err as DeviceAuthError).code).toBe('invalid_client_name');
+    }
+  });
+
+  it('unwraps response from { result: ... } envelope', async () => {
+    const fetchFn = mockFetch([{
+      status: 200,
+      body: { result: MOCK_DEVICE_CODE_RESPONSE },
+    }]);
+
+    const result = await requestDeviceCode('https://api.cube.exchange/ir/v0', {
+      verificationKey: 'base64key==',
+      clientName: 'Test',
+    }, fetchFn);
+
+    expect(result.deviceCode).toBe(MOCK_DEVICE_CODE_RESPONSE.deviceCode);
+  });
 });
 
 // ── requestDeviceToken ───────────────────────────────────────
@@ -231,6 +282,21 @@ describe('requestDeviceToken', () => {
       expect(err).toBeInstanceOf(DeviceAuthError);
       expect((err as DeviceAuthError).code).toBe('slow_down');
     }
+  });
+
+  it('unwraps response from { result: ... } envelope', async () => {
+    const fetchFn = mockFetch([{
+      status: 200,
+      body: { result: MOCK_TOKEN_RESPONSE },
+    }]);
+
+    const result = await requestDeviceToken(
+      'https://api.cube.exchange/ir/v0',
+      { deviceCode: 'abc123' },
+      fetchFn,
+    );
+
+    expect(result.verificationKeyId).toBe(MOCK_TOKEN_RESPONSE.verificationKeyId);
   });
 });
 
@@ -789,5 +855,51 @@ describe('deviceAuthFlow', () => {
     ).rejects.toThrow(DeviceAuthError);
 
     stdoutSpy.mockRestore();
+  });
+
+  it('reuses existingKeyPair instead of generating a new one', async () => {
+    const existingKeyPair = await generateKeyPair();
+    const existingPubHex = Buffer.from(existingKeyPair.publicKey).toString('hex');
+
+    const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
+      const urlStr = url.toString();
+
+      if (urlStr.includes('/agent/device/code')) {
+        return mockResponse(200, MOCK_HEADLESS_CODE_RESPONSE);
+      }
+
+      if (urlStr.includes('/agent/device/token')) {
+        return mockResponse(200, MOCK_TOKEN_RESPONSE);
+      }
+
+      return mockResponse(404, {});
+    });
+
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    const result = await deviceAuthFlow({
+      apiBase: 'https://api.cube.exchange/ir/v0',
+      clientName: 'AI Fund',
+      headless: true,
+      openBrowser: vi.fn(),
+      log: vi.fn(),
+      fetch: fetchFn as typeof globalThis.fetch,
+      existingKeyPair,
+    });
+
+    stdoutSpy.mockRestore();
+
+    // The returned keypair should be the same object we passed in
+    expect(result.keyPair).toBe(existingKeyPair);
+    expect(Buffer.from(result.keyPair.publicKey).toString('hex')).toBe(existingPubHex);
+    expect(result.verificationKeyId).toBe(MOCK_TOKEN_RESPONSE.verificationKeyId);
+
+    // The verification key in the device code request should use the existing public key
+    const codeCallBody = JSON.parse(fetchFn.mock.calls[0][1]?.body as string);
+    expect(codeCallBody.verificationKey).toBeTruthy();
+    // Decode the base64 verification key and check it contains our public key bytes
+    const vkBytes = Buffer.from(codeCallBody.verificationKey, 'base64');
+    const pubKeyInVk = vkBytes.subarray(2, 34); // protobuf field 1: tag(1 byte) + length(1 byte) + 32 bytes
+    expect(Buffer.from(existingKeyPair.publicKey).equals(pubKeyInVk)).toBe(true);
   });
 });

@@ -1,4 +1,4 @@
-import { buildAuthHeaders, getEnvironment, resetAuth } from './auth.js';
+import { buildAuthHeaders, getEnvironment, resetAuth, fetchAccessToken, type AccessToken } from './auth.js';
 import { ASSET_ICONS } from '../../../../../lib/format.js';
 
 // ── Asset Registry ────────────────────────────────────────
@@ -19,10 +19,6 @@ export class AssetRegistry {
 
   buildFromMarkets(markets: Market[]): void {
     for (const m of markets) {
-      // Parse base/quote from symbol like "BTCUSDC"
-      // Cube tickers use format: parsed/tickers returns base_currency + quote_currency
-      // But markets only have symbol + assetIds — we need tickers to get the split
-      // Use a heuristic: quote is always USDC (or ends with known quote)
       const symbol = m.symbol;
       const quoteAssets = ['USDC', 'USDT'];
       let base = symbol;
@@ -76,9 +72,19 @@ export class AssetRegistry {
 /**
  * Iridium REST client for Cube Exchange.
  *
- * Two base URLs:
+ * Three base URLs:
  * - restUrl (/ir/v0): markets, klines, authenticated account endpoints
  * - mdRestUrl (/md): parsed tickers, order book snapshots, recent trades
+ * - osRestUrl (/os/v0): order placement, cancellation, modification
+ *
+ * Auth requirements:
+ * - PUBLIC (no auth): markets, tickers, order book, recent trades, klines, token search
+ * - AUTHENTICATED (HMAC or verification key): positions, orders, fills, fees, subaccounts
+ * - AUTHENTICATED (for Osmium REST): place/cancel/modify orders
+ *
+ * When using verification key auth (from `npm run login`):
+ * - Iridium endpoints: fetches HMAC via /users/hmac bridge, then uses HMAC
+ * - Osmium endpoints: uses Ed25519 verification key headers directly
  */
 export class IridiumClient {
   private baseUrl: string;
@@ -94,7 +100,6 @@ export class IridiumClient {
     this.baseUrl = env.restUrl;
     this.mdBaseUrl = env.mdRestUrl;
     this.osBaseUrl = env.osRestUrl;
-    // Reset auth cache so env vars set after import are picked up
     resetAuth();
   }
 
@@ -120,13 +125,14 @@ export class IridiumClient {
   /**
    * Auto-discover the default subaccount ID from the API.
    * Fetches once on first authenticated call, then caches.
+   * REQUIRES AUTH.
    */
   async getDefaultSubaccountId(): Promise<number> {
     if (this._subaccountId !== null) return this._subaccountId;
 
     if (!this._subaccountPromise) {
       this._subaccountPromise = this.request<SubaccountIds>(
-        '/users/subaccounts', {}, { authenticated: true }
+        '/users/subaccounts', {}, { authenticated: 'iridium' }
       ).then(result => {
         if (!result.ids || result.ids.length === 0) {
           throw new Error('No subaccounts found for this API key.');
@@ -139,10 +145,22 @@ export class IridiumClient {
     return this._subaccountPromise;
   }
 
+  /**
+   * Fetch HMAC access token for Osmium WebSocket authentication.
+   * Uses verification key → HMAC bridge when needed.
+   */
+  async getAccessToken(): Promise<AccessToken> {
+    return fetchAccessToken();
+  }
+
   private async request<T>(
     path: string,
     options: RequestInit = {},
-    opts: { authenticated?: boolean; useMd?: boolean; useOs?: boolean } = {}
+    opts: {
+      authenticated?: false | 'iridium' | 'osmium';
+      useMd?: boolean;
+      useOs?: boolean;
+    } = {}
   ): Promise<T> {
     const base = opts.useOs ? this.osBaseUrl : opts.useMd ? this.mdBaseUrl : this.baseUrl;
     const url = `${base}${path}`;
@@ -151,7 +169,8 @@ export class IridiumClient {
     };
 
     if (opts.authenticated) {
-      const authHeaders = await buildAuthHeaders();
+      const target = opts.authenticated === 'iridium' ? 'iridium' : 'osmium';
+      const authHeaders = await buildAuthHeaders(target);
       if (Object.keys(authHeaders).length === 0) {
         throw new Error(
           'No credentials available. Run `npm run login` to authenticate, ' +
@@ -176,14 +195,14 @@ export class IridiumClient {
     return (json.result ?? json) as T;
   }
 
-  // ── Markets (public, /ir/v0) ────────────────────────────
+  // ── PUBLIC: Markets (/ir/v0, no auth) ──────────────────
 
   async getMarkets(): Promise<Market[]> {
     const data = await this.request<{ markets: Market[] }>('/markets');
     return data.markets;
   }
 
-  // ── Tickers (public, /md) ──────────────────────────────
+  // ── PUBLIC: Tickers (/md, no auth) ─────────────────────
 
   async getTickers(): Promise<Ticker[]> {
     const parsed = await this.request<ParsedTicker[]>('/parsed/tickers', {}, { useMd: true });
@@ -208,7 +227,7 @@ export class IridiumClient {
     }));
   }
 
-  // ── Order Book (public, /md) ────────────────────────────
+  // ── PUBLIC: Order Book (/md, no auth) ──────────────────
 
   async getOrderBook(marketSymbol: string): Promise<ParsedOrderBook> {
     return this.request<ParsedOrderBook>(
@@ -216,7 +235,7 @@ export class IridiumClient {
     );
   }
 
-  // ── Recent Trades (public, /md) ─────────────────────────
+  // ── PUBLIC: Recent Trades (/md, no auth) ───────────────
 
   async getRecentTrades(marketSymbol: string): Promise<ParsedRecentTrades> {
     return this.request<ParsedRecentTrades>(
@@ -224,7 +243,7 @@ export class IridiumClient {
     );
   }
 
-  // ── Price History (public, /ir/v0) ──────────────────────
+  // ── PUBLIC: Price History (/ir/v0, no auth) ────────────
 
   async getPriceHistory(marketId: number, interval: string = '1h', limit: number = 100): Promise<Kline[]> {
     const raw = await this.request<number[][]>(
@@ -241,19 +260,19 @@ export class IridiumClient {
     }));
   }
 
-  // ── Account (authenticated, /ir/v0) ────────────────────
+  // ── AUTHENTICATED: Account (/ir/v0, requires login) ───
 
   async getSubaccounts(): Promise<SubaccountIds> {
-    return this.request<SubaccountIds>('/users/subaccounts', {}, { authenticated: true });
+    return this.request<SubaccountIds>('/users/subaccounts', {}, { authenticated: 'iridium' });
   }
 
   async getPositions(subaccountId: number): Promise<Record<string, PositionGroup>> {
     return this.request<Record<string, PositionGroup>>(
-      `/users/subaccount/${subaccountId}/positions`, {}, { authenticated: true }
+      `/users/subaccount/${subaccountId}/positions`, {}, { authenticated: 'iridium' }
     );
   }
 
-  // ── Order History (authenticated, /ir/v0) ───────────────
+  // ── AUTHENTICATED: Order History (/ir/v0, requires login)
 
   async getOrderHistory(
     subaccountId: number,
@@ -264,7 +283,7 @@ export class IridiumClient {
     if (params.limit) qs.set('limit', String(params.limit));
     const query = qs.toString() ? `?${qs}` : '';
     return this.request<HistoricalOrder[]>(
-      `/users/subaccount/${subaccountId}/orders${query}`, {}, { authenticated: true }
+      `/users/subaccount/${subaccountId}/orders${query}`, {}, { authenticated: 'iridium' }
     );
   }
 
@@ -274,11 +293,11 @@ export class IridiumClient {
     if (params.limit) qs.set('limit', String(params.limit));
     const query = qs.toString() ? `?${qs}` : '';
     return this.request<Fill[]>(
-      `/users/subaccount/${subaccountId}/fills${query}`, {}, { authenticated: true }
+      `/users/subaccount/${subaccountId}/fills${query}`, {}, { authenticated: 'iridium' }
     );
   }
 
-  // ── Fees (authenticated, /ir/v0) ────────────────────────
+  // ── AUTHENTICATED: Fees (/ir/v0, requires login) ──────
 
   async getEstimatedFees(
     subaccountId: number,
@@ -302,11 +321,11 @@ export class IridiumClient {
     return this.request<FeeEstimate>(
       '/users/fee-estimates',
       { method: 'POST', body: JSON.stringify(body) },
-      { authenticated: true }
+      { authenticated: 'iridium' }
     );
   }
 
-  // ── Orders (authenticated, /os/v0) ─────────────────────
+  // ── AUTHENTICATED: Orders (/os/v0, requires login) ────
 
   async placeOrderRest(params: RestOrderParams): Promise<RestOrderResponse> {
     const subaccountId = params.subaccountId ?? await this.getDefaultSubaccountId();
@@ -315,11 +334,11 @@ export class IridiumClient {
       requestId: params.requestId ?? Date.now() + 1,
       marketId: params.marketId,
       subaccountId,
-      side: params.side,       // 0 = BID, 1 = ASK
-      orderType: params.orderType ?? 0,  // 0 = LIMIT
+      side: params.side,
+      orderType: params.orderType ?? 0,
       price: params.price,
       quantity: params.quantity,
-      timeInForce: params.timeInForce ?? 1,  // 1 = GFS
+      timeInForce: params.timeInForce ?? 1,
       postOnly: params.postOnly ?? 0,
       cancelOnDisconnect: params.cancelOnDisconnect ?? false,
       ...(params.quoteQuantity !== undefined && { quoteQuantity: params.quoteQuantity }),
@@ -329,7 +348,7 @@ export class IridiumClient {
     return this.request<RestOrderResponse>(
       '/order',
       { method: 'POST', body: JSON.stringify(body) },
-      { authenticated: true, useOs: true }
+      { authenticated: 'osmium', useOs: true }
     );
   }
 
@@ -346,7 +365,7 @@ export class IridiumClient {
           requestId: Date.now(),
         }),
       },
-      { authenticated: true, useOs: true }
+      { authenticated: 'osmium', useOs: true }
     );
   }
 
@@ -373,7 +392,7 @@ export class IridiumClient {
           postOnly: params.postOnly ?? 0,
         }),
       },
-      { authenticated: true, useOs: true }
+      { authenticated: 'osmium', useOs: true }
     );
   }
 
@@ -390,11 +409,11 @@ export class IridiumClient {
           ...(params.side !== undefined && { side: params.side }),
         }),
       },
-      { authenticated: true, useOs: true }
+      { authenticated: 'osmium', useOs: true }
     );
   }
 
-  // ── DeFi Swap (authenticated, /ir/v0) ──────────────────
+  // ── AUTHENTICATED: DeFi Swap (/ir/v0, requires login) ─
 
   async getSwapEstimate(params: {
     tokenIn: string;
@@ -416,10 +435,37 @@ export class IridiumClient {
     return this.request<SwapEstimateResponse>(
       '/wallet/solana/swap/estimate',
       { method: 'POST', body: JSON.stringify(body) },
-      { authenticated: true }
+      { authenticated: 'iridium' }
     );
   }
 
+  /**
+   * Submit a signed intent via REST POST /wallet/submit.
+   * REQUIRES AUTH (Iridium verification key + Ed25519 signature).
+   */
+  async submitIntent(params: SubmitIntentRequest): Promise<IntentSubmitResponse> {
+    return this.request<IntentSubmitResponse>(
+      '/wallet/submit',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          subaccountId: params.subaccountId,
+          sourceId: params.sourceId,
+          intentType: params.intentType,
+          intentBytes: params.intentBytes,
+          clientOrderId: params.clientOrderId,
+          dryRun: params.dryRun ?? false,
+          signatureInfo: params.signatureInfo,
+        }),
+      },
+      { authenticated: 'iridium' }
+    );
+  }
+
+  /**
+   * Execute a DeFi swap. Uses /wallet/solana/swap/execute REST endpoint.
+   * REQUIRES AUTH.
+   */
   async executeSwap(params: {
     tokenIn: string;
     tokenOut: string;
@@ -437,15 +483,14 @@ export class IridiumClient {
     if (params.amountIn != null) body.amountIn = params.amountIn;
     if (params.amountOut != null) body.amountOut = params.amountOut;
 
-    // Try the most likely execute endpoint
     return this.request(
       '/wallet/solana/swap/execute',
       { method: 'POST', body: JSON.stringify(body) },
-      { authenticated: true }
+      { authenticated: 'iridium' }
     );
   }
 
-  // ── Token Search (public, cube.exchange) ───────────────
+  // ── PUBLIC: Token Search (cube.exchange, no auth) ─────
 
   async searchTokens(query: string, limit: number = 10): Promise<TokenSearchResult[]> {
     const url = `https://www.cube.exchange/api/markets/search?query=${encodeURIComponent(query)}`;
@@ -644,12 +689,12 @@ export interface SwapEstimateResponse {
 
 export interface RestOrderParams {
   marketId: number;
-  side: number;        // 0 = BID, 1 = ASK
-  price?: number;      // In lot units
-  quantity?: number;    // In lot units
-  orderType?: number;   // 0 = LIMIT, 1 = MARKET_LIMIT, 2 = MARKET_WITH_PROTECTION
-  timeInForce?: number; // 0 = IOC, 1 = GFS, 2 = FOK
-  postOnly?: number;    // 0 = disabled, 1 = enabled
+  side: number;
+  price?: number;
+  quantity?: number;
+  orderType?: number;
+  timeInForce?: number;
+  postOnly?: number;
   cancelOnDisconnect?: boolean;
   subaccountId?: number;
   clientOrderId?: number;
@@ -671,4 +716,38 @@ export interface RestOrderResponse {
   requestId: number;
   transactTime: number;
   msgSeqNum: number;
+}
+
+// ── Intent / DeFi Types ────────────────────────────────────
+
+export const IntentType = {
+  SolanaSwapIn: 12,
+  SolanaSwapOut: 13,
+  SolanaTransfer: 16,
+} as const;
+
+export const SourceId = {
+  Solana: 203,
+} as const;
+
+export interface IntentSignatureInfo {
+  timestamp: number;
+  verificationKey: string;
+  signature: string;
+}
+
+export interface SubmitIntentRequest {
+  subaccountId: number;
+  sourceId: number;
+  intentType: number;
+  intentBytes: string;
+  clientOrderId: number;
+  signatureInfo: IntentSignatureInfo;
+  dryRun?: boolean;
+}
+
+export interface IntentSubmitResponse {
+  state: 'Initiated' | 'NeedsMfa';
+  intentId?: number;
+  [key: string]: unknown;
 }

@@ -3,6 +3,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { IridiumClient } from './client/iridium.js';
+import { OsmiumClient } from './client/osmium.js';
+import { MendelevClient } from './client/mendelev.js';
+import { resolveAuth } from './client/auth.js';
 import { registerMarketResources } from './resources/markets.js';
 import { registerPortfolioResources } from './resources/portfolio.js';
 import { registerAccountTools } from './tools/account.js';
@@ -16,20 +19,61 @@ const server = new McpServer({
   version: '0.1.0',
 });
 
-// Initialize client — REST-based for both reads and order placement
+// ── Initialize clients ──────────────────────────────────────
+
+// Iridium: REST API for markets, account, orders (fallback)
 const iridium = new IridiumClient();
 
-// Register tools (orders use REST API via iridium, no WebSocket needed)
-registerOrderTools(server, null, iridium);
-registerMarketDataTools(server, iridium);
-registerAccountTools(server, iridium);
-registerRiskTools(server, iridium);
-registerDefiTools(server, iridium);
+// Mendelev: WebSocket market data — NO AUTH REQUIRED
+// Connects on startup so market data is available immediately
+const mendelev = new MendelevClient();
 
-// Register resources
+// Osmium: WebSocket trading — uses verification key or HMAC auth
+// Connects lazily on first trade (requires auth)
+const osmium = new OsmiumClient();
+
+// ── Resolve auth and log status (never expose secrets) ─────
+
+resolveAuth().then(auth => {
+  if (auth?.type === 'signing') {
+    process.stderr.write('[cube] Auth: verification key (Ed25519)\n');
+  } else if (auth?.type === 'hmac') {
+    process.stderr.write('[cube] Auth: HMAC (API key)\n');
+  } else {
+    process.stderr.write('[cube] Auth: none — run `npm run login` in connectors/cube/mcp-server to authenticate\n');
+  }
+}).catch(() => {});
+
+// ── Connect market data WebSocket (no auth, non-blocking) ───
+
+mendelev.connectTops().catch(() => {
+  // Tops connection failed — will auto-reconnect.
+  // Market data tools fall back to REST via Iridium.
+});
+
+// ── Register tools ──────────────────────────────────────────
+
+// Orders: WebSocket via Osmium (preferred), REST via Iridium (fallback)
+registerOrderTools(server, osmium, iridium);
+
+// Market data: WebSocket via Mendelev (real-time), REST via Iridium (fallback)
+registerMarketDataTools(server, iridium, mendelev);
+
+// Account: REST via Iridium (requires auth)
+registerAccountTools(server, iridium);
+
+// Risk: REST via Iridium (requires auth for positions)
+registerRiskTools(server, iridium);
+
+// DeFi: REST via Iridium + WebSocket via Osmium wallet (requires auth)
+registerDefiTools(server, iridium, osmium);
+
+// ── Register resources ──────────────────────────────────────
+
 registerMarketResources(server, iridium);
 registerPortfolioResources(server, iridium);
 
-// Start server
+// ── Start server ────────────────────────────────────────────
+
 const transport = new StdioServerTransport();
 await server.connect(transport);

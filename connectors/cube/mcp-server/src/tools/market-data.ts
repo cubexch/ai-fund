@@ -1,15 +1,16 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { IridiumClient } from '../client/iridium.js';
+import type { MendelevClient } from '../client/mendelev.js';
 import { sma, ema, rsi, macd, bollingerBands, atr, adx, obv, stochastic } from '../../../../../lib/indicators.js';
 import type { OHLCV } from '../../../../../lib/indicators.js';
 
-export function registerMarketDataTools(server: McpServer, iridium: IridiumClient) {
+export function registerMarketDataTools(server: McpServer, iridium: IridiumClient, mendelev?: MendelevClient) {
   const defaultSubaccountId = () => iridium.getDefaultSubaccountId();
 
   server.tool(
     'get_markets',
-    'List all available markets on Cube Exchange with their trading pairs, lot sizes, tick sizes, and status.',
+    'List all available markets on Cube Exchange with their trading pairs, lot sizes, tick sizes, and status. No login required.',
     {},
     async () => {
       try {
@@ -33,11 +34,48 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
 
   server.tool(
     'get_tickers',
-    'Get real-time parsed ticker data for all markets: last price, bid/ask, 24h volume, 24h high/low/open, and 24h change %.',
+    'Get real-time ticker data for all markets: last price, bid/ask, 24h volume, 24h high/low/open, and 24h change %. No login required. Uses WebSocket for real-time data when available.',
     {},
     async () => {
       try {
+        // If mendelev tops WebSocket is connected, augment REST data with real-time tops
         const tickers = await iridium.getTickers();
+
+        if (mendelev?.isTopsConnected) {
+          const tops = mendelev.getTops();
+          if (tops.length > 0) {
+            // Get markets to map marketId → symbol
+            const markets = await iridium.getMarkets();
+            const marketMap = new Map(markets.map(m => [m.marketId, m]));
+
+            for (const top of tops) {
+              const market = marketMap.get(top.marketId);
+              if (!market) continue;
+
+              const ticker = tickers.find(t => t.symbol === market.symbol);
+              if (ticker && top.lastPrice !== null) {
+                // WebSocket tops have raw lot prices — convert using tick size
+                const tickSize = parseFloat(market.priceTickSize);
+                if (tickSize > 0) {
+                  const wsLastPrice = Number(top.lastPrice) * tickSize;
+                  const wsBidPrice = top.bidPrice !== null ? Number(top.bidPrice) * tickSize : null;
+                  const wsAskPrice = top.askPrice !== null ? Number(top.askPrice) * tickSize : null;
+
+                  // Update with real-time WebSocket values
+                  ticker.lastPrice = wsLastPrice;
+                  if (wsBidPrice !== null) ticker.bidPrice = wsBidPrice;
+                  if (wsAskPrice !== null) ticker.askPrice = wsAskPrice;
+
+                  // Recalculate 24h change with updated price
+                  if (ticker.open24h && ticker.lastPrice) {
+                    ticker.change24h = ((ticker.lastPrice - ticker.open24h) / ticker.open24h) * 100;
+                  }
+                }
+              }
+            }
+          }
+        }
+
         return {
           content: [
             {
@@ -57,12 +95,48 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
 
   server.tool(
     'get_order_book',
-    'Get the current order book (bids and asks with prices and quantities) for a market. Prices and quantities are in human-readable units.',
+    'Get the current order book (bids and asks with prices and quantities) for a market. No login required. Uses WebSocket for real-time data when subscribed.',
     {
       marketSymbol: z.string().describe('Market symbol, e.g. "BTCUSDC", "ETHUSDC", "SOLUSDC"'),
     },
     async params => {
       try {
+        // Try WebSocket first if we have a subscription
+        if (mendelev) {
+          const markets = await iridium.getMarkets();
+          const market = markets.find(m => m.symbol === params.marketSymbol);
+          if (market && mendelev.isSubscribed(market.marketId)) {
+            const book = mendelev.getOrderBook(market.marketId);
+            if (book) {
+              const tickSize = parseFloat(market.priceTickSize);
+              const qtyTick = parseFloat(market.quantityTickSize);
+              return {
+                content: [{
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    ticker_id: params.marketSymbol,
+                    source: 'websocket',
+                    bids: book.bids.slice(0, 20).map(l => [
+                      Number(l.price) * tickSize,
+                      Number(l.quantity) * qtyTick,
+                    ]),
+                    asks: book.asks.slice(0, 20).map(l => [
+                      Number(l.price) * tickSize,
+                      Number(l.quantity) * qtyTick,
+                    ]),
+                  }, null, 2),
+                }],
+              };
+            }
+          }
+
+          // Auto-subscribe for future calls (non-blocking)
+          if (market && !mendelev.isSubscribed(market.marketId)) {
+            mendelev.subscribe(market.marketId).catch(() => {});
+          }
+        }
+
+        // Fall back to REST
         const book = await iridium.getOrderBook(params.marketSymbol);
         return {
           content: [
@@ -83,12 +157,42 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
 
   server.tool(
     'get_recent_trades',
-    'Get recent trades for a market. Shows trade price, volume, timestamp, and side (buy/sell).',
+    'Get recent trades for a market. Shows trade price, volume, timestamp, and side (buy/sell). No login required.',
     {
       marketSymbol: z.string().describe('Market symbol, e.g. "BTCUSDC", "ETHUSDC", "SOLUSDC"'),
     },
     async params => {
       try {
+        // Try WebSocket first if subscribed
+        if (mendelev) {
+          const markets = await iridium.getMarkets();
+          const market = markets.find(m => m.symbol === params.marketSymbol);
+          if (market && mendelev.isSubscribed(market.marketId)) {
+            const trades = mendelev.getRecentTrades(market.marketId);
+            if (trades.length > 0) {
+              const tickSize = parseFloat(market.priceTickSize);
+              const qtyTick = parseFloat(market.quantityTickSize);
+              return {
+                content: [{
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    ticker_id: params.marketSymbol,
+                    source: 'websocket',
+                    trades: trades.map(t => ({
+                      id: t.tradeId,
+                      p: Number(t.price) * tickSize,
+                      q: Number(t.quantity) * qtyTick,
+                      side: t.side === 'BID' ? 'buy' : 'sell',
+                      ts: Number(t.timestamp),
+                    })),
+                  }, null, 2),
+                }],
+              };
+            }
+          }
+        }
+
+        // Fall back to REST
         const trades = await iridium.getRecentTrades(params.marketSymbol);
         return {
           content: [
@@ -109,7 +213,7 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
 
   server.tool(
     'get_price_history',
-    'Get historical OHLCV candlestick data for a market. Useful for technical analysis, backtesting, and charting. Note: values are in raw lot units.',
+    'Get historical OHLCV candlestick data for a market. Useful for technical analysis, backtesting, and charting. No login required.',
     {
       marketId: z.number().describe('Market ID to get history for'),
       interval: z.enum(['1s', '1m', '15m', '1h', '4h', '1d']).default('1h').describe('Candlestick interval'),
@@ -119,7 +223,6 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
       try {
         const candles = await iridium.getPriceHistory(params.marketId, params.interval, params.limit);
 
-        // Data freshness check
         let freshnessWarning: string | undefined;
         if (candles.length > 0) {
           const mostRecentMs = candles[0].startTime;
@@ -159,7 +262,7 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
 
   server.tool(
     'get_estimated_fees',
-    'Get estimated trading fees for a specific trade. Returns maker and taker fee rates.',
+    'Get estimated trading fees for a specific trade. Returns maker and taker fee rates. Requires login.',
     {
       subaccountId: z.number().optional().describe('Subaccount ID (defaults to configured subaccount)'),
       marketId: z.number().describe('Market ID'),
@@ -199,7 +302,7 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
 
   server.tool(
     'get_technical_analysis',
-    'Run technical analysis on a market: SMA, EMA, RSI, MACD, Bollinger Bands, ATR, ADX, OBV, and Stochastic. Computes indicators server-side from price history.',
+    'Run technical analysis on a market: SMA, EMA, RSI, MACD, Bollinger Bands, ATR, ADX, OBV, and Stochastic. No login required.',
     {
       marketId: z.number().describe('Market ID to analyze'),
       interval: z.enum(['1s', '1m', '15m', '1h', '4h', '1d']).default('1h').describe('Candlestick interval'),
@@ -225,7 +328,6 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
           };
         }
 
-        // Candles come most-recent-first from API, reverse for indicator calculation
         const sorted = [...candles].reverse();
         const closes = sorted.map(k => parseFloat(k.close));
         const ohlcv: OHLCV[] = sorted.map(k => ({
@@ -245,7 +347,6 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
           latestTimestamp: new Date(sorted[sorted.length - 1].startTime).toISOString(),
         };
 
-        // Freshness check
         const ageMs = Date.now() - sorted[sorted.length - 1].startTime;
         if (ageMs > 86_400_000) {
           result.freshnessWarning = `Most recent candle is ${Math.floor(ageMs / 86_400_000)} day(s) old.`;
@@ -307,7 +408,6 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
               const bbMiddle = last(bb.middle);
               const bbWidth = last(bb.width);
 
-              // Bandwidth percentile (squeeze detection)
               const recentWidths = bb.width.slice(-120);
               const sortedWidths = [...recentWidths].sort((a, b) => a - b);
               const percentileIdx = sortedWidths.findIndex(w => w >= bbWidth);

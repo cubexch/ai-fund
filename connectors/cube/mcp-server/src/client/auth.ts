@@ -117,7 +117,7 @@ export async function generateEd25519Signature(privateKey: CryptoKey, timestamp:
  */
 
 export type AuthMethod =
-  | { type: 'signing'; verificationKeyId: string; privateKey: CryptoKey }
+  | { type: 'signing'; verificationKeyId: string; privateKey: CryptoKey; publicKeyHex: string }
   | { type: 'hmac'; apiKey: string; secretKey: string }
   | null;
 
@@ -140,7 +140,14 @@ export async function resolveAuth(): Promise<AuthMethod> {
     }
     const seed = fromHex(signingKeyEnv);
     const privateKey = await importPrivateKey(seed);
-    _resolvedAuth = { type: 'signing', verificationKeyId: keyId, privateKey };
+    // Derive public key from seed
+    const pkcs8 = new Uint8Array(48);
+    pkcs8.set([0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20]);
+    pkcs8.set(seed, 16);
+    const keyPair = await crypto.subtle.importKey('pkcs8', pkcs8.buffer as ArrayBuffer, 'Ed25519', true, ['sign']);
+    // We need the public key hex — get it from env or derive
+    const publicKeyHex = process.env.CUBE_VERIFICATION_PUBLIC_KEY || '';
+    _resolvedAuth = { type: 'signing', verificationKeyId: keyId, privateKey, publicKeyHex };
     return _resolvedAuth;
   }
 
@@ -156,7 +163,12 @@ export async function resolveAuth(): Promise<AuthMethod> {
   if (creds?.ed25519PrivateKey && creds?.verificationKeyId) {
     const seed = fromHex(creds.ed25519PrivateKey);
     const privateKey = await importPrivateKey(seed);
-    _resolvedAuth = { type: 'signing', verificationKeyId: creds.verificationKeyId, privateKey };
+    _resolvedAuth = {
+      type: 'signing',
+      verificationKeyId: creds.verificationKeyId,
+      privateKey,
+      publicKeyHex: creds.ed25519PublicKey,
+    };
     return _resolvedAuth;
   }
 
@@ -171,13 +183,18 @@ export function resetAuth(): void {
   _resolvedAuth = undefined;
   _signingCredentials = undefined;
   _signingKey = null;
+  _accessTokenCache = null;
 }
 
 /**
- * Build authentication headers for a REST request.
- * Returns empty object if no auth is available.
+ * Build authentication headers for Osmium REST API requests.
+ *
+ * For HMAC auth: sends x-api-key + HMAC signature
+ * For Ed25519 auth: sends x-verification-key-id + Ed25519 signature
+ *
+ * Used by: /os/v0/* endpoints (order placement, cancellation, etc.)
  */
-export async function buildAuthHeaders(): Promise<Record<string, string>> {
+export async function buildOsmiumAuthHeaders(): Promise<Record<string, string>> {
   const auth = await resolveAuth();
   if (!auth) return {};
 
@@ -191,13 +208,165 @@ export async function buildAuthHeaders(): Promise<Record<string, string>> {
     };
   }
 
-  // Ed25519 signing auth
+  // Ed25519 signing auth for Osmium REST
   const signature = await generateEd25519Signature(auth.privateKey, timestamp);
   return {
     'x-verification-key-id': auth.verificationKeyId,
     'x-api-signature': signature,
     'x-api-timestamp': String(timestamp),
   };
+}
+
+/**
+ * Build authentication headers for Iridium REST API requests.
+ *
+ * For HMAC auth: sends x-api-key + HMAC signature (works for all endpoints)
+ * For Ed25519 auth: uses verification key → HMAC bridge (fetches HMAC from /users/hmac)
+ *
+ * Used by: /ir/v0/users/* endpoints (account, positions, orders, fills, etc.)
+ */
+export async function buildIridiumAuthHeaders(): Promise<Record<string, string>> {
+  const auth = await resolveAuth();
+  if (!auth) return {};
+
+  if (auth.type === 'hmac') {
+    const timestamp = Math.floor(Date.now() / 1000);
+    return {
+      'x-api-key': auth.apiKey,
+      'x-api-signature': generateSignature(auth.secretKey, timestamp),
+      'x-api-timestamp': String(timestamp),
+    };
+  }
+
+  // For verification key auth on Iridium, we need to fetch HMAC creds first
+  // because most Iridium endpoints only accept HMAC or session token auth.
+  // The verification key is only directly accepted on /users/check and /users/hmac.
+  const token = await fetchAccessToken();
+  return {
+    'x-api-key': token.apiKey,
+    'x-api-signature': token.signature,
+    'x-api-timestamp': String(token.timestamp),
+  };
+}
+
+/**
+ * Build authentication headers for a REST request.
+ * Legacy wrapper — routes to the appropriate auth builder.
+ */
+export async function buildAuthHeaders(target: 'iridium' | 'osmium' = 'osmium'): Promise<Record<string, string>> {
+  if (target === 'iridium') {
+    return buildIridiumAuthHeaders();
+  }
+  return buildOsmiumAuthHeaders();
+}
+
+// ── Access Token (Verification Key → HMAC Bridge) ────────
+
+/**
+ * HMAC access token obtained from Iridium /users/hmac.
+ * Used to authenticate Osmium WebSocket and Iridium REST calls
+ * when only verification key credentials are available.
+ */
+export interface AccessToken {
+  apiKey: string;
+  signature: string;
+  timestamp: number;
+}
+
+let _accessTokenCache: { token: AccessToken; fetchedAt: number } | null = null;
+const ACCESS_TOKEN_TTL_MS = 5_000; // Tokens are time-sensitive, refresh frequently
+
+/**
+ * Fetch HMAC access token for authenticating to Osmium WebSocket or Iridium REST.
+ *
+ * Auth flow:
+ * - If HMAC env vars set: generate HMAC signature directly (no network call)
+ * - If verification key available: call Iridium POST /users/hmac with
+ *   verification key headers to get server-generated HMAC credentials
+ *
+ * The returned token contains {apiKey, signature, timestamp} which can be
+ * used directly as Osmium WebSocket Credentials or as Iridium HMAC headers.
+ */
+export async function fetchAccessToken(): Promise<AccessToken> {
+  // Check cache (tokens are short-lived so TTL is small)
+  if (_accessTokenCache && Date.now() - _accessTokenCache.fetchedAt < ACCESS_TOKEN_TTL_MS) {
+    return _accessTokenCache.token;
+  }
+
+  const auth = await resolveAuth();
+  if (!auth) {
+    throw new Error(
+      'No credentials available. Run `npm run login` to authenticate, ' +
+      'or set CUBE_API_KEY + CUBE_SECRET_KEY, ' +
+      'or set CUBE_SIGNING_KEY + CUBE_VERIFICATION_KEY_ID.'
+    );
+  }
+
+  // Direct HMAC — generate signature locally without network call
+  if (auth.type === 'hmac') {
+    const timestamp = Math.floor(Date.now() / 1000);
+    const token: AccessToken = {
+      apiKey: auth.apiKey,
+      signature: generateSignature(auth.secretKey, timestamp),
+      timestamp,
+    };
+    _accessTokenCache = { token, fetchedAt: Date.now() };
+    return token;
+  }
+
+  // Verification key auth — call Iridium /users/hmac
+  const env = getEnvironment(process.env.CUBE_ENV);
+  const timestamp = Math.floor(Date.now() / 1000);
+
+  // Sign the method+path per Iridium's verification key auth protocol:
+  // message = "{METHOD} {PATH}" (e.g. "POST /users/hmac")
+  // POST is required — the backend only allows verification key auth on POST /users/hmac
+  const message = new TextEncoder().encode('POST /users/hmac');
+  const sig = await signMessage(message, auth.privateKey);
+  const publicKeyBase64 = Buffer.from(auth.publicKeyHex, 'hex').toString('base64');
+
+  const response = await fetch(`${env.restUrl}/users/hmac`, {
+    method: 'POST',
+    headers: {
+      'x-verification-key': publicKeyBase64,
+      'x-verification-key-signature': Buffer.from(sig).toString('base64'),
+      'x-verification-key-timestamp': String(timestamp),
+    },
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to fetch access token from Iridium: ${response.status} ${body}`);
+  }
+
+  const data = (await response.json()) as Record<string, unknown>;
+  const result = (data.result ?? data) as Record<string, unknown>;
+
+  const token: AccessToken = {
+    apiKey: String(result.apiKey ?? result.api_key),
+    signature: String(result.signature),
+    timestamp: Number(result.timestamp),
+  };
+
+  _accessTokenCache = { token, fetchedAt: Date.now() };
+  return token;
+}
+
+/**
+ * Check if any authentication credentials are available.
+ * Returns true if HMAC env vars, signing key env vars, or stored credentials exist.
+ */
+export async function hasAuth(): Promise<boolean> {
+  const auth = await resolveAuth();
+  return auth !== null;
+}
+
+/**
+ * Check what auth method is available.
+ */
+export async function getAuthType(): Promise<'hmac' | 'signing' | null> {
+  const auth = await resolveAuth();
+  return auth?.type ?? null;
 }
 
 // ── Signing Credentials (Ed25519) ─────────────────────────
