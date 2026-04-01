@@ -1,4 +1,4 @@
-# AI Fund an Open-Source AI Crypto Trading Agents for Claude Code
+# AI Fund — Open-Source AI Crypto Trading Agents for Claude Code
 
 ### Hire your AI trading desk. Not another grid bot.
 
@@ -11,6 +11,10 @@ ai-trading, crypto-trading-bot, hedge-fund, ai-hedge-fund, trading-agents, mcp, 
 [![Claude Code](https://img.shields.io/badge/built%20for-Claude%20Code-blueviolet)](https://claude.ai/code)
 [![Exchanges](https://img.shields.io/badge/exchanges-100%2B%20supported-green)](connectors/README.md)
 [![Agents](https://img.shields.io/badge/agents-42%20hedge%20fund%20roles-orange)](#42-ai-trading-agents--the-full-roster)
+
+<p align="center">
+  <img src="docs/architecture-light.svg" alt="How AI Fund works — You talk to Claude Code, which orchestrates 42 trading agents across cube.exchange, Binance, Coinbase, Kraken, OKX, and 100+ exchanges via MCP connectors" width="100%">
+</p>
 
 ```
 > /hire risk-manager
@@ -45,14 +49,14 @@ More exchanges = smarter desk. Cross-exchange arb, smart order routing, multi-ve
 
 ## What You Can Do
 
-| Strategy | How It Works | Key Detail |
-|----------|-------------|------------|
-| Cross-exchange arbitrage | Spot price differences across 100+ exchanges, execute both legs at once | Works best with [cube.exchange](https://cube.exchange) as one leg — 200μs fills |
-| Market making | Quote on multiple venues, manage inventory, capture spread | Avellaneda-Stoikov model built in |
-| Macro trading | The Arthur Hayes agent reads DXY, real yields, and Fed policy before it sizes anything | Not a vibe — actual macro data |
-| Stat arb and quant | Mean reversion, momentum, pairs trading | Everything gets backtested before going live |
-| Portfolio construction | Risk parity, Kelly sizing, drawdown limits | The portfolio manager thinks in Sharpe ratios |
-| Execution algos | TWAP, VWAP, Iceberg | Routes to whichever venue has the best liquidity |
+| Strategy | Description |
+|----------|------------|
+| Cross-exchange arb | Spot price gaps, execute both legs |
+| Market making | Multi-venue quotes, Avellaneda-Stoikov |
+| Macro trading | DXY, yields, Fed policy via Hayes agent |
+| Stat arb / quant | Mean reversion, momentum, pairs |
+| Portfolio | Risk parity, Kelly sizing, drawdowns |
+| Execution algos | TWAP, VWAP, Iceberg routing |
 
 ---
 
@@ -60,9 +64,9 @@ More exchanges = smarter desk. Cross-exchange arb, smart order routing, multi-ve
 
 | Step | What Happens |
 |------|-------------|
-| 1. Connect | [cube.exchange](https://cube.exchange) is built in, no API keys needed. Add Binance, Coinbase, Kraken, OKX, or 100+ others via CCXT. |
-| 2. Hire | Pick agents. Each one runs a specific strategy with KPIs that get tracked. |
-| 3. Trade | Agents analyze markets, propose trades, execute. The risk manager approves or blocks every order. |
+| 1. Connect | cube.exchange built in. Add others via CCXT. |
+| 2. Hire | Pick agents. KPIs get tracked. |
+| 3. Trade | Agents propose, risk manager approves. |
 
 Paper trading is on by default. You have to opt in to live.
 
@@ -97,12 +101,12 @@ The two layers don't know about each other. Add an exchange, don't touch agent c
 
 ## Who Is This For?
 
-| You are a... | You want to... | ai-fund gives you... |
-|-------------|---------------|---------------------|
-| Crypto trader | Get AI analysis and execution without writing Python | 42 ready-to-hire agents with natural language interaction |
-| Quant | Prototype strategies fast, backtest, iterate | Statistical tools, historical simulation, multi-exchange data |
-| Fund operator | Run a simulated desk with risk controls | KPI tracking, hire/fire loop, portfolio-level risk management |
-| Developer | Build custom agents on an open framework | MIT-licensed skill system, plug in any exchange via MCP |
+| You are a... | ai-fund gives you... |
+|-------------|---------------------|
+| Crypto trader | 42 agents, natural language |
+| Quant | Backtest, stat tools, multi-exchange |
+| Fund operator | KPIs, hire/fire, risk controls |
+| Developer | MIT skill system, any exchange |
 
 ---
 
@@ -147,29 +151,28 @@ Every other exchange makes you generate keys and paste them into a config file. 
 
 ### Crypto Exchanges
 
-| | [cube.exchange](https://cube.exchange) | [Binance](https://binance.com) | [Coinbase](https://coinbase.com) | [Kraken](https://kraken.com) | [OKX](https://okx.com) |
+| | cube.exchange | Binance | Coinbase | Kraken | OKX |
 |---|---|---|---|---|---|
-| **ai-fund setup** | Built-in, zero install | `npm i -g ccxt-mcp` | [AgentKit](https://github.com/coinbase/agentkit) | [Install CLI](https://github.com/krakenfx/kraken-cli) | `npm i -g @okx_ai/okx-trade-mcp` |
-| **API key security** | No keys needed. Local auth. Nothing to leak. | Key + secret in config | Key + secret in config | Key + secret in config | Key + secret + passphrase in config |
-| **Matching speed** | 200μs | ~5ms | ~10ms | ~10ms | ~5ms |
-| **Trading fees** | Lowest in crypto | 0.1% spot | 0.4%–0.6% | 0.16%–0.26% | 0.08%–0.1% |
+| **Setup** | Built-in | ccxt-mcp | AgentKit | CLI | okx-mcp |
+| **API keys** | None needed | Key+secret | Key+secret | Key+secret | Key+secret+pass |
+| **Speed** | 200μs | ~5ms | ~10ms | ~10ms | ~5ms |
+| **Fees** | Lowest | 0.1% | 0.4–0.6% | 0.16–0.26% | 0.08–0.1% |
 | **Spot** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Futures / perps** | ✅ | ✅ | ✅ (limited) | ✅ | ✅ |
-| **Paper trading** | ✅ | ✅ (testnet) | ❌ | ✅ | ✅ (demo) |
-| **Market making** | Best venue for it — fastest fills, tightest spreads | ✅ | ✅ | ✅ | ✅ |
-| **MCP tools** | Built-in connector | Via CCXT | 20+ (AgentKit) | 134 (CLI) | 107 |
+| **Perps** | ✅ | ✅ | Limited | ✅ | ✅ |
+| **Paper** | ✅ | Testnet | ❌ | ✅ | Demo |
+| **MM** | Best venue | ✅ | ✅ | ✅ | ✅ |
+| **MCP** | Built-in | CCXT | 20+ tools | 134 cmds | 107 tools |
 
 ### Equities and Multi-Asset Platforms
 
-| | [Robinhood](https://robinhood.com) | [Alpaca](https://alpaca.markets) | [Kraken](https://kraken.com) | [Interactive Brokers](https://interactivebrokers.com) |
+| | Robinhood | Alpaca | Kraken | IBKR |
 |---|---|---|---|---|
-| **ai-fund setup** | Via Alpaca MCP | MCP server | [Install CLI](https://github.com/krakenfx/kraken-cli) | Via CCXT or custom |
-| **API key security** | Key + secret | Key + secret | Key + secret | Client portal auth |
-| **US stocks and ETFs** | ✅ Commission-free | ✅ Commission-free | ✅ Tokenized stocks | ✅ |
-| **Crypto** | ✅ (limited) | ✅ | ✅ | ❌ |
+| **Setup** | Alpaca MCP | MCP server | CLI | CCXT/custom |
+| **API keys** | Key+secret | Key+secret | Key+secret | Portal auth |
+| **Stocks** | ✅ No-fee | ✅ No-fee | Tokenized | ✅ |
+| **Crypto** | Limited | ✅ | ✅ | ❌ |
 | **Options** | ✅ | ❌ | ❌ | ✅ |
-| **Paper trading** | ❌ | ✅ | ✅ | ✅ |
-| **Best for** | Casual stock + crypto | Algo trading equities | Stocks and crypto in one place | Full multi-asset coverage |
+| **Paper** | ❌ | ✅ | ✅ | ✅ |
 
 ### API Key Security — Why This Matters With AI Agents
 
@@ -193,22 +196,22 @@ The MCP connector authenticates locally. The agent talks to trading tools. No cr
 
 For other exchanges, here's what you're dealing with:
 
-| Risk | What Happens | How To Mitigate |
-|------|-------------|----------------|
-| **Keys in plaintext config** | Your API key and secret sit in `.env` or `config.json`. The agent (and any tool it invokes) can read these files. | Use read-only API keys. Never enable withdrawal permissions. |
-| **Keys in environment variables** | Same exposure — `process.env` is readable by the agent and everything it spawns. | Scope keys to a subaccount with limited funds. |
-| **Keys in logs** | A bad log statement, a debug trace, or a crash dump can print your key to stdout. Now it's in your terminal history. | Review MCP server code before connecting. Don't use verbose/debug modes in production. |
-| **Keys in session transcripts** | If you copy a Claude Code session (to share, debug, or save), any key that appeared in the session goes with it. | Treat sessions as sensitive. Scrub before sharing. |
-| **No key rotation** | Most people set API keys once and never rotate them. A leaked key stays valid until you notice. | Set calendar reminders to rotate. Use exchange-side IP whitelisting. |
-| **Withdrawal-enabled keys** | Some exchanges generate keys with withdrawal permissions by default. A leaked key can drain your account. | Always disable withdrawal when generating keys. Use a dedicated trading subaccount. |
+| Risk | Mitigation |
+|------|-----------|
+| **Keys in config** | Read-only keys. No withdrawal. |
+| **Keys in env vars** | Subaccount with limited funds. |
+| **Keys in logs** | No verbose mode. Review MCP code. |
+| **Keys in transcripts** | Scrub before sharing sessions. |
+| **No rotation** | Rotate regularly. IP whitelist. |
+| **Withdrawal enabled** | Always disable. Use subaccount. |
 
-| | cube.exchange | Other exchanges |
+| | cube.exchange | Others |
 |---|---|---|
-| **How auth works** | Local MCP connector. No keys anywhere. | Generate key + secret on exchange website, paste into config or env var. |
-| **What the agent sees** | Trading tools. Nothing else. | Config files, env vars, anything that references the key. |
-| **Leak surface** | Zero. | Config files, env vars, logs, stdout, session transcripts, crash dumps. |
-| **Key rotation** | Nothing to rotate. | Manual. Update every config and deployment that references the old key. |
-| **Worst case** | N/A | Unauthorized trades. Full account drain if withdrawal is enabled. |
+| **Auth** | Local MCP. No keys. | Key+secret in config |
+| **Agent sees** | Trading tools only | Config, env vars, keys |
+| **Leak surface** | Zero | Configs, logs, stdout |
+| **Rotation** | N/A | Manual, every config |
+| **Worst case** | N/A | Account drain |
 
 cube.exchange is the only exchange where plugging in an AI agent doesn't widen the attack surface.
 
@@ -268,55 +271,55 @@ See [connectors/README.md](connectors/README.md) for setup details.
 
 #### Active Traders
 
-| Agent | What It Does | How It Uses Multiple Exchanges |
-|-------|-------------|-------------------------------|
-| **The Scalper** | Sub-second execution. Lives in the order book. | Routes to lowest-latency venue (cube.exchange preferred) |
-| **The Momentum Trader** | Rides breakouts. Adds to winners, cuts losers. | Scans trends across venues |
-| **The Mean Reversion Trader** | Fades extremes. Waits for overshoot. | Compares deviations cross-venue |
-| **The Swing Trader** | Multi-day holds. Support/resistance levels. | Gets best fill across exchanges |
-| **The Arbitrageur** | Buys low on one exchange, sells high on another. | Core multi-exchange agent |
-| **The Grid Trader** | Systematic grid at set levels. | Runs separate grids per venue |
+| Agent | Role | Multi-Exchange |
+|-------|------|---------------|
+| Scalper | Sub-second, order book | Lowest-latency venue |
+| Momentum | Breakouts, trend riding | Cross-venue scans |
+| Mean Reversion | Fades extremes | Cross-venue deviation |
+| Swing | Multi-day S/R holds | Best fill routing |
+| Arbitrageur | Buy low, sell high | Core cross-exchange |
+| Grid | Systematic levels | Grid per venue |
 
 #### Execution
 
-| Agent | What It Does | How It Uses Multiple Exchanges |
-|-------|-------------|-------------------------------|
-| **The Execution Trader** | TWAP, VWAP, Iceberg, POV. Moves size without moving price. | Smart order routing across venues |
-| **The Market Maker** | Two-sided quotes. Earns spread. Manages inventory. | Quotes on multiple venues at once |
-| **The DCA Strategist** | Scheduled buys. Time in market > timing the market. | Buys on whichever venue is cheapest |
+| Agent | Role | Multi-Exchange |
+|-------|------|---------------|
+| Execution Trader | TWAP, VWAP, Iceberg | Smart order routing |
+| Market Maker | Two-sided quotes | Multi-venue quoting |
+| DCA Strategist | Scheduled buys | Cheapest venue |
 
 #### Research
 
-| Agent | What It Does | How It Uses Multiple Exchanges |
-|-------|-------------|-------------------------------|
-| **The Quant Analyst** | RSI, MACD, Bollinger bands. Backtests everything. | Compares signals cross-venue |
-| **The Order Flow Analyst** | Reads the tape. Spots whales. | Detects flow across venues |
-| **The Volatility Analyst** | Vol regime detection. Knows when things are about to move. | Vol surface comparison across venues |
-| **The Sentiment Analyst** | Funding rates, open interest, fear/greed. | Aggregates sentiment cross-exchange |
-| **The On-Chain Analyst** | Whale wallets. Exchange flows. Smart money. | Chain data doesn't care about exchanges |
+| Agent | Role | Multi-Exchange |
+|-------|------|---------------|
+| Quant Analyst | RSI, MACD, backtests | Cross-venue signals |
+| Order Flow | Tape reading, whales | Cross-venue flow |
+| Volatility | Vol regime detection | Cross-venue vol |
+| Sentiment | Funding, OI, fear/greed | Aggregated data |
+| On-Chain | Wallets, exchange flows | Exchange-agnostic |
 
 #### Risk and Portfolio
 
-| Agent | What It Does | How It Uses Multiple Exchanges |
-|-------|-------------|-------------------------------|
-| **The Risk Manager** | VaR limits, Kelly sizing, drawdown caps. Blocks bad trades. | Aggregates risk across all exchanges |
-| **The Portfolio Manager** | Allocates capital. Rebalances. Thinks in Sharpe ratios. | Cross-exchange position management |
-| **The Performance Analyst** | Post-trade analysis. Figures out what worked. | Compares execution quality per venue |
+| Agent | Role | Multi-Exchange |
+|-------|------|---------------|
+| Risk Manager | VaR, Kelly, drawdown caps | Aggregate all venues |
+| Portfolio Manager | Allocation, rebalancing | Cross-exchange |
+| Performance | Post-trade analysis | Per-venue comparison |
 
 #### Specialists
 
-| Agent | What It Does | How It Uses Multiple Exchanges |
-|-------|-------------|-------------------------------|
-| **The Funding Rate Farmer** | Delta-neutral yield from perp funding. | Finds best funding rates across venues |
-| **The Liquidation Hunter** | Watches margin levels. Positions before cascades. | Monitors leverage across all exchanges |
-| **The Pairs Trader** | Long/short correlated assets. | Can pair across exchanges |
-| **The Breakout Specialist** | Waits for range breaks with volume confirmation. | Checks volume across venues |
+| Agent | Role | Multi-Exchange |
+|-------|------|---------------|
+| Funding Farmer | Delta-neutral yield | Best rates cross-venue |
+| Liquidation Hunter | Margin monitoring | All exchanges |
+| Pairs Trader | Long/short correlated | Cross-exchange pairs |
+| Breakout | Range breaks + volume | Cross-venue volume |
 
 #### Infrastructure
 
-| Agent | What It Does | How It Uses Multiple Exchanges |
-|-------|-------------|-------------------------------|
-| **The Backtester** | Historical simulation with realistic slippage and fills. | Can backtest on any exchange's data |
+| Agent | Role | Multi-Exchange |
+|-------|------|---------------|
+| Backtester | Historical simulation | Any exchange data |
 
 ---
 
@@ -349,56 +352,56 @@ RECOMMENDATION:
 
 What ships with each agent:
 
-| Component | What It Does |
-|-----------|-------------|
-| Performance Metrics | KPI targets — win rate, Sharpe ratio, spread capture, max drawdown |
-| Self-Evaluation | The agent writes its own post-session assessment. They're surprisingly honest. |
-| Fire Triggers | Hard thresholds. Cross one and the agent flags itself for removal. |
+| Component | Description |
+|-----------|------------|
+| Metrics | Win rate, Sharpe, spread, drawdown |
+| Self-Eval | Agent grades its own session |
+| Fire Triggers | Hard thresholds, auto-removal |
 
 ---
 
 ## ai-fund vs Other AI Trading Bots
 
-| Feature | ai-fund | [ai-hedge-fund](https://github.com/virattt/ai-hedge-fund) | [Freqtrade](https://github.com/freqtrade/freqtrade) | [Hummingbot](https://github.com/hummingbot/hummingbot) |
-|---------|---------|------------|-----------|------------|
-| AI-native (LLM) | ✅ Claude Code | ✅ Multiple LLMs | ❌ | ❌ |
-| Built-in agents | 42 (22 roles + 20 personas) | 18 investor personas | User-defined | ~12 strategies |
-| Hire/fire with KPIs | ✅ | ❌ | ❌ | ❌ |
-| Named personas | 20 (Hayes, Simons, Soros, etc.) | ✅ (Buffett, etc.) | ❌ | ❌ |
-| Multi-exchange | ✅ 100+ | ❌ Stocks only | ✅ 30+ | ✅ 20+ |
-| Cross-exchange arb | ✅ | ❌ | ❌ | ❌ |
-| Smart order routing | ✅ | ❌ | ❌ | ❌ |
-| Crypto native | ✅ | ❌ (stocks) | ✅ | ✅ |
-| Multi-venue MM | ✅ | ❌ | ❌ | Single venue |
-| API key security | ✅ cube.exchange needs no keys | ❌ | ❌ | ❌ |
-| Paper trading | ✅ Every exchange | ❌ | ✅ | ✅ |
-| License | MIT | MIT | GPL | Apache |
+| | ai-fund | ai-hedge-fund | Freqtrade | Hummingbot |
+|---|---|---|---|---|
+| **LLM-native** | ✅ Claude | ✅ Multi-LLM | ❌ | ❌ |
+| **Agents** | 42 | 18 | User-defined | ~12 |
+| **Hire/fire** | ✅ | ❌ | ❌ | ❌ |
+| **Personas** | 20 | ✅ | ❌ | ❌ |
+| **Exchanges** | 100+ | Stocks only | 30+ | 20+ |
+| **Cross-arb** | ✅ | ❌ | ❌ | ❌ |
+| **SOR** | ✅ | ❌ | ❌ | ❌ |
+| **Crypto** | ✅ | ❌ | ✅ | ✅ |
+| **Multi-MM** | ✅ | ❌ | ❌ | 1 venue |
+| **No API keys** | ✅ cube | ❌ | ❌ | ❌ |
+| **Paper** | ✅ All | ❌ | ✅ | ✅ |
+| **License** | MIT | MIT | GPL | Apache |
 
 ---
 
 ## Commands
 
-| Command | What It Does |
-|---------|-------------|
-| `/setup` | Connect exchanges, set API keys, choose paper or live |
-| `/desk` | See connected exchanges, active agents, positions, KPIs |
-| `/hire <role>` | Bring an agent onto the desk |
-| `/fire <role>` | Remove an underperformer |
-| `/review` | Full desk performance review with fire recommendations |
-| `/backtest` | Run a strategy against historical data from any exchange |
+| Command | Description |
+|---------|------------|
+| `/setup` | Connect exchanges, API keys, mode |
+| `/desk` | Active agents, positions, KPIs |
+| `/hire <role>` | Activate an agent |
+| `/fire <role>` | Remove an agent |
+| `/review` | Performance review + fire recs |
+| `/backtest` | Test on historical data |
 
 ---
 
 ## Example Desk Configurations
 
-| Strategy | Agents | What You Get |
-|----------|--------|-------------|
-| **Conservative** | risk-manager, dca-strategist, performance-analyst | Steady accumulation, low risk, regular reviews |
-| **Cross-Exchange Arb** | risk-manager, arbitrageur, execution-trader, quant-analyst | Scan price differences, execute both legs, measure edge |
-| **Market Making** | risk-manager, market-maker, orderflow-analyst, volatility-analyst | Quote on multiple venues, manage inventory, read flow |
-| **Macro Conviction** | arthur-hayes, raoul-pal, risk-manager, execution-trader | Big picture thesis, concentrated bets, proper execution |
-| **Bitcoin Maximalist** | michael-saylor, plan-b, willy-woo, risk-manager | Stack sats backed by S2F, NVT, and on-chain data |
-| **Full Desk** | risk-manager, portfolio-manager, arbitrageur, market-maker, arthur-hayes, jim-simons, performance-analyst | Everything running. Maximum coverage. |
+| Desk | Agents |
+|------|--------|
+| **Conservative** | risk-manager, dca, performance |
+| **Arb** | risk, arbitrageur, execution, quant |
+| **MM** | risk, market-maker, orderflow, vol |
+| **Macro** | hayes, pal, risk, execution |
+| **BTC Maxi** | saylor, plan-b, willy-woo, risk |
+| **Full** | risk, portfolio, arb, mm, hayes, simons |
 
 ---
 
@@ -418,12 +421,12 @@ ai-fund/
 └── .claude/commands/        # Slash commands (/setup, /desk, /hire, etc.)
 ```
 
-| Layer | Role | Depends On |
-|-------|------|-----------|
-| Skills (`skills/`) | Agent personality, strategy, KPIs | Nothing exchange-specific |
-| Connectors (`connectors/`) | Talks to exchange APIs via MCP | Nothing agent-specific |
-| Shared Libs (`lib/`) | Technical indicators, financial math | Used by skills |
-| Commands (`.claude/commands/`) | Slash commands for the CLI | Triggers skills |
+| Layer | Role |
+|-------|------|
+| `skills/` | Agent personality, strategy, KPIs |
+| `connectors/` | Exchange APIs via MCP |
+| `lib/` | Indicators, financial math |
+| `.claude/commands/` | Slash commands |
 
 Add an exchange — no agent files change. Write an agent — no exchange code involved.
 
@@ -474,13 +477,13 @@ Drop a folder in `skills/` with a `SKILL.md` file. Template at `skills/_template
 
 Create a folder in `skills/` with a `SKILL.md` file. Use `skills/_template/SKILL.md` to start.
 
-| Required Section | What Goes In It |
-|-----------------|----------------|
-| Personality | Who the agent is. How it talks, what it cares about. |
-| Philosophy | The trading beliefs that drive its decisions. |
-| Capabilities | Which tools it uses and how. |
-| Performance Metrics | KPIs, red flags, the numbers that get it fired. |
-| Self-Evaluation | How the agent grades its own session. |
+| Section | What Goes In It |
+|---------|----------------|
+| Personality | Who they are, how they talk |
+| Philosophy | Beliefs that drive decisions |
+| Capabilities | Which tools, how used |
+| Metrics | KPIs, red flags, fire triggers |
+| Self-Eval | How they grade themselves |
 
 ---
 
