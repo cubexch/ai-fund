@@ -11,6 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "login": "tsx src/cli/login.ts",
+    "logout": "tsx src/cli/logout.ts",
     "status": "tsx src/cli/status.ts"
   },
   "dependencies": {
