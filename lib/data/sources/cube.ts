@@ -58,6 +58,26 @@ export interface CubeTicker {
   open24h: number | null;
 }
 
+// ── Security helpers ───────────────────────────────────────
+
+/** Alphanumeric symbols only — reject anything that could be a path traversal or injection. */
+const SAFE_SYMBOL = /^[A-Z0-9]{2,20}$/;
+
+function validateSymbol(symbol: string): void {
+  if (!SAFE_SYMBOL.test(symbol)) {
+    throw new Error(`Invalid market symbol: ${symbol}. Must be 2-20 uppercase alphanumeric chars.`);
+  }
+}
+
+/** Valid kline interval values (hardcoded allowlist). */
+const VALID_INTERVALS = new Set(['1s', '1m', '15m', '1h', '4h', '1d']);
+
+function validateInterval(interval: string): void {
+  if (!VALID_INTERVALS.has(interval)) {
+    throw new Error(`Invalid interval: ${interval}. Allowed: ${[...VALID_INTERVALS].join(', ')}`);
+  }
+}
+
 // ── Instrument helpers ─────────────────────────────────────
 
 /** Parse a Cube market symbol like 'BTCUSDC' into base/quote. */
@@ -75,15 +95,24 @@ export function parseSymbol(symbol: string): { base: string; quote: string } {
 
 /** Build the canonical instrument ID for a Cube market. */
 export function cubeIid(symbol: string): string {
+  validateSymbol(symbol);
   return `cube:${symbol}`;
 }
 
 // ── API calls ──────────────────────────────────────────────
 
+/**
+ * Fetch from Cube API. URL is always constructed from hardcoded base + validated params.
+ * Never accepts arbitrary URLs to prevent SSRF.
+ */
 async function cubeGet<T>(url: string): Promise<T> {
+  // Defense-in-depth: ensure URL is always under our known API base
+  if (!url.startsWith(REST_URL) && !url.startsWith(MD_URL)) {
+    throw new Error(`SSRF blocked: URL ${url} is not under the Cube API base`);
+  }
   const res = await fetch(url);
   if (!res.ok) {
-    throw new Error(`Cube API ${res.status}: ${res.statusText} — ${url}`);
+    throw new Error(`Cube API ${res.status}: ${res.statusText}`);
   }
   const json = await res.json() as { result?: T } & T;
   return (json.result ?? json) as T;
@@ -132,8 +161,11 @@ export async function fetchKlines(
   interval: string = '1h',
   limit: number = 1000,
 ): Promise<CubeKline[]> {
+  if (!Number.isInteger(marketId) || marketId < 0) throw new Error(`Invalid marketId: ${marketId}`);
+  validateInterval(interval);
+  const safeLimit = Math.min(Math.max(1, Math.floor(limit)), 1000);
   const raw = await cubeGet<number[][]>(
-    `${REST_URL}/history/klines?marketId=${marketId}&interval=${interval}&limit=${limit}`
+    `${REST_URL}/history/klines?marketId=${encodeURIComponent(marketId)}&interval=${encodeURIComponent(interval)}&limit=${safeLimit}`
   );
 
   return raw.map(k => ({
@@ -159,8 +191,8 @@ export async function* fetchAllKlines(
   interval: string = '1h',
   sinceMs?: number,
 ): AsyncGenerator<CubeKline[]> {
+  validateInterval(interval);
   const intervalMs = INTERVAL_MS[interval];
-  if (!intervalMs) throw new Error(`Unknown interval: ${interval}`);
 
   let oldestSeen: number | undefined;
   const pageSize = 1000;
@@ -205,8 +237,9 @@ export async function* fetchAllKlines(
  * Returns the most recent ~100 trades.
  */
 export async function fetchRecentTrades(marketSymbol: string): Promise<CubeTrade[]> {
+  validateSymbol(marketSymbol);
   const data = await cubeGet<{ ticker_id: string; trades: Array<{ id: number; p: number; q: number; side: string; ts: number }> }>(
-    `${MD_URL}/parsed/book/${marketSymbol}/recent-trades`
+    `${MD_URL}/parsed/book/${encodeURIComponent(marketSymbol)}/recent-trades`
   );
 
   return data.trades.map(t => ({
@@ -227,12 +260,13 @@ export async function fetchOrderBook(marketSymbol: string): Promise<{
   asks: [number, number][];
   timestamp: number;
 }> {
+  validateSymbol(marketSymbol);
   const data = await cubeGet<{
     ticker_id: string;
     timestamp: number;
     bids: [number, number][];
     asks: [number, number][];
-  }>(`${MD_URL}/parsed/book/${marketSymbol}/snapshot`);
+  }>(`${MD_URL}/parsed/book/${encodeURIComponent(marketSymbol)}/snapshot`);
 
   return {
     bids: data.bids,

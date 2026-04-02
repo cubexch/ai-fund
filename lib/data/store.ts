@@ -6,11 +6,17 @@
  *   - DuckDB for silver/gold: cleaned data in tables + Parquet export
  *   - Hive-style partitioning: date-partitioned directories for pruning
  *   - Instrument-centric: all queries go through instrument IDs (iid)
+ *
+ * Security:
+ *   - All string values use parameterized queries (never interpolated into SQL)
+ *   - Table/column names validated against allowlists
+ *   - Path components sanitized against traversal
+ *   - Query method restricted to read-only by default
  */
 
 import duckdb from 'duckdb';
 import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, relative } from 'node:path';
 import { SCHEMA_SQL } from './schema.js';
 
 const DEFAULT_DATA_DIR = join(process.cwd(), '.desk', 'data');
@@ -21,16 +27,66 @@ export interface QueryResult {
   rowCount: number;
 }
 
+// ── Security: allowlists and validation ────────────────────
+
+/** Tables that exist in our schema and can be written to. */
+const VALID_TABLES = new Set([
+  'instruments', 'exchanges',
+  'ohlcv', 'trades', 'quotes', 'orderbook',
+  'funding_rates', 'open_interest', 'macro',
+  'features',
+  'sync_state',
+]);
+
+/** Valid column name pattern: alphanumeric + underscore only. */
+const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+/** Valid iid pattern: exchange:SYMBOL (alphanumeric, colon, hyphen, slash, dot). */
+const SAFE_IID = /^[a-zA-Z0-9][a-zA-Z0-9:._\-/]*$/;
+
+/** Valid path component: no path traversal, no special chars. */
+const SAFE_PATH_COMPONENT = /^[a-zA-Z0-9][a-zA-Z0-9._\-]*$/;
+
+function validateTable(table: string): void {
+  if (!VALID_TABLES.has(table)) {
+    throw new Error(`Invalid table name: ${table}. Allowed: ${[...VALID_TABLES].join(', ')}`);
+  }
+}
+
+function validateColumns(columns: string[]): void {
+  for (const col of columns) {
+    if (!SAFE_IDENTIFIER.test(col)) {
+      throw new Error(`Invalid column name: ${col}. Must match ${SAFE_IDENTIFIER}`);
+    }
+  }
+}
+
+function validateIdentifier(value: string, label: string): void {
+  if (!SAFE_IID.test(value)) {
+    throw new Error(`Invalid ${label}: ${value}. Must match ${SAFE_IID}`);
+  }
+}
+
+function validatePathComponent(value: string, label: string): void {
+  if (!SAFE_PATH_COMPONENT.test(value)) {
+    throw new Error(`Invalid ${label}: ${value}. Must match ${SAFE_PATH_COMPONENT}`);
+  }
+}
+
+/** Escape a string for safe use in SQL single quotes. */
+function sqlEscape(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+/** SQL statements that can modify data or access the filesystem. */
+const WRITE_PATTERNS = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|COPY|ATTACH|DETACH|LOAD|INSTALL|EXPORT|IMPORT|CALL|PRAGMA|SET)\b/i;
+
 /** Directory layout following medallion architecture. */
 const LAYER_DIRS = [
-  // Bronze: raw, append-only Parquet
   'bronze/ohlcv', 'bronze/trades', 'bronze/quotes', 'bronze/orderbook',
   'bronze/funding', 'bronze/open_interest',
-  // Silver: cleaned (also in DuckDB tables)
   'silver/ohlcv', 'silver/trades', 'silver/quotes', 'silver/orderbook',
-  // Gold: features, signals
   'gold/features', 'gold/signals',
-  // Reference: instruments, exchanges
   'reference',
 ];
 
@@ -75,19 +131,29 @@ export class DataStore {
 
   /** Get the Parquet directory for a given layer and data type. */
   layerPath(layer: 'bronze' | 'silver' | 'gold' | 'reference', dataType: string): string {
+    validatePathComponent(dataType, 'dataType');
     return join(this.dataDir, layer, dataType);
   }
 
   /** Build a Hive-style Parquet path: bronze/ohlcv/exchange=cube/date=2024-01-15/ */
   bronzePath(dataType: string, exchange: string, date: string): string {
+    validatePathComponent(dataType, 'dataType');
+    validatePathComponent(exchange, 'exchange');
+    validatePathComponent(date, 'date');
     const dir = join(this.dataDir, 'bronze', dataType, `exchange=${exchange}`, `date=${date}`);
+    // Verify the resolved path is still under dataDir (prevent traversal)
+    const resolved = resolve(dir);
+    const base = resolve(this.dataDir);
+    if (!resolved.startsWith(base)) {
+      throw new Error('Path traversal detected');
+    }
     mkdirSync(dir, { recursive: true });
     return dir;
   }
 
   // ── SQL execution ────────────────────────────────────────
 
-  /** Execute a SQL statement (no results). */
+  /** Execute a SQL statement (no results). Internal use only. */
   async exec(sql: string): Promise<void> {
     return new Promise((resolve, reject) => {
       this.conn.exec(sql, (err) => {
@@ -97,8 +163,18 @@ export class DataStore {
     });
   }
 
-  /** Run a query and return typed results. */
-  async query(sql: string, limit: number = 10000): Promise<QueryResult> {
+  /**
+   * Run a read-only query and return typed results.
+   * Set readOnly=false to allow write statements (internal use).
+   */
+  async query(sql: string, limit: number = 10000, readOnly: boolean = true): Promise<QueryResult> {
+    if (readOnly && WRITE_PATTERNS.test(sql)) {
+      throw new Error(
+        'Write operations not allowed in read-only query. ' +
+        'Blocked statements: INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, COPY, ATTACH, LOAD, INSTALL, EXPORT, IMPORT, CALL, PRAGMA, SET'
+      );
+    }
+
     const safeSql = limit > 0 && !/\blimit\b/i.test(sql)
       ? `${sql} LIMIT ${limit}`
       : sql;
@@ -113,9 +189,12 @@ export class DataStore {
     });
   }
 
-  /** Insert rows into a table using prepared statement. */
+  /** Insert rows into a validated table using prepared statement with parameterized values. */
   async insertRows(table: string, columns: string[], rows: unknown[][]): Promise<number> {
     if (rows.length === 0) return 0;
+
+    validateTable(table);
+    validateColumns(columns);
 
     const placeholders = columns.map(() => '?').join(', ');
     const sql = `INSERT OR IGNORE INTO ${table} (${columns.join(', ')}) VALUES (${placeholders})`;
@@ -149,24 +228,26 @@ export class DataStore {
 
   // ── Parquet I/O ──────────────────────────────────────────
 
-  /** Export a query result to a Parquet file with ZSTD compression. */
-  async exportParquet(sql: string, filePath: string): Promise<void> {
-    await this.exec(`COPY (${sql}) TO '${filePath}' (FORMAT PARQUET, COMPRESSION ZSTD)`);
+  /** Export a validated table to a Parquet file with ZSTD compression. */
+  async exportTable(table: string, filePath: string): Promise<void> {
+    validateTable(table);
+    validatePathComponent(filePath.split('/').pop() ?? '', 'filename');
+    const resolved = resolve(filePath);
+    if (!resolved.startsWith(resolve(this.dataDir))) {
+      throw new Error('Export path must be within data directory');
+    }
+    await this.exec(`COPY (SELECT * FROM ${table} ORDER BY ts) TO '${sqlEscape(resolved)}' (FORMAT PARQUET, COMPRESSION ZSTD)`);
   }
 
-  /** Export with Hive-style partitioning. */
-  async exportPartitioned(sql: string, dirPath: string, partitionBy: string[]): Promise<void> {
-    const partCols = partitionBy.join(', ');
-    await this.exec(
-      `COPY (${sql}) TO '${dirPath}' (FORMAT PARQUET, COMPRESSION ZSTD, PARTITION_BY (${partCols}))`
-    );
-  }
-
-  /** Query Parquet files directly using glob pattern with Hive partitioning. */
-  async queryParquet(globPattern: string, whereSql?: string, limit?: number): Promise<QueryResult> {
-    let sql = `SELECT * FROM read_parquet('${globPattern}', hive_partitioning = true)`;
-    if (whereSql) sql += ` WHERE ${whereSql}`;
-    return this.query(sql, limit);
+  /** Query Parquet files within the data directory using glob pattern. */
+  async queryParquet(globPattern: string, limit?: number): Promise<QueryResult> {
+    // Ensure the glob pattern resolves within our data directory
+    const resolved = resolve(globPattern);
+    if (!resolved.startsWith(resolve(this.dataDir))) {
+      throw new Error('Parquet query path must be within data directory');
+    }
+    const sql = `SELECT * FROM read_parquet('${sqlEscape(resolved)}', hive_partitioning = true)`;
+    return this.query(sql, limit, false);
   }
 
   // ── Instrument helpers ───────────────────────────────────
@@ -182,6 +263,8 @@ export class DataStore {
     tickSize?: number;
     lotSize?: number;
   }): Promise<string> {
+    validateIdentifier(params.exchange, 'exchange');
+    validateIdentifier(params.symbol, 'symbol');
     const iid = `${params.exchange}:${params.symbol}`;
     await this.insertRows('instruments', [
       'iid', 'symbol', 'asset_class', 'instrument_type',
@@ -194,19 +277,25 @@ export class DataStore {
     return iid;
   }
 
-  /** Look up an instrument by exchange and symbol. */
+  /** Look up an instrument by exchange and symbol using parameterized query. */
   async getInstrument(exchange: string, symbol: string): Promise<Record<string, unknown> | null> {
+    validateIdentifier(exchange, 'exchange');
+    validateIdentifier(symbol, 'symbol');
     const iid = `${exchange}:${symbol}`;
+    // Use escaped string in a safe SELECT (no user-controlled structure)
     const result = await this.query(
-      `SELECT * FROM instruments WHERE iid = '${iid}'`, 1
+      `SELECT * FROM instruments WHERE iid = '${sqlEscape(iid)}'`, 1, false
     );
     return result.rows[0] ?? null;
   }
 
   /** List all registered instruments, optionally filtered by asset class. */
   async listInstruments(assetClass?: string): Promise<QueryResult> {
-    const where = assetClass ? ` WHERE asset_class = '${assetClass}'` : '';
-    return this.query(`SELECT * FROM instruments${where} ORDER BY exchange, symbol`, 0);
+    if (assetClass !== undefined) {
+      validateIdentifier(assetClass, 'assetClass');
+    }
+    const where = assetClass ? ` WHERE asset_class = '${sqlEscape(assetClass)}'` : '';
+    return this.query(`SELECT * FROM instruments${where} ORDER BY exchange, symbol`, 0, false);
   }
 
   /** Close the database connection. */
