@@ -19,12 +19,18 @@ for (let i = 0; i < args.length; i++) {
 
 exchangeId = process.env.CCXT_EXCHANGE ?? exchangeId;
 
+const prefix = exchangeId.toUpperCase().replace(/-/g, '_');
+const apiKey = process.env[`${prefix}_API_KEY`] ?? process.env.CCXT_API_KEY ?? '';
+const secret = process.env[`${prefix}_SECRET`] ?? process.env.CCXT_SECRET ?? '';
+const password = process.env[`${prefix}_PASSWORD`] ?? process.env[`${prefix}_PASSPHRASE`] ?? process.env.CCXT_PASSWORD ?? '';
+const sandbox = process.env[`${prefix}_SANDBOX`] === 'true' || process.env.CCXT_SANDBOX === 'true';
+
 const client = new ExchangeClient({
   exchangeId,
-  apiKey: process.env.CCXT_API_KEY || undefined,
-  secret: process.env.CCXT_SECRET || undefined,
-  password: process.env.CCXT_PASSWORD || undefined,
-  sandbox: process.env.CCXT_SANDBOX === 'true',
+  apiKey: apiKey || undefined,
+  secret: secret || undefined,
+  password: password || undefined,
+  sandbox,
 });
 
 console.log(`Exchange: ${client.name} (${client.exchangeId})`);

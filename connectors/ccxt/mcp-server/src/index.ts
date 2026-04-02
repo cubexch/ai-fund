@@ -27,16 +27,23 @@ for (let i = 0; i < args.length; i++) {
 exchangeId = process.env.CCXT_EXCHANGE ?? exchangeId;
 sandbox = process.env.CCXT_SANDBOX === 'true' || sandbox;
 
+// ── Resolve credentials ────────────────────────────────────
+// Per-exchange env vars take priority: COINBASE_API_KEY, BINANCE_SECRET, etc.
+// Falls back to generic CCXT_* vars for convenience.
+
+const prefix = exchangeId.toUpperCase().replace(/-/g, '_');
+
+const apiKey = process.env[`${prefix}_API_KEY`] ?? process.env.CCXT_API_KEY ?? '';
+const secret = process.env[`${prefix}_SECRET`] ?? process.env.CCXT_SECRET ?? '';
+const password = process.env[`${prefix}_PASSWORD`] ?? process.env[`${prefix}_PASSPHRASE`] ?? process.env.CCXT_PASSWORD ?? '';
+sandbox = process.env[`${prefix}_SANDBOX`] === 'true' || sandbox;
+
 // ── Initialize ─────────────────────────────────────────────
 
 const server = new McpServer({
   name: `ccxt-${exchangeId}`,
   version: '0.1.0',
 });
-
-const apiKey = process.env.CCXT_API_KEY ?? '';
-const secret = process.env.CCXT_SECRET ?? '';
-const password = process.env.CCXT_PASSWORD ?? '';
 
 const client = new ExchangeClient({
   exchangeId,
@@ -49,7 +56,7 @@ const client = new ExchangeClient({
 if (client.hasCredentials) {
   process.stderr.write(`[ccxt-${exchangeId}] Auth: API key loaded (${client.isSandbox ? 'sandbox' : 'LIVE'})\n`);
 } else {
-  process.stderr.write(`[ccxt-${exchangeId}] Auth: none — market data only. Set CCXT_API_KEY and CCXT_SECRET to trade.\n`);
+  process.stderr.write(`[ccxt-${exchangeId}] Auth: none — market data only. Set ${prefix}_API_KEY and ${prefix}_SECRET to trade.\n`);
 }
 
 // ── Register tools ─────────────────────────────────────────

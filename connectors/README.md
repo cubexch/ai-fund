@@ -82,6 +82,8 @@ Then enable it in `.mcp.json`:
 
 The built-in CCXT connector supports Coinbase, Binance, Bybit, and 100+ exchanges. No extra install needed.
 
+Credentials are per-exchange via env vars: `<EXCHANGE>_API_KEY`, `<EXCHANGE>_SECRET`, `<EXCHANGE>_PASSWORD`. Falls back to generic `CCXT_*` vars.
+
 **Coinbase (default):**
 ```json
 {
@@ -90,10 +92,10 @@ The built-in CCXT connector supports Coinbase, Binance, Bybit, and 100+ exchange
     "command": "npx",
     "args": ["tsx", "connectors/ccxt/mcp-server/src/index.ts"],
     "env": {
-      "CCXT_API_KEY": "your-api-key",
-      "CCXT_SECRET": "your-api-secret",
-      "CCXT_PASSWORD": "your-passphrase",
-      "CCXT_SANDBOX": "true"
+      "COINBASE_API_KEY": "your-api-key",
+      "COINBASE_SECRET": "your-api-secret",
+      "COINBASE_PASSPHRASE": "your-passphrase",
+      "COINBASE_SANDBOX": "true"
     }
   }
 }
@@ -107,9 +109,9 @@ The built-in CCXT connector supports Coinbase, Binance, Bybit, and 100+ exchange
     "command": "npx",
     "args": ["tsx", "connectors/ccxt/mcp-server/src/index.ts", "--exchange", "binance"],
     "env": {
-      "CCXT_API_KEY": "your-key",
-      "CCXT_SECRET": "your-secret",
-      "CCXT_SANDBOX": "true"
+      "BINANCE_API_KEY": "your-key",
+      "BINANCE_SECRET": "your-secret",
+      "BINANCE_SANDBOX": "true"
     }
   }
 }
