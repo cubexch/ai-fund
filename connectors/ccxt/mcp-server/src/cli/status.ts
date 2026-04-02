@@ -6,6 +6,7 @@
  */
 
 import { ExchangeClient } from '../client/exchange.js';
+import { loadCredentials, getBackendName } from '../client/credential-store.js';
 
 const args = process.argv.slice(2);
 let exchangeId = 'coinbase';
@@ -19,11 +20,24 @@ for (let i = 0; i < args.length; i++) {
 
 exchangeId = process.env.CCXT_EXCHANGE ?? exchangeId;
 
+// Resolve credentials: env vars > credential store
 const prefix = exchangeId.toUpperCase().replace(/-/g, '_');
-const apiKey = process.env[`${prefix}_API_KEY`] ?? process.env.CCXT_API_KEY ?? '';
-const secret = process.env[`${prefix}_SECRET`] ?? process.env.CCXT_SECRET ?? '';
-const password = process.env[`${prefix}_PASSWORD`] ?? process.env[`${prefix}_PASSPHRASE`] ?? process.env.CCXT_PASSWORD ?? '';
-const sandbox = process.env[`${prefix}_SANDBOX`] === 'true' || process.env.CCXT_SANDBOX === 'true';
+let apiKey = process.env[`${prefix}_API_KEY`] ?? process.env.CCXT_API_KEY ?? '';
+let secret = process.env[`${prefix}_SECRET`] ?? process.env.CCXT_SECRET ?? '';
+let password = process.env[`${prefix}_PASSWORD`] ?? process.env[`${prefix}_PASSPHRASE`] ?? process.env.CCXT_PASSWORD ?? '';
+let sandbox = process.env[`${prefix}_SANDBOX`] === 'true' || process.env.CCXT_SANDBOX === 'true';
+let source = 'env';
+
+if (!apiKey || !secret) {
+  const creds = await loadCredentials(exchangeId);
+  if (creds) {
+    apiKey = creds.apiKey;
+    secret = creds.secret;
+    password = creds.password ?? password;
+    sandbox = creds.sandbox || sandbox;
+    source = await getBackendName();
+  }
+}
 
 const client = new ExchangeClient({
   exchangeId,
@@ -34,8 +48,9 @@ const client = new ExchangeClient({
 });
 
 console.log(`Exchange: ${client.name} (${client.exchangeId})`);
-console.log(`Auth:     ${client.hasCredentials ? 'API key configured' : 'none (market data only)'}`);
+console.log(`Auth:     ${client.hasCredentials ? `API key configured (via ${source})` : 'none (market data only)'}`);
 console.log(`Mode:     ${client.isSandbox ? 'sandbox/testnet' : 'production'}`);
+console.log(`Store:    ${await getBackendName()}`);
 
 // Test connectivity by loading markets
 try {

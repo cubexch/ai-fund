@@ -11,7 +11,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "status": "tsx src/cli/status.ts"
+    "status": "tsx src/cli/status.ts",
+    "login": "tsx src/cli/login.ts",
+    "logout": "tsx src/cli/logout.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
