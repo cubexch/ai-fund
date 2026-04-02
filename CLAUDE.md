@@ -47,6 +47,23 @@ After every code change, run the following before considering the work done:
 2. **Unit tests**: `cd connectors/cube/mcp-server && npm test` — run the full vitest suite; fix any failures before committing
 3. **Update docs**: If your change affects architecture, commands, agent categories, shared libraries, or exchange support, update `CLAUDE.md` and `README.md` to reflect the new state
 
+### Task Completion Checklists
+
+- **Bug fix**: Write a test reproducing the bug + fix + typecheck + full test suite green
+- **New skill**: Copy `skills/_template/SKILL.md` + fill all required sections + update agent categories in `CLAUDE.md` and `README.md`
+- **New connector**: MCP server + tool namespace docs + update supported exchanges table in `CLAUDE.md` and `README.md`
+- **Library change** (`lib/`): Add/update unit tests + verify all importing code still works if function signatures change
+- **Command change** (`.claude/commands/`): Update commands list in `CLAUDE.md` and `README.md`
+
+## Code Conventions
+
+- **Indentation**: 2 spaces, no tabs
+- **Quotes**: Single quotes in TypeScript
+- **File naming**: `kebab-case.ts` for files, `kebab-case/` for directories
+- **TypeScript naming**: `PascalCase` for types/interfaces/classes, `camelCase` for functions/variables/parameters
+- **Imports**: ES module syntax only (`import`/`export`), no `require()`. Use `.js` extensions in import paths.
+- **Commit messages**: Conventional Commits format — `feat(skills): add new persona`, `fix(cube): correct order signing`, `docs: update exchange table`. Scopes: `skills`, `cube`, `lib`, `desk`, `commands`, `docs`
+
 ## Shared Libraries
 
 - **`lib/indicators.ts`** — `sma`, `ema`, `rsi`, `macd`, `bollingerBands`, `atr`, `obv`, `stochastic`, `adx` + `OHLCV` interface
@@ -171,6 +188,35 @@ Defined in `.claude/commands/` as markdown files:
 ## Dependency Policy
 
 **All new dependencies and dependency updates require explicit developer approval before being added.** This applies to both `dependencies` and `devDependencies` in any `package.json` across the monorepo. Do not run `npm install <package>` or add entries to `package.json` without the developer confirming the specific package name and version. This policy exists to minimize supply chain attack surface.
+
+## Do Not
+
+- Use `eval()`, `exec()`, `Function()`, or `pickle` on untrusted input
+- Add exchange-specific API calls inside skill files — skills must stay exchange-agnostic
+- Modify `.desk/` state files directly — always use `bin/desk-state` CLI
+- Commit `.desk/` contents, `.env` files, API keys, or credentials
+- Use `require()` — ESM imports only
+- Change SKILL.md frontmatter schema without updating `skills/_template/SKILL.md`
+- Add or update dependencies without explicit developer approval (see Dependency Policy)
+- Skip typecheck or tests before committing — CI will catch it, but don't waste the round-trip
+
+## Architecture Flow
+
+```
+User command (/hire, /desk, /review, ...)
+  → .claude/commands/<command>.md (skill definition)
+    → Skill loaded from skills/<role>/SKILL.md
+      → Reads .desk/ state via bin/desk-state
+        → Calls exchange tools via MCP connectors
+          → Results persisted to .desk/ (briefings, orders, risk)
+```
+
+**Connector layer**: MCP protocol → tool handlers (`src/tools/`) → exchange API clients (`src/client/`)
+
+**Public API boundaries**:
+- `lib/` exports are public and stable — used by skills and connectors
+- `connectors/cube/mcp-server/src/client/` is internal to the Cube connector
+- Skill SKILL.md files are the interface for agent behavior
 
 ## When Writing Skills
 
