@@ -673,152 +673,191 @@ You never need to think about the signing differences. Each MCP connector handle
 
 ---
 
-## Why Cube Keys Aren't in a TEE (And What We Can Learn from Coinbase)
+## Signing Key Security: TEE + Policy Engine
 
-### Different Trust Models
+### The Problem
 
-The reason comes down to what the key *controls*:
+The Cube signing key currently sits in extractable form — macOS Keychain, Linux libsecret, `~/.cube/credentials.json`, or a Cloudflare Worker secret. Yes, it expires in 1-30 days. But "it'll die soon" is a fallback, not a security model. A leaked key can place a lot of bad trades in the hours or days before it expires.
 
-```
-COINBASE (AgentKit / on-chain wallets):
-  Private key = THE MONEY
-  If key leaks → attacker owns the wallet, can drain everything
-  Key IS the custody mechanism (self-custodial)
-  ∴ TEE makes sense — isolate the key in hardware, never extract it
+Short-lived expiry and TEE isolation aren't alternatives — they're layers that compound. There's no reason to accept the weak point when you can eliminate it.
 
-CUBE (centralized exchange):
-  Private key = SESSION AUTHENTICATION
-  If key leaks → attacker can place trades (but not withdraw)
-  Funds are custodied by Cube (MPC vault: user + Cube + Guardians)
-  ∴ Short-lived key makes sense — key dies in days, exchange holds funds
-```
+### The Right Architecture
 
-Coinbase needs TEE because losing the key means losing the funds. Cube doesn't because the signing key is more like an OAuth session token — it authenticates you to an exchange that already holds your assets. The exchange can revoke the key, the key expires, and withdrawal requires separate authorization.
-
-### Where the Analogy Breaks Down
-
-But if you move the Cube signing key to a Cloudflare Worker for the Telegram bot, you've changed the threat model:
+Private key lives in a hardware enclave. The agent never holds it — only requests signatures. A policy engine inside the enclave enforces limits before signing.
 
 ```
-LOCAL MACHINE (current):
-  - Key in macOS Keychain / Linux libsecret / file (0600)
-  - Physical access required to extract
-  - Key expires in 1-30 days
-  - Blast radius: limited by expiry
-
-CLOUDFLARE WORKER (Telegram bot):
-  - Key in Cloudflare's infrastructure (Worker secret)
-  - Cloud provider has theoretical access
-  - Key still expires in 1-30 days
-  - Blast radius: limited by expiry + Cloudflare's security posture
+PROPOSED:
+  ┌──────────────────────────────────────────┐
+  │  TEE / Secure Enclave                    │
+  │                                          │
+  │  Ed25519 private key (generated here)    │
+  │  Key NEVER exported                      │
+  │                                          │
+  │  Policy engine:                          │
+  │    - Max order size per key              │
+  │    - Allowed trading pairs               │
+  │    - Max daily volume                    │
+  │    - Rate limit (orders/minute)          │
+  │    - No withdrawal (already true)        │
+  │                                          │
+  │  Input: sign request for place_order     │
+  │  Check: policy allows? ✓                │
+  │  Output: Ed25519 signature (64 bytes)    │
+  └──────────────────────────────────────────┘
+           ↑                    ↓
+    sign request          signature only
+           ↑                    ↓
+  ┌──────────────────────────────────────────┐
+  │  MCP Server / Cloudflare Worker          │
+  │  Has: TEE access creds (rotatable)       │
+  │  Does NOT have: Ed25519 private key      │
+  └──────────────────────────────────────────┘
 ```
 
-The key is now in someone else's infrastructure. Short-lived expiry still limits blast radius, but you're trusting Cloudflare's isolation between Workers (V8 isolates, not hardware enclaves).
+### Where the TEE Lives — Use Whatever's Available
 
-### What Cube Could Learn from Coinbase
-
-#### 1. Policy Engine at the Signing Layer
-
-This is the biggest takeaway. Coinbase enforces spending limits *at the TEE*, not in the agent's prompts:
+Simple rule: if there's a local TEE, use it. The credential store
+auto-detects and uses the best available option:
 
 ```
-COINBASE:
-  Agent says "transfer 100 ETH" →
-  TEE checks policy: "max 1 ETH per tx" →
-  REJECTED before signing, at hardware level
-  
-  The agent literally cannot sign a transaction that violates the policy.
-  Prompt injection cannot bypass this.
+macOS:
+  Keychain (encrypted at rest, per-app ACL, password-protected)
+  Note: Secure Enclave only supports P-256, not Ed25519.
+  True SE integration needs Cube to accept P-256 or a Swift
+  helper to wrap the Ed25519 seed with an SE-backed AES key.
 
-CUBE (current):
-  Agent says place_order(100 BTC) →
-  Risk Manager (AI) checks limits →
-  SOFT GATE — enforced by prompt, not infrastructure
-  
-  The MCP server CAN sign any order. Limits are advisory.
+iOS:
+  Keychain + Secure Enclave (Face ID / Touch ID gate)
+  Same P-256 limitation for Ed25519 keys
+
+Android:
+  StrongBox / TEE via Android Keystore
+  Hardware-backed key storage
+
+Linux VPS:
+  libsecret (GNOME Keyring / KWallet) — not hardware-backed
+  Or: Cube-hosted signing service (key never on VPS at all)
+
+Cloudflare Worker:
+  Worker secrets (V8 isolate) — not hardware-backed
+  Or: Cube-hosted signing service via CUBE_TEE_SIGNING_URL
+
+Telegram Mini App:
+  SecureStorage API + BiometricManager (Face ID / fingerprint)
+  For signing trade approvals from phone
 ```
 
-A Cube-side policy engine could enforce:
-- Max order size per signing key
-- Max daily volume per signing key
-- Allowed trading pairs per signing key
-- Rate limits per signing key
+The connector auto-detects: `detectStore()` in `credential-store.ts`
+picks the best local store (keychain on macOS, libsecret on Linux,
+file fallback). If `CUBE_TEE_SIGNING_URL` is set, the remote TEE
+signing service takes priority over all local options — key never
+touches the device at all.
 
-These would be enforced by the exchange, not by the agent. Even if the agent is compromised, the exchange rejects orders that violate the policy.
+### How Device Auth Changes
 
-#### 2. TEE for Cloud Deployments
-
-For users running AI Fund on a VPS or Cloudflare Worker, Cube could offer TEE-backed signing:
+User experience is identical:
 
 ```
-Option A: Current (short-lived key on your machine)
-  Good for: local Claude Code sessions
-  
-Option B: TEE-backed signing (Cube-hosted or self-hosted enclave)
-  Good for: cloud deployments (Telegram bot, always-on VPS)
-  The signing key never exists outside the enclave
-  Even the VPS operator can't extract it
-  
-Option C: Hybrid (short-lived key + exchange-side policy)
-  Good for: Cloudflare Worker deployments
-  Key still expires, AND the exchange enforces limits
-  Defense in depth without TEE infrastructure overhead
+CURRENT:
+  1. Agent generates Ed25519 keypair locally
+  2. Public key sent to Cube
+  3. Private key on agent's machine              ← extractable
+  4. Agent signs orders locally
+
+PROPOSED:
+  1. Agent initiates device auth (same browser flow)
+  2. Cube generates Ed25519 keypair IN ITS TEE
+  3. Public key registered for user's account
+  4. Private key stays in Cube's TEE              ← never extracted
+  5. Agent requests signatures via API
+  6. Agent attaches signature to order
 ```
 
-#### 3. Attestation
+### Policy Engine: Enforced at Signing, Not in Prompts
 
-Coinbase's TEE provides attestation — cryptographic proof of *what code* is running. Cube could verify that the agent signing requests is running approved software, not a compromised binary. This matters less for API keys (which are opaque tokens) but matters for Ed25519 signing (where the key holder has real capabilities).
-
-### Why Short-Lived Keys May Actually Be Better
-
-TEEs aren't a silver bullet:
+More important than TEE itself:
 
 ```
-TEE RISKS:
-  - Side-channel attacks (Intel SGX has had multiple CVEs)
-  - Supply chain vulnerabilities (hardware backdoors)
-  - Vendor lock-in (AWS Nitro = AWS only)
-  - Operational complexity (no SSH, no persistent storage)
-  - Larger attack surface (full Linux in enclave)
+CURRENT:
+  Agent says place_order(100 BTC)
+  → Risk Manager (AI) checks → SOFT GATE (prompt-based)
+  → MCP server CAN sign any order
+  → Prompt injection can bypass this
 
-SHORT-LIVED KEY ADVANTAGES:
-  - Zero infrastructure overhead
-  - No vendor dependency
-  - No side-channel attack surface
-  - Key leaks are time-bounded (dead in days)
-  - Simple to reason about
-  - Works on any platform (laptop, VPS, Worker, phone)
+WITH POLICY ENGINE:
+  Agent requests signature for 100 BTC order
+  → TEE policy: max $10,000 per order → REJECTED
+  → No signature produced
+  → Agent can't forge one
+  → Exchange won't accept unsigned orders
+  → Prompt injection CANNOT bypass this
 ```
 
-The honest answer: **short-lived keys + exchange-side policy enforcement** gives you 90% of TEE's security benefit with 10% of the complexity. The missing 10% is the guarantee that the key *cannot be extracted from memory* during its lifetime — which TEE provides but short-lived expiry makes less critical.
-
-### Recommended Architecture for AI Fund on Cloudflare
+### Layers That Compound
 
 ```
-DEFENSE IN DEPTH (no TEE required):
-
-1. Short-lived Cube signing key (expires in 7 days)
-   → Limits blast radius of any compromise
-
-2. Exchange-side policy (PROPOSED — not yet available from Cube):
-   → Max order size per key
-   → Allowed pairs per key
-   → Rate limit per key
-   → No withdrawal capability (already true for device auth)
-
-3. Worker-side hard limits (in YOUR code):
-   → Max order size, daily volume, allowed symbols
-   → Human approval required for every trade
-
-4. Cloudflare Worker secrets (encrypted at rest):
-   → Key encrypted, only decrypted at runtime in V8 isolate
-
-5. Telegram allowlist + HMAC-signed approvals:
-   → Only you can approve trades
-   → Approvals are one-time-use, time-bounded
+  TEE isolation         → key can't be extracted
+  Policy engine         → limits can't be exceeded
+  Short-lived expiry    → dead in days (defense in depth)
+  No withdrawal         → can't move funds off exchange
+  Human approval in TG  → final gate
+  Worker-side limits    → defense in depth in your code
 ```
 
-This stack doesn't need a TEE. It achieves comparable security through layered, time-bounded controls. The key insight from Coinbase isn't "use TEE" — it's "enforce policy at the infrastructure layer, not in prompts."
+These are not alternatives. They stack.
+
+### TEE Risks to Acknowledge
+
+Intel SGX has had side-channel CVEs (Spectre, Foreshadow, Plundervolt).
+AWS Nitro uses a dedicated security chip — more resilient. Even imperfect
+TEE raises the bar from "read a file" to "hardware attack," a massive
+jump in attacker cost.
+
+### Telegram Trade Approval via Phone TEE
+
+Telegram Mini Apps have native biometric + secure storage APIs.
+The approval flow uses the phone's hardware security:
+
+```
+1. Bot sends trade proposal with "Approve" button
+2. Button opens Mini App (inline or full-screen)
+3. Mini App calls BiometricManager.requestBiometricAuth()
+   → Face ID / fingerprint prompt on phone
+4. On success, Mini App retrieves approval signing key
+   from Telegram SecureStorage (hardware-backed on iOS/Android)
+5. Signs the approval challenge with the key
+6. Sends signed approval to Cloudflare Worker
+7. Worker verifies signature against registered public key
+8. Worker requests order signature from Cube TEE
+9. Order executes
+
+No extractable keys anywhere:
+  Phone TEE     → signs the approval (proves human authorized it)
+  Cube TEE      → signs the order (proves exchange authorized it)
+```
+
+Telegram APIs used:
+- `BiometricManager.requestBiometricAuth({ reason })` — triggers Face ID
+- `SecureStorage.setItem(key, value)` — hardware-backed on-device storage
+- `BiometricManager.updateBiometricToken(token)` — store sensitive data
+  gated behind biometric auth
+
+### Recommended Path
+
+**Short term**: Exchange-side policy per signing key. Highest impact, no
+TEE infra needed. Server-side validation on existing device auth.
+macOS Keychain protects keys at rest (encrypted, per-app ACL).
+
+**Medium term**: Cube-hosted signing service. Generate keys in TEE during
+device auth. Expose `/agent/sign`. MCP server requests signatures instead
+of signing locally.
+
+**Long term**: Telegram Mini App with biometric approval. Full end-to-end
+hardware-backed chain from phone to exchange.
+
+---
+
+---
 
 ---
 

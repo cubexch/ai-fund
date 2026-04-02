@@ -177,13 +177,12 @@ async function isCommandAvailable(cmd: string): Promise<boolean> {
 
 /**
  * Detect the best credential store for the current platform.
- * Falls back to file store if no native keychain is available.
+ * Priority: Keychain (macOS) > libsecret (Linux) > file.
  */
 export async function detectStore(): Promise<CredentialStore> {
   const os = platform();
 
   if (os === 'darwin') {
-    // macOS always has `security`
     return new KeychainStore();
   }
 
