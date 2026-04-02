@@ -1,0 +1,15 @@
+DESK PERFORMANCE REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━
+
+  CONNECTED: paper mode
+
+Agent                Primary KPI     Actual    Grade
+─────────────────────────────────────────────────────
+Risk Manager         Breaches        0         A
+Momentum Trader      Win Rate        58%       B+
+Mean Reversion       Sharpe          1.92      B+
+Quant Analyst        Signal Acc      67%       B
+
+RECOMMENDATION:
+  All agents performing above threshold. Consider adding
+  Arbitrageur if connecting a second exchange.
