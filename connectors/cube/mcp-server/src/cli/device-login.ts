@@ -276,8 +276,12 @@ async function main() {
   const forceNew = args.includes('--new-keypair');
   const env = getEnvironment(process.env.CUBE_ENV);
 
-  // Header
-  console.log(renderLogo());
+  // Header — skip logo in non-TTY to keep output compact
+  if (isTTY) {
+    console.log(renderLogo());
+  } else {
+    console.log(`\n  ${c.cyan}${c.bold}Cube Exchange${c.reset} — Device Login\n`);
+  }
 
   // Check for existing keypair — offer to reuse
   let existingKeyPair: Ed25519KeyPair | undefined;
@@ -327,11 +331,11 @@ async function main() {
   const handleEvent = async (event: DeviceAuthEvent) => {
     switch (event.type) {
       case 'keypair_generated':
-        spinner.succeed(`${existingKeyPair ? 'Reusing' : 'Generated'} Ed25519 keypair ${c.dim}${event.publicKeyHex.slice(0, 12)}...${c.reset}`);
+        if (isTTY) spinner.succeed(`${existingKeyPair ? 'Reusing' : 'Generated'} Ed25519 keypair ${c.dim}${event.publicKeyHex.slice(0, 12)}...${c.reset}`);
         break;
 
       case 'callback_server_started':
-        spinner.succeed(`Callback server ready ${c.dim}:${event.port}${c.reset}`);
+        if (isTTY) spinner.succeed(`Callback server ready ${c.dim}:${event.port}${c.reset}`);
         break;
 
       case 'callback_server_failed':

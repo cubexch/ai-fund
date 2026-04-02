@@ -93,6 +93,26 @@ Tests live in `connectors/cube/mcp-server/tests/` using vitest. Run with `cd con
 - **File naming**: `<module>.test.ts` matching the source file name
 - **Integration tests**: Suffix with `.integration.test.ts` — these hit real APIs and may be skipped in CI
 
+## MCP Tool Loading
+
+MCP tools in Claude Code are **deferred** (lazy-loaded). They won't appear in your available tool list until fetched via `ToolSearch`. This means:
+
+- **Never conclude "0 tools" or "server not connected" by inspecting your tool list.** The tools exist but haven't been materialized yet.
+- **To verify an MCP server works**: use `ToolSearch` to fetch a tool, then call it. For Cube, `get_assets` requires no auth and is a good connectivity test.
+- **Auth is separate from connectivity.** The Cube MCP server registers ALL tools regardless of auth status. Public endpoints (market data) work without credentials. Auth-required tools (trading, positions) return an error at call time if not authenticated.
+- **To check auth status**: run the exchange's status CLI (e.g., `npx tsx connectors/cube/mcp-server/src/cli/status.ts`).
+
+## Cube Login
+
+The Cube login command is `npm run login` in `connectors/cube/mcp-server/`, which runs `src/cli/device-login.ts`. The device login uses RFC 8628 device authorization — **no API keys needed**. It generates an Ed25519 keypair locally and registers it with Cube via browser approval.
+
+When run from Claude Code (no TTY), the CLI:
+- Auto-enables headless mode (prints URL instead of opening browser)
+- Accepts `--reuse-keypair` or `--new-keypair` flags to skip the interactive keypair question
+- Exits with code 2 if an existing keypair is found and no flag was provided — read the output, ask the user, then re-run with the chosen flag
+- Prints a verification URL and code for the user to approve in their browser
+- Polls until approved (up to 10 minutes)
+
 ## Multi-Exchange Design
 
 Skills reference generic trading capabilities (place orders, get prices, check positions). When multiple exchanges are connected via MCP, tools are namespaced by exchange. Skills understand this and can:
