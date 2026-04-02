@@ -1,0 +1,33 @@
+{
+  "_comment": "My First Desk -- a balanced starter config with 4 agents.",
+
+  "name": "My First Desk",
+  "description": "A beginner-friendly trading desk that pairs momentum and mean-reversion strategies under strict risk management, with a quant analyst feeding signals to both.",
+
+  "agents": [
+    "risk-manager",
+    "momentum-trader",
+    "mean-reversion-trader",
+    "quant-analyst"
+  ],
+
+  "_agent_notes": {
+    "risk-manager": "Hired first -- gatekeeps every trade proposal. No order fires without approval.",
+    "momentum-trader": "Rides trends using moving-average crossovers and ADX filters.",
+    "mean-reversion-trader": "Fades overextended moves using Bollinger Bands and RSI.",
+    "quant-analyst": "Runs statistical screens and feeds scored signals to the two traders."
+  },
+
+  "risk_parameters": {
+    "_comment": "Conservative limits suitable for a first desk.",
+    "max_position_size_pct": 5,
+    "max_portfolio_drawdown_pct": 10,
+    "max_leverage": 1,
+    "stop_loss_required": true,
+    "max_correlated_exposure_pct": 20
+  },
+
+  "markets": ["BTC-USDC", "ETH-USDC", "SOL-USDC"],
+  "default_timeframe": "4h",
+  "paper_mode": true
+}
