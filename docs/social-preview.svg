@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#1a1a2e"/>
+    </linearGradient>
+    <linearGradient id="greenGlow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3fb950" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#3fb950" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="curveGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#238636"/>
+      <stop offset="100%" stop-color="#3fb950"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <clipPath id="chartClip">
+      <rect x="780" y="80" width="440" height="180" rx="8"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1280" height="640" fill="url(#bg)"/>
+
+  <!-- Subtle grid pattern -->
+  <g opacity="0.04">
+    <line x1="0" y1="160" x2="1280" y2="160" stroke="#ffffff" stroke-width="1"/>
+    <line x1="0" y1="320" x2="1280" y2="320" stroke="#ffffff" stroke-width="1"/>
+    <line x1="0" y1="480" x2="1280" y2="480" stroke="#ffffff" stroke-width="1"/>
+    <line x1="320" y1="0" x2="320" y2="640" stroke="#ffffff" stroke-width="1"/>
+    <line x1="640" y1="0" x2="640" y2="640" stroke="#ffffff" stroke-width="1"/>
+    <line x1="960" y1="0" x2="960" y2="640" stroke="#ffffff" stroke-width="1"/>
+  </g>
+
+  <!-- Accent line top -->
+  <rect x="0" y="0" width="1280" height="3" fill="#3fb950" opacity="0.6"/>
+
+  <!-- ==================== LEFT HALF ==================== -->
+
+  <!-- Title -->
+  <text x="72" y="130" font-family="Arial, Helvetica, sans-serif" font-size="56" font-weight="bold" fill="#ffffff" letter-spacing="4">AI FUND</text>
+
+  <!-- Subtitle -->
+  <text x="72" y="172" font-family="Arial, Helvetica, sans-serif" font-size="22" fill="#8b949e">Open-Source AI Hedge Fund OS</text>
+
+  <!-- Divider -->
+  <rect x="72" y="196" width="60" height="3" rx="2" fill="#3fb950"/>
+
+  <!-- Bullet points -->
+  <g font-family="Arial, Helvetica, sans-serif" font-size="22" fill="#c9d1d9">
+    <text x="72" y="248">
+      <tspan fill="#f0883e">&#x26A1;</tspan>
+      <tspan dx="8">42 AI Trading Agents</tspan>
+    </text>
+    <text x="72" y="292">
+      <tspan fill="#58a6ff">&#x1F50C;</tspan>
+      <tspan dx="8">100+ Exchange Connectors</tspan>
+    </text>
+    <text x="72" y="336">
+      <tspan fill="#3fb950">&#x1F4CA;</tspan>
+      <tspan dx="8">Shareable PnL &amp; KPI Outputs</tspan>
+    </text>
+  </g>
+
+  <!-- Named personas -->
+  <g font-family="Arial, Helvetica, sans-serif" font-size="14" fill="#484f58">
+    <text x="72" y="380">Personas include Arthur Hayes, Jim Simons, George Soros, Jesse Livermore &amp; more</text>
+  </g>
+
+  <!-- Bottom left note -->
+  <text x="72" y="430" font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#484f58">Paper trading by default  &#xB7;  MIT Licensed</text>
+
+  <!-- ==================== RIGHT HALF ==================== -->
+
+  <!-- Chart card background -->
+  <rect x="770" y="70" width="460" height="200" rx="12" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+
+  <!-- Chart title -->
+  <text x="792" y="100" font-family="Arial, Helvetica, sans-serif" font-size="13" fill="#484f58" font-weight="bold" letter-spacing="1">EQUITY CURVE</text>
+  <text x="1130" y="100" font-family="Arial, Helvetica, sans-serif" font-size="13" fill="#3fb950" font-weight="bold">+34.2%</text>
+
+  <!-- Chart area fill -->
+  <polygon points="800,240 800,220 830,215 860,210 890,218 920,195 950,190 980,200 1010,175 1040,165 1070,170 1100,148 1130,140 1160,145 1190,125 1205,120 1205,240" fill="url(#greenGlow)" clip-path="url(#chartClip)"/>
+
+  <!-- Equity curve line -->
+  <polyline
+    points="800,220 830,215 860,210 890,218 920,195 950,190 980,200 1010,175 1040,165 1070,170 1100,148 1130,140 1160,145 1190,125 1205,120"
+    fill="none" stroke="url(#curveGrad)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
+
+  <!-- Chart baseline -->
+  <line x1="800" y1="240" x2="1205" y2="240" stroke="#30363d" stroke-width="1"/>
+
+  <!-- KPI Scorecard card -->
+  <rect x="770" y="290" width="460" height="200" rx="12" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+
+  <!-- Scorecard title -->
+  <text x="792" y="322" font-family="Arial, Helvetica, sans-serif" font-size="13" fill="#484f58" font-weight="bold" letter-spacing="1">AGENT SCORECARD</text>
+
+  <!-- Column headers -->
+  <text x="792" y="350" font-family="'Courier New', monospace" font-size="12" fill="#484f58">AGENT</text>
+  <text x="1080" y="350" font-family="'Courier New', monospace" font-size="12" fill="#484f58">GRADE</text>
+  <text x="1150" y="350" font-family="'Courier New', monospace" font-size="12" fill="#484f58">STATUS</text>
+  <line x1="792" y1="358" x2="1200" y2="358" stroke="#21262d" stroke-width="1"/>
+
+  <!-- Row 1: Risk Manager -->
+  <circle cx="805" cy="378" r="4" fill="#3fb950"/>
+  <text x="820" y="382" font-family="'Courier New', monospace" font-size="15" fill="#c9d1d9">Risk Manager</text>
+  <text x="1085" y="382" font-family="'Courier New', monospace" font-size="16" fill="#3fb950" font-weight="bold">A</text>
+  <rect x="1145" y="368" width="52" height="20" rx="4" fill="#238636" opacity="0.2"/>
+  <text x="1155" y="382" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#3fb950">HIRED</text>
+
+  <!-- Row 2: Arbitrageur -->
+  <circle cx="805" cy="410" r="4" fill="#3fb950"/>
+  <text x="820" y="414" font-family="'Courier New', monospace" font-size="15" fill="#c9d1d9">Arbitrageur</text>
+  <text x="1085" y="414" font-family="'Courier New', monospace" font-size="16" fill="#58a6ff" font-weight="bold">B+</text>
+  <rect x="1145" y="400" width="52" height="20" rx="4" fill="#238636" opacity="0.2"/>
+  <text x="1155" y="414" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#3fb950">HIRED</text>
+
+  <!-- Row 3: Market Maker -->
+  <circle cx="805" cy="442" r="4" fill="#e3b341"/>
+  <text x="820" y="446" font-family="'Courier New', monospace" font-size="15" fill="#c9d1d9">Market Maker</text>
+  <text x="1085" y="446" font-family="'Courier New', monospace" font-size="16" fill="#e3b341" font-weight="bold">B</text>
+  <rect x="1145" y="432" width="52" height="20" rx="4" fill="#238636" opacity="0.2"/>
+  <text x="1155" y="446" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#3fb950">HIRED</text>
+
+  <!-- Row 4: Momentum (fired) -->
+  <circle cx="805" cy="474" r="4" fill="#f85149"/>
+  <text x="820" y="478" font-family="'Courier New', monospace" font-size="15" fill="#c9d1d9">Momentum</text>
+  <text x="1085" y="478" font-family="'Courier New', monospace" font-size="16" fill="#f85149" font-weight="bold">D</text>
+  <rect x="1145" y="464" width="52" height="20" rx="4" fill="#da3633" opacity="0.25"/>
+  <text x="1150" y="478" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#f85149">FIRED</text>
+
+  <!-- ==================== FOOTER BAR ==================== -->
+  <rect x="0" y="560" width="1280" height="80" fill="#0d1117" opacity="0.7"/>
+  <line x1="0" y1="560" x2="1280" y2="560" stroke="#21262d" stroke-width="1"/>
+
+  <!-- GitHub URL -->
+  <text x="72" y="607" font-family="'Courier New', monospace" font-size="17" fill="#58a6ff">github.com/cubexch/ai-fund</text>
+
+  <!-- Code box: npx ai-fund demo -->
+  <rect x="920" y="586" width="290" height="36" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="938" y="610" font-family="'Courier New', monospace" font-size="15" fill="#8b949e">$</text>
+  <text x="958" y="610" font-family="'Courier New', monospace" font-size="15" fill="#c9d1d9">npx ai-fund demo</text>
+
+  <!-- Bottom accent line -->
+  <rect x="0" y="637" width="1280" height="3" fill="#3fb950" opacity="0.6"/>
+</svg>
