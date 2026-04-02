@@ -165,6 +165,18 @@ class FileStore implements CredentialStore {
 }
 
 // ── Store Detection ──────────────────────────────────────────
+//
+// Note on macOS Secure Enclave:
+// The SE only supports P-256, not Ed25519. To truly use the SE for
+// key protection, Cube would need to either:
+//   a) Accept P-256 signatures (allowing native SE signing), or
+//   b) Ship a small Swift helper that creates a P-256 key in the SE,
+//      uses ECDH to derive an AES key, and wraps the Ed25519 seed.
+//
+// The macOS Keychain is already well-protected (encrypted at rest,
+// access-controlled per app). For stronger isolation, use the remote
+// TEE signing service (CUBE_TEE_SIGNING_URL) which keeps the key
+// off the machine entirely.
 
 async function isCommandAvailable(cmd: string): Promise<boolean> {
   try {
@@ -177,13 +189,12 @@ async function isCommandAvailable(cmd: string): Promise<boolean> {
 
 /**
  * Detect the best credential store for the current platform.
- * Falls back to file store if no native keychain is available.
+ * Priority: Keychain (macOS) > libsecret (Linux) > file.
  */
 export async function detectStore(): Promise<CredentialStore> {
   const os = platform();
 
   if (os === 'darwin') {
-    // macOS always has `security`
     return new KeychainStore();
   }
 

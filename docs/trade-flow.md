@@ -714,27 +714,44 @@ PROPOSED:
   └──────────────────────────────────────────┘
 ```
 
-### Where the TEE Lives
+### Where the TEE Lives — Use Whatever's Available
 
-**Option 1: Cube-Hosted Signing Service (recommended)**
-Cube runs a TEE-backed signing API. Key generated in Cube's enclave during
-device auth. Agent requests signatures via:
-`POST /agent/sign { verificationKeyId, orderPayload } → { signature }`
-Cube already holds custody via MPC — a signing service is natural. Zero
-infra for the user.
+Simple rule: if there's a local TEE, use it. The credential store
+auto-detects and uses the best available option:
 
-**Option 2: Platform Secure Enclave (local)**
-macOS / iOS Secure Enclave, Android Keystore. Key generated in hardware,
-never exported. Only works locally. Note: Secure Enclave uses P-256, not
-Ed25519 — Cube would need to accept P-256 or provide a bridge.
+```
+macOS:
+  Keychain (encrypted at rest, per-app ACL, password-protected)
+  Note: Secure Enclave only supports P-256, not Ed25519.
+  True SE integration needs Cube to accept P-256 or a Swift
+  helper to wrap the Ed25519 seed with an SE-backed AES key.
 
-**Option 3: Cloud TEE (self-hosted)**
-AWS Nitro / Azure Confidential Computing. Full control + attestation,
-but operational complexity and vendor lock-in.
+iOS:
+  Keychain + Secure Enclave (Face ID / Touch ID gate)
+  Same P-256 limitation for Ed25519 keys
 
-**Option 4: Cloudflare Worker + Cube signing proxy**
-Worker handles Telegram + trade logic. Signing goes to Cube-hosted service
-(Option 1). Free Worker + secure signing. Clean separation.
+Android:
+  StrongBox / TEE via Android Keystore
+  Hardware-backed key storage
+
+Linux VPS:
+  libsecret (GNOME Keyring / KWallet) — not hardware-backed
+  Or: Cube-hosted signing service (key never on VPS at all)
+
+Cloudflare Worker:
+  Worker secrets (V8 isolate) — not hardware-backed
+  Or: Cube-hosted signing service via CUBE_TEE_SIGNING_URL
+
+Telegram Mini App:
+  SecureStorage API + BiometricManager (Face ID / fingerprint)
+  For signing trade approvals from phone
+```
+
+The connector auto-detects: `detectStore()` in `credential-store.ts`
+picks the best local store (keychain on macOS, libsecret on Linux,
+file fallback). If `CUBE_TEE_SIGNING_URL` is set, the remote TEE
+signing service takes priority over all local options — key never
+touches the device at all.
 
 ### How Device Auth Changes
 
@@ -796,17 +813,47 @@ AWS Nitro uses a dedicated security chip — more resilient. Even imperfect
 TEE raises the bar from "read a file" to "hardware attack," a massive
 jump in attacker cost.
 
+### Telegram Trade Approval via Phone TEE
+
+Telegram Mini Apps have native biometric + secure storage APIs.
+The approval flow uses the phone's hardware security:
+
+```
+1. Bot sends trade proposal with "Approve" button
+2. Button opens Mini App (inline or full-screen)
+3. Mini App calls BiometricManager.requestBiometricAuth()
+   → Face ID / fingerprint prompt on phone
+4. On success, Mini App retrieves approval signing key
+   from Telegram SecureStorage (hardware-backed on iOS/Android)
+5. Signs the approval challenge with the key
+6. Sends signed approval to Cloudflare Worker
+7. Worker verifies signature against registered public key
+8. Worker requests order signature from Cube TEE
+9. Order executes
+
+No extractable keys anywhere:
+  Phone TEE     → signs the approval (proves human authorized it)
+  Cube TEE      → signs the order (proves exchange authorized it)
+```
+
+Telegram APIs used:
+- `BiometricManager.requestBiometricAuth({ reason })` — triggers Face ID
+- `SecureStorage.setItem(key, value)` — hardware-backed on-device storage
+- `BiometricManager.updateBiometricToken(token)` — store sensitive data
+  gated behind biometric auth
+
 ### Recommended Path
 
 **Short term**: Exchange-side policy per signing key. Highest impact, no
 TEE infra needed. Server-side validation on existing device auth.
+macOS Keychain protects keys at rest (encrypted, per-app ACL).
 
-**Medium term**: Cube-hosted signing service (Option 1). Generate keys
-in TEE during device auth. Expose `/agent/sign`. MCP server requests
-signatures instead of signing locally.
+**Medium term**: Cube-hosted signing service. Generate keys in TEE during
+device auth. Expose `/agent/sign`. MCP server requests signatures instead
+of signing locally.
 
-**Long term**: Attestation — verify agent is running approved code before
-producing signatures.
+**Long term**: Telegram Mini App with biometric approval. Full end-to-end
+hardware-backed chain from phone to exchange.
 
 ---
 
