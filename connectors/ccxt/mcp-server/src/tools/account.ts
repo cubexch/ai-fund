@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { ExchangeClient } from '../client/exchange.js';
+import { sanitizeError } from '../client/sanitize.js';
 
 // Cast schemas to any to avoid TS2589 "excessively deep type instantiation" with zod + MCP SDK
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -34,7 +35,7 @@ export function registerAccountTools(server: McpServer, client: ExchangeClient) 
         };
       } catch (error: any) {
         return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
+          content: [{ type: 'text' as const, text: `Failed: ${sanitizeError(error)}` }],
           isError: true,
         };
       }
@@ -67,7 +68,7 @@ export function registerAccountTools(server: McpServer, client: ExchangeClient) 
         };
       } catch (error: any) {
         return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
+          content: [{ type: 'text' as const, text: `Failed: ${sanitizeError(error)}` }],
           isError: true,
         };
       }
@@ -112,7 +113,7 @@ export function registerAccountTools(server: McpServer, client: ExchangeClient) 
         };
       } catch (error: any) {
         return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
+          content: [{ type: 'text' as const, text: `Failed: ${sanitizeError(error)}` }],
           isError: true,
         };
       }

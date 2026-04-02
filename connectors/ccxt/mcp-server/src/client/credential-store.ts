@@ -20,13 +20,20 @@ import { homedir, platform } from 'node:os';
 // ── Constants ────────────────────────────────────────────────
 
 const BASE_DIR = join(homedir(), '.ccxt');
+const EXCHANGE_ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
+
+function validateExchangeId(exchangeId: string): void {
+  if (!EXCHANGE_ID_RE.test(exchangeId)) {
+    throw new Error(`Invalid exchange ID: "${exchangeId}". Must be lowercase alphanumeric with hyphens/underscores.`);
+  }
+}
 
 function service(exchangeId: string) { return `ccxt-${exchangeId}`; }
 function label(exchangeId: string) { return `CCXT ${exchangeId} credentials`; }
-function credentialsDir(exchangeId: string) { return join(BASE_DIR, exchangeId); }
+function credentialsDir(exchangeId: string) { validateExchangeId(exchangeId); return join(BASE_DIR, exchangeId); }
 function credentialsFile(exchangeId: string) { return join(credentialsDir(exchangeId), 'credentials.json'); }
 
-export { credentialsFile };
+export { credentialsFile, validateExchangeId };
 
 // ── Credential Shape ────────────────────────────────────────
 
@@ -223,16 +230,19 @@ export function resetStore(): void {
 }
 
 export async function loadCredentials(exchangeId: string): Promise<CcxtCredentials | null> {
+  validateExchangeId(exchangeId);
   const store = await getStore();
   return store.load(exchangeId);
 }
 
 export async function saveCredentials(creds: CcxtCredentials): Promise<void> {
+  validateExchangeId(creds.exchangeId);
   const store = await getStore();
   await store.save(creds);
 }
 
 export async function deleteCredentials(exchangeId: string): Promise<void> {
+  validateExchangeId(exchangeId);
   const store = await getStore();
   await store.delete(exchangeId);
 }
