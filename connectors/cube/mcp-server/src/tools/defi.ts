@@ -4,19 +4,19 @@ import type { IridiumClient, TokenSearchResult, Ticker } from '../client/iridium
 import type { OsmiumClient } from '../client/osmium.js';
 import { getSigningCredentials } from '../client/auth.js';
 
-function isMintAddress(value: string): boolean {
+export function isMintAddress(value: string): boolean {
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
 }
 
 /** Well-known Solana mint addresses for tokens that don't appear in search APIs */
-const KNOWN_MINTS: Record<string, { mint: string; symbol: string; decimals: number }> = {
+export const KNOWN_MINTS: Record<string, { mint: string; symbol: string; decimals: number }> = {
   SOL: { mint: 'So11111111111111111111111111111111111111112', symbol: 'SOL', decimals: 9 },
   WSOL: { mint: 'So11111111111111111111111111111111111111112', symbol: 'SOL', decimals: 9 },
   USDC: { mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', symbol: 'USDC', decimals: 6 },
   USDT: { mint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', symbol: 'USDT', decimals: 6 },
 };
 
-function formatToken(t: TokenSearchResult): string {
+export function formatToken(t: TokenSearchResult): string {
   const parts = [t.symbol];
   if (t.metadata.currencyName && t.metadata.currencyName !== t.symbol) {
     parts.push(`(${t.metadata.currencyName})`);

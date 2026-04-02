@@ -168,6 +168,10 @@ Defined in `.claude/commands/` as markdown files:
 - **Risk Manager as gatekeeper.** Trading agents should consult the Risk Manager before executing trades. Firing risk-manager while trading agents are active triggers a warning.
 - **API key security.** Never log, display, or store API keys in plaintext outside the credential store. Use read-only keys on subaccounts where possible.
 
+## Dependency Policy
+
+**All new dependencies and dependency updates require explicit developer approval before being added.** This applies to both `dependencies` and `devDependencies` in any `package.json` across the monorepo. Do not run `npm install <package>` or add entries to `package.json` without the developer confirming the specific package name and version. This policy exists to minimize supply chain attack surface.
+
 ## When Writing Skills
 
 Each SKILL.md must:
