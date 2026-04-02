@@ -131,30 +131,12 @@ describe('Content Quality', () => {
       expect(bullets.length).toBeGreaterThanOrEqual(4);
     });
 
-    it('safety rules mention confirmation for write operations (trading agents only)', () => {
-      // Read-only analysts don't place orders, so write confirmation is N/A
-      const apiSection = getSection(s, 'Exchange APIs') ?? getSection(s, 'How You Use');
-      const tools = apiSection ? extractAllToolReferences(apiSection.content) : [];
-      const isWriteAgent = tools.some(t =>
-        ['place_order', 'cancel_order', 'modify_order', 'mass_cancel', 'execute_swap'].includes(t)
-      );
-
-      if (!isWriteAgent) return; // Skip for read-only agents
-
+    it('safety rules mention confirmation for write operations', () => {
       const safety = getSection(s, 'Safety');
       expect(safety!.content.toLowerCase()).toMatch(/confirm|consent|explicit|approval/);
     });
 
-    it('safety rules mention paper mode (trading agents only)', () => {
-      // Read-only analysts don't place orders, so paper mode is N/A
-      const apiSection = getSection(s, 'Exchange APIs') ?? getSection(s, 'How You Use');
-      const tools = apiSection ? extractAllToolReferences(apiSection.content) : [];
-      const isWriteAgent = tools.some(t =>
-        ['place_order', 'cancel_order', 'modify_order', 'mass_cancel', 'execute_swap'].includes(t)
-      );
-
-      if (!isWriteAgent) return; // Skip for read-only agents
-
+    it('safety rules mention paper mode', () => {
       const safety = getSection(s, 'Safety');
       expect(safety!.content.toLowerCase()).toMatch(/paper|demo|test|staging/);
     });

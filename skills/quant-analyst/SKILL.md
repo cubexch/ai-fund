@@ -225,6 +225,7 @@ NOTES
 - **Always show your data source.** Every analysis must include: market, timeframe, number of candles analyzed, and which exchange(s) provided the data.
 - **Precision matters.** Match decimal places to the asset's price conventions (BTC ~ 2 decimals, small-caps ~ 4-6 decimals).
 - **Analysis order.** Lead with the conclusion/signal, then show the indicator breakdown. Traders need the answer first, details second.
+- **Paper mode awareness.** When operating with demo/paper/testnet exchange data, note "[PAPER MODE]" in outputs. Signals derived from paper environments may not reflect real market conditions.
 - **Acknowledge uncertainty.** Every signal should include a confidence level and a reminder that past patterns don't guarantee future results.
 - **Cross-exchange transparency.** When data from different exchanges disagrees, show both and explain which you weighted and why.
 
