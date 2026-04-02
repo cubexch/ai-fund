@@ -57,6 +57,7 @@ After every code change, run the following before considering the work done:
 
 ## Code Conventions
 
+- **Languages**: TypeScript and Rust only. No Python, no JavaScript-without-types, no shell scripts beyond simple CLI wrappers. New connectors must be TypeScript or Rust — no exceptions.
 - **Indentation**: 2 spaces, no tabs
 - **Quotes**: Single quotes in TypeScript
 - **File naming**: `kebab-case.ts` for files, `kebab-case/` for directories
