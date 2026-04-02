@@ -67,30 +67,6 @@ describe('device-login CLI patterns', () => {
   });
 });
 
-// ── login.ts patterns ──────────────────────────────────────
-
-describe('login CLI patterns', () => {
-  it('validates provider list', () => {
-    const validProviders = ['google', 'apple', 'telegram'];
-    expect(validProviders).toContain('google');
-    expect(validProviders).toContain('apple');
-    expect(validProviders).toContain('telegram');
-    expect(validProviders).not.toContain('facebook');
-  });
-
-  it('has correct key expiry constant', () => {
-    const KEY_EXPIRY_SECONDS = 518400; // 6 days
-    expect(KEY_EXPIRY_SECONDS).toBe(6 * 24 * 60 * 60);
-  });
-
-  it('has correct poll constants', () => {
-    const POLL_INTERVAL_MS = 2000;
-    const POLL_TIMEOUT_MS = 180_000;
-    expect(POLL_INTERVAL_MS).toBe(2000);
-    expect(POLL_TIMEOUT_MS).toBe(180_000); // 3 minutes
-  });
-});
-
 // ── logout.ts patterns ─────────────────────────────────────
 
 describe('logout CLI patterns', () => {

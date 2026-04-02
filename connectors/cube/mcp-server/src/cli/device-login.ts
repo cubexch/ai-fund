@@ -5,6 +5,12 @@
  * Usage:
  *   npx tsx src/cli/device-login.ts              # Interactive (localhost callback)
  *   npx tsx src/cli/device-login.ts --headless    # Headless (polling with user code)
+ *   npx tsx src/cli/device-login.ts --reuse-keypair  # Non-interactive: reuse existing keypair
+ *   npx tsx src/cli/device-login.ts --new-keypair    # Non-interactive: generate new keypair
+ *
+ * When run without a TTY (e.g., from Claude Code), interactive prompts are
+ * replaced with structured output. Use --reuse-keypair or --new-keypair to
+ * pre-answer the keypair question. Headless mode is auto-enabled.
  */
 
 import { loadCredentials, getBackendName, importPrivateKey, type Ed25519KeyPair } from '../client/signing.js';
@@ -226,6 +232,24 @@ function printVerificationCode(code: string, url?: string) {
   console.log('');
 }
 
+// ── Tail summary (last lines visible in collapsed output) ──
+
+/**
+ * Print a compact phrase + URL summary designed to be the last
+ * thing visible when output is collapsed (e.g. in Claude Code).
+ */
+function printTailSummary(userCode: string, url: string) {
+  if (!userCode && !url) return;
+  const words = userCode ? userCode.split('-').map(w => `${c.bold}${c.white}${w}${c.reset}`).join(` ${c.dim}-${c.reset} `) : '';
+  if (words) {
+    console.log(`  ${c.yellow}Verify:${c.reset} ${words}`);
+  }
+  if (url) {
+    console.log(`  ${c.dim}Open:${c.reset}   ${c.cyan}${url}${c.reset}`);
+  }
+  console.log('');
+}
+
 // ── Single-key prompt ───────────────────────────────────────
 
 /** Wait for a single keypress and return the character. */
@@ -246,7 +270,10 @@ function waitForKey(): Promise<string> {
 
 async function main() {
   const args = process.argv.slice(2);
+  const isTTY = !!process.stdin.isTTY;
   const headless = args.includes('--headless');
+  const forceReuse = args.includes('--reuse-keypair');
+  const forceNew = args.includes('--new-keypair');
   const env = getEnvironment(process.env.CUBE_ENV);
 
   // Header
@@ -257,11 +284,32 @@ async function main() {
   const existing = await loadCredentials();
   if (existing) {
     const pubShort = existing.ed25519PublicKey.slice(0, 12);
-    console.log(`  ${c.dim}Existing keypair found${c.reset} ${c.dim}${pubShort}...${c.reset}`);
-    process.stdout.write(`  Reuse existing keypair? ${c.dim}[y/n]${c.reset} `);
-    const key = await waitForKey();
-    console.log(key);
-    if (key === 'y' || key === 'Y') {
+
+    let reuseKey: boolean;
+    if (forceReuse) {
+      reuseKey = true;
+      console.log(`  ${c.dim}Existing keypair found${c.reset} ${c.dim}${pubShort}...${c.reset}`);
+      console.log(`  Reusing existing keypair (--reuse-keypair)`);
+    } else if (forceNew) {
+      reuseKey = false;
+      console.log(`  ${c.dim}Existing keypair found${c.reset} ${c.dim}${pubShort}...${c.reset}`);
+      console.log(`  Generating new keypair (--new-keypair)`);
+    } else if (!isTTY) {
+      // Non-interactive without explicit flag — ask the caller to decide
+      console.log(`  ${c.dim}Existing keypair found${c.reset} ${c.dim}${pubShort}...${c.reset}`);
+      console.log('');
+      console.log(`  ${c.yellow}?${c.reset} Reuse existing keypair?`);
+      console.log(`    Re-run with ${c.bold}--reuse-keypair${c.reset} to keep it, or ${c.bold}--new-keypair${c.reset} to generate a fresh one.`);
+      process.exit(2);
+    } else {
+      console.log(`  ${c.dim}Existing keypair found${c.reset} ${c.dim}${pubShort}...${c.reset}`);
+      process.stdout.write(`  Reuse existing keypair? ${c.dim}[y/n]${c.reset} `);
+      const key = await waitForKey();
+      console.log(key);
+      reuseKey = key === 'y' || key === 'Y';
+    }
+
+    if (reuseKey) {
       const seed = Uint8Array.from(Buffer.from(existing.ed25519PrivateKey, 'hex'));
       const publicKey = Uint8Array.from(Buffer.from(existing.ed25519PublicKey, 'hex'));
       const privateKey = await importPrivateKey(seed);
@@ -293,52 +341,31 @@ async function main() {
       case 'device_code_received':
         codeExpiresIn = event.expiresIn;
         deviceUserCode = event.userCode ?? '';
+        authUrl = event.authorizeUrl;
+        await copyToClipboard(event.authorizeUrl);
 
         if (headless || !event.userCode) {
-          // Headless: show code + URL, start countdown
-          printVerificationCode(deviceUserCode, event.authorizeUrl);
-          const copied = await copyToClipboard(event.authorizeUrl);
-          if (copied) {
-            console.log(`  ${c.dim}       Copied to clipboard${c.reset}`);
-          }
-          console.log('');
+          printTailSummary(deviceUserCode, authUrl);
           spinner.startCountdown('Waiting for approval...', event.expiresIn);
-          console.log(`  ${c.dim}Press c to cancel${c.reset}`);
+          if (isTTY) console.log(`  ${c.dim}Press c to cancel${c.reset}`);
         } else {
-          // Interactive: browser will open — just copy URL for now
-          authUrl = event.authorizeUrl;
-          await copyToClipboard(event.authorizeUrl);
           spinner.start('Opening browser...');
         }
         break;
 
       case 'browser_opened':
         spinner.succeed('Browser opened');
-        // Show code so user can verify in the browser tab
-        if (deviceUserCode) {
-          printVerificationCode(deviceUserCode);
-        }
-        if (authUrl) {
-          console.log(`    ${c.dim}Open:${c.reset} ${c.cyan}${authUrl}${c.reset}`);
-          console.log('');
-        }
+        printTailSummary(deviceUserCode, authUrl);
         spinner.startCountdown('Approve in the browser tab...', codeExpiresIn);
-        console.log(`  ${c.dim}Press c to cancel${c.reset}`);
+        if (isTTY) console.log(`  ${c.dim}Press c to cancel${c.reset}`);
         break;
 
-      case 'browser_failed': {
+      case 'browser_failed':
         spinner.warn('Could not open browser');
-        // Show code + URL since user needs to open manually
-        printVerificationCode(deviceUserCode, event.url);
-        const copied = await copyToClipboard(event.url);
-        if (copied) {
-          console.log(`  ${c.dim}       Copied to clipboard${c.reset}`);
-        }
-        console.log('');
+        printTailSummary(deviceUserCode, event.url);
         spinner.startCountdown('Waiting for approval...', codeExpiresIn);
-        console.log(`  ${c.dim}Press c to cancel${c.reset}`);
+        if (isTTY) console.log(`  ${c.dim}Press c to cancel${c.reset}`);
         break;
-      }
 
       case 'polling':
         // Countdown timer handles the display — no-op
@@ -409,18 +436,19 @@ async function main() {
   console.log('');
   console.log(`  ${c.dim}Note: this key will expire in ${days} days. Re-run to re-authenticate.${c.reset}`);
   console.log('');
-  console.log(`  ${c.green}Login successful.${c.reset} Press Enter to continue…`);
-
-  // Wait for Enter before exiting
-  await new Promise<void>(resolve => {
-    if (!process.stdin.isTTY) { resolve(); return; }
-    process.stdin.setRawMode(false);
-    process.stdin.resume();
-    process.stdin.once('data', () => {
-      process.stdin.pause();
-      resolve();
+  if (isTTY) {
+    console.log(`  ${c.green}Login successful.${c.reset} Press Enter to continue…`);
+    await new Promise<void>(resolve => {
+      process.stdin.setRawMode(false);
+      process.stdin.resume();
+      process.stdin.once('data', () => {
+        process.stdin.pause();
+        resolve();
+      });
     });
-  });
+  } else {
+    console.log(`  ${c.green}Login successful.${c.reset}`);
+  }
 }
 
 main().catch(err => {
