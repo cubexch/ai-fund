@@ -383,6 +383,296 @@ This means the signature proves *who* is placing the order, but the order detail
 
 ---
 
+## Other Venues: How Each Exchange Signs Orders
+
+Cube uses Ed25519. Every other exchange has a different auth model. Here's how each one works in the context of AI Fund.
+
+---
+
+### OKX — HMAC-SHA256 + Passphrase
+
+```
+Credentials: API Key + Secret Key + Passphrase (3 values)
+Signing:     HMAC-SHA256
+Stored:      ~/.okx/config.toml (official MCP) or .mcp.json env vars
+```
+
+**How it works:**
+
+```
+1. Construct prehash string:
+   prehash = timestamp + method + requestPath + body
+   example: "2026-04-02T12:00:00.000Z" + "POST" + "/api/v5/trade/order" + '{"instId":"SOL-USDT",...}'
+
+2. Sign with HMAC-SHA256:
+   signature = Base64(HMAC-SHA256(secretKey, prehash))
+
+3. Send headers:
+   OK-ACCESS-KEY:        your-api-key
+   OK-ACCESS-SIGN:       base64(hmac-sha256-signature)
+   OK-ACCESS-TIMESTAMP:  2026-04-02T12:00:00.000Z
+   OK-ACCESS-PASSPHRASE: your-passphrase
+   
+4. Exchange verifies: HMAC matches, timestamp within 30 seconds
+```
+
+**Security features:**
+- API keys can be scoped: Read / Trade / Withdraw (separate permissions)
+- IP whitelist supported (up to 20 IPs)
+- Passphrase adds a third factor beyond key+secret
+- Demo trading mode via `x-simulated-trading: 1` header
+- **Official OKX MCP (`okx-trade-mcp`) never exposes keys to the LLM** — signing happens in the MCP server process, Claude only sends trading intent
+
+**Permission scoping for AI Fund:**
+```
+Create API key with:
+  ✅ Read (market data, positions, balances)
+  ✅ Trade (place/cancel orders)
+  ❌ Withdraw (NEVER enable for bot trading)
+  ❌ Transfer (don't allow fund movement between accounts)
+```
+
+---
+
+### Kraken — Handled by CLI (No Manual Signing)
+
+```
+Credentials: API Key + Private Key (via `kraken auth login`)
+Signing:     Handled internally by kraken-cli binary (Rust)
+Stored:      Local config with restricted file permissions
+```
+
+**How it works:**
+
+```
+1. Authenticate:
+   $ kraken auth login
+   Opens browser → OAuth flow → credentials saved locally
+
+2. MCP server:
+   $ kraken mcp -s market,trade,paper
+   Built-in MCP server over stdio — no API wrappers needed
+   All signing, nonce management, rate limiting handled by the binary
+
+3. Order placement:
+   Claude calls → kraken MCP tool → kraken-cli signs internally → Kraken API
+   The LLM never sees API keys or signing details
+```
+
+**Security features:**
+- Scoped MCP services: `market` (read-only), `trade`, `paper`, `all`
+- Dangerous calls require explicit `--allow-dangerous` flag
+- API keys scoped to specific permissions (Query Funds, Create Order, Cancel Order, etc.)
+- Built-in paper trading engine (local state, live market data, zero risk)
+- Release binaries are signed with minisign for supply chain verification
+- Written in Rust — single zero-dependency binary
+
+**Permission scoping for AI Fund:**
+```
+kraken mcp -s market,trade,paper    ← recommended: no funding, no withdrawal
+kraken mcp -s market                ← read-only mode for analysis agents
+kraken mcp -s paper                 ← paper trading only (safest for testing)
+```
+
+---
+
+### CCXT (Binance, Bybit, 100+ exchanges) — HMAC-SHA256 (varies)
+
+```
+Credentials: API Key + Secret (+ Passphrase for some exchanges)
+Signing:     HMAC-SHA256 (most exchanges), varies per exchange
+Stored:      .mcp.json env vars or ccxt-accounts.json config file
+```
+
+**How it works:**
+
+CCXT is a universal adapter. It abstracts away each exchange's unique signing scheme:
+
+```
+                    CCXT Library
+                        │
+        ┌───────────────┼───────────────┐
+        ▼               ▼               ▼
+    Binance          Bybit           Gate.io
+    HMAC-SHA256      HMAC-SHA256     HMAC-SHA512
+    + timestamp      + timestamp     + timestamp
+    + recv_window    + recv_window   + body hash
+```
+
+Each exchange has different rules, but CCXT handles all of them:
+
+```
+Claude calls place_order on ccxt-mcp
+  → ccxt-mcp looks up exchange config
+  → CCXT library constructs the exchange-specific request
+  → Signs with the exchange-specific algorithm (HMAC-SHA256 for most)
+  → Sends to the exchange API
+  → Returns result
+```
+
+**Configuration:**
+```json
+// ccxt-accounts.json
+{
+  "accounts": [
+    {
+      "name": "binance-spot",
+      "exchangeId": "binance",
+      "apiKey": "your-key",
+      "secret": "your-secret",
+      "defaultType": "spot"
+    },
+    {
+      "name": "bybit-futures",
+      "exchangeId": "bybit",
+      "apiKey": "your-key",
+      "secret": "your-secret",
+      "defaultType": "future"
+    }
+  ]
+}
+```
+
+**Security features (varies by exchange):**
+
+| Exchange | Signing | IP Whitelist | Permission Scoping | Withdrawal Disable |
+|----------|---------|-------------|-------------------|-------------------|
+| Binance | HMAC-SHA256 | Yes (required for unrestricted) | Read/Trade/Withdraw | Yes |
+| Bybit | HMAC-SHA256 | Yes | Read/Trade/Withdraw/Transfer | Yes |
+| Gate.io | HMAC-SHA512 | Yes | Read/Trade/Withdraw | Yes |
+| Bitget | HMAC-SHA256 | Yes | Read/Trade/Withdraw | Yes |
+| KuCoin | HMAC-SHA256 + Passphrase | Yes | General/Trade/Margin | Yes |
+
+**Key safety for CCXT:**
+- Some CCXT MCP implementations have `SAFE_MODE` (read-only, no trading)
+- Rate limiting: max 10 orders/minute per session (configurable)
+- CCXT MCP servers sign locally — the LLM never sees API keys
+
+---
+
+### Coinbase — ECDSA (ES256) + JWT
+
+```
+Credentials: CDP API Key ID + API Key Secret
+Signing:     ECDSA (ES256) → JWT token
+Stored:      Environment variables
+```
+
+**How it works:**
+
+Coinbase uses a different pattern — ECDSA keys generate JWTs:
+
+```
+1. Create CDP API key (Coinbase Developer Platform)
+   → Select ECDSA (ES256) algorithm (NOT Ed25519 — not supported)
+   → Get: api_key_id + api_key_secret (PEM format)
+
+2. Generate JWT:
+   jwt = ES256_sign({
+     sub: api_key_id,
+     iss: "coinbase-cloud",
+     aud: ["cdp_service"],
+     exp: now + 120,  // 2 minute expiry
+     uri: "POST api.coinbase.com/api/v3/brokerage/orders"
+   }, api_key_secret)
+
+3. Send request:
+   Authorization: Bearer <jwt>
+```
+
+**AgentKit + MCP:**
+- AgentKit wraps Coinbase APIs into agent-friendly tools
+- MCP extension provides standardized tool interface
+- Agentic Wallets (Feb 2026): non-custodial wallets in Trusted Execution Environments (TEEs)
+- Trade, Send, Earn — pre-built skills
+
+**Permission scoping:**
+```
+CDP API Key permissions:
+  ✅ View — read-only (balances, prices, history)
+  ✅ Trade — place/cancel orders
+  ❌ Transfer — don't allow fund movement
+  
+IP allowlist: Yes (set in CDP dashboard)
+Portfolio restriction: Can scope key to specific portfolio
+```
+
+---
+
+### Hyperliquid — On-Chain Signing (EVM Wallet)
+
+```
+Credentials: EVM private key (Ethereum wallet)
+Signing:     EIP-712 typed data signing (secp256k1)
+Stored:      Environment variable or wallet file
+```
+
+**How it works:**
+
+Hyperliquid is different — it's a DEX. Orders are signed on-chain style:
+
+```
+1. Construct EIP-712 typed data:
+   {
+     type: "Order",
+     asset: 4,        // SOL index
+     isBuy: true,
+     limitPx: "142.0",
+     sz: "35.0",
+     ...
+   }
+
+2. Sign with EVM private key:
+   signature = secp256k1_sign(keccak256(EIP712_hash(order)), privateKey)
+
+3. Send to Hyperliquid API:
+   POST /exchange { action: { type: "order", orders: [...], grouping: "na" },
+                    nonce: timestamp,
+                    signature: { r, s, v } }
+```
+
+**Security:**
+- The private key IS the identity — no API key/secret separation
+- This means if the key leaks, the attacker has FULL control (trade + withdraw)
+- Use an agent sub-wallet (Hyperliquid vault) with limited funds
+- No IP whitelisting (it's a DEX, permissionless)
+
+---
+
+## Signing Comparison Across All Venues
+
+| Exchange | Algorithm | Key Type | Expiry | LLM Sees Keys? | Withdrawal Disable |
+|----------|-----------|----------|--------|----------------|-------------------|
+| **Cube** | Ed25519 | Signing key | 1-30 days | No (MCP signs) | N/A (device auth) |
+| **OKX** | HMAC-SHA256 | API key+secret+passphrase | Permanent | No (MCP signs) | Yes |
+| **Kraken** | Internal (Rust CLI) | API key+private key | Permanent | No (CLI signs) | Yes |
+| **Binance** | HMAC-SHA256 | API key+secret | Permanent | No (CCXT signs) | Yes |
+| **Bybit** | HMAC-SHA256 | API key+secret | Permanent | No (CCXT signs) | Yes |
+| **Coinbase** | ECDSA (ES256) | CDP key (PEM) | JWT: 2 min | No (AgentKit signs) | Yes |
+| **Hyperliquid** | secp256k1 (EIP-712) | EVM private key | Never | Depends on MCP | No (DEX) |
+
+**Key insight:** In every case, the MCP server handles signing locally. The LLM (Claude) never sees API keys or private keys. Claude sends trading *intent* ("buy 35 SOL at $142"), the MCP server translates it into a signed API request.
+
+### What This Means for the Telegram Bot
+
+```
+Telegram message: "CZ evaluate SOL"
+  → Claude: analysis + trade proposal
+  → You: tap [Approve]
+  → MCP server (whichever exchange):
+      OKX:         HMAC-SHA256 signs the order
+      Kraken:      kraken-cli binary signs internally
+      Binance:     CCXT HMAC-SHA256 signs the order
+      Coinbase:    AgentKit ECDSA/JWT signs the order
+      Cube:        Ed25519 signs the auth header
+      Hyperliquid: secp256k1 signs EIP-712 typed data
+  → Exchange: verifies signature, executes order
+```
+
+You never need to think about the signing differences. Each MCP connector handles its own exchange's auth protocol. Your Telegram bot and the AI agents are completely exchange-agnostic.
+
+---
+
 ## Complete Security Chain Summary
 
 ```
