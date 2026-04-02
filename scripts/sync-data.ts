@@ -2,13 +2,17 @@
 /**
  * CLI for syncing market data from Cube Exchange into the local DuckDB store.
  *
+ * Medallion architecture: data flows Bronze (raw Parquet) → Silver (DuckDB) → Gold (features).
+ *
  * Usage:
- *   npx tsx scripts/sync-data.ts                        # sync all markets, 1h + 1d
- *   npx tsx scripts/sync-data.ts --symbols BTCUSDC,ETHUSDC
- *   npx tsx scripts/sync-data.ts --intervals 1m,1h,1d
- *   npx tsx scripts/sync-data.ts --trades --orderbook   # also fetch trades + book snapshots
- *   npx tsx scripts/sync-data.ts --status               # show what's in the store
- *   npx tsx scripts/sync-data.ts --query "SELECT ..."   # run a SQL query
+ *   npx tsx scripts/sync-data.ts                            # sync all markets, 1h + 1d
+ *   npx tsx scripts/sync-data.ts --symbols BTCUSDC,ETHUSDC  # specific pairs
+ *   npx tsx scripts/sync-data.ts --intervals 1m,1h,1d       # specific timeframes
+ *   npx tsx scripts/sync-data.ts --trades --orderbook        # also fetch trades + book snapshots
+ *   npx tsx scripts/sync-data.ts --status                    # show what's in the store
+ *   npx tsx scripts/sync-data.ts --instruments               # list registered instruments
+ *   npx tsx scripts/sync-data.ts --query "SELECT ..."        # run a SQL query
+ *   npx tsx scripts/sync-data.ts --export ohlcv              # export silver → Parquet
  */
 
 import { DataStore } from '../lib/data/store.js';
@@ -37,11 +41,26 @@ async function main() {
   const store = await DataStore.open();
 
   try {
+    // ── Status mode ──────────────────────────────────────
     if (args.status) {
       await printStatus(store);
       return;
     }
 
+    // ── Instruments listing ──────────────────────────────
+    if (args.instruments) {
+      const result = await store.listInstruments(
+        typeof args.instruments === 'string' ? args.instruments : undefined
+      );
+      if (result.rows.length === 0) {
+        console.log('No instruments registered. Run a sync first.');
+      } else {
+        console.table(result.rows);
+      }
+      return;
+    }
+
+    // ── Ad-hoc SQL query ─────────────────────────────────
     if (args.query && typeof args.query === 'string') {
       const result = await store.query(args.query, 0);
       if (result.rows.length === 0) {
@@ -52,7 +71,20 @@ async function main() {
       return;
     }
 
-    // Sync mode
+    // ── Export silver layer to Parquet ────────────────────
+    if (args.export && typeof args.export === 'string') {
+      const table = args.export;
+      const outDir = store.layerPath('silver', table);
+      console.log(`Exporting ${table} → ${outDir}/...`);
+      await store.exportParquet(
+        `SELECT * FROM ${table} ORDER BY ts`,
+        `${outDir}/export.parquet`
+      );
+      console.log('Done.');
+      return;
+    }
+
+    // ── Sync mode ────────────────────────────────────────
     const symbols = typeof args.symbols === 'string'
       ? args.symbols.split(',').map(s => s.trim())
       : undefined;
@@ -61,9 +93,10 @@ async function main() {
       ? args.intervals.split(',').map(s => s.trim())
       : ['1h', '1d'];
 
-    console.log('╔══════════════════════════════════════╗');
-    console.log('║   Cube Market Data Sync              ║');
-    console.log('╚══════════════════════════════════════╝');
+    console.log('╔══════════════════════════════════════════╗');
+    console.log('║   Cube Market Data Sync                  ║');
+    console.log('║   Bronze → Silver → Gold                 ║');
+    console.log('╚══════════════════════════════════════════╝');
     console.log();
 
     const start = Date.now();
@@ -72,6 +105,7 @@ async function main() {
       intervals,
       trades: !!args.trades,
       orderbook: !!args.orderbook,
+      quotes: !args['no-quotes'],
     });
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(1);

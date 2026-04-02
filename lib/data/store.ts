@@ -1,12 +1,15 @@
 /**
  * DuckDB connection manager for local market data storage.
- * Provides a thin async wrapper over duckdb-node for querying
- * OHLCV candles, trades, funding rates, and macro data stored
- * as Parquet files with a lightweight metadata catalog.
+ *
+ * Follows institutional patterns:
+ *   - Parquet-first: bronze layer is raw Parquet files on disk
+ *   - DuckDB for silver/gold: cleaned data in tables + Parquet export
+ *   - Hive-style partitioning: date-partitioned directories for pruning
+ *   - Instrument-centric: all queries go through instrument IDs (iid)
  */
 
 import duckdb from 'duckdb';
-import { existsSync, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { SCHEMA_SQL } from './schema.js';
 
@@ -17,6 +20,19 @@ export interface QueryResult {
   rows: Record<string, unknown>[];
   rowCount: number;
 }
+
+/** Directory layout following medallion architecture. */
+const LAYER_DIRS = [
+  // Bronze: raw, append-only Parquet
+  'bronze/ohlcv', 'bronze/trades', 'bronze/quotes', 'bronze/orderbook',
+  'bronze/funding', 'bronze/open_interest',
+  // Silver: cleaned (also in DuckDB tables)
+  'silver/ohlcv', 'silver/trades', 'silver/quotes', 'silver/orderbook',
+  // Gold: features, signals
+  'gold/features', 'gold/signals',
+  // Reference: instruments, exchanges
+  'reference',
+];
 
 export class DataStore {
   private db: duckdb.Database;
@@ -29,10 +45,9 @@ export class DataStore {
     this.dataDir = dataDir;
   }
 
-  /** Open (or create) the local data store. */
+  /** Open (or create) the local data store with medallion directory structure. */
   static async open(dataDir: string = DEFAULT_DATA_DIR): Promise<DataStore> {
-    // Ensure directory structure exists
-    for (const sub of ['ohlcv', 'trades', 'funding', 'open_interest', 'orderbook', 'macro']) {
+    for (const sub of LAYER_DIRS) {
       mkdirSync(join(dataDir, sub), { recursive: true });
     }
 
@@ -55,6 +70,22 @@ export class DataStore {
     await store.exec(SCHEMA_SQL);
     return store;
   }
+
+  // ── Path helpers for Parquet file layout ─────────────────
+
+  /** Get the Parquet directory for a given layer and data type. */
+  layerPath(layer: 'bronze' | 'silver' | 'gold' | 'reference', dataType: string): string {
+    return join(this.dataDir, layer, dataType);
+  }
+
+  /** Build a Hive-style Parquet path: bronze/ohlcv/exchange=cube/date=2024-01-15/ */
+  bronzePath(dataType: string, exchange: string, date: string): string {
+    const dir = join(this.dataDir, 'bronze', dataType, `exchange=${exchange}`, `date=${date}`);
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  // ── SQL execution ────────────────────────────────────────
 
   /** Execute a SQL statement (no results). */
   async exec(sql: string): Promise<void> {
@@ -116,22 +147,66 @@ export class DataStore {
     return inserted;
   }
 
-  /** Export a table/query to Parquet file. */
+  // ── Parquet I/O ──────────────────────────────────────────
+
+  /** Export a query result to a Parquet file with ZSTD compression. */
   async exportParquet(sql: string, filePath: string): Promise<void> {
     await this.exec(`COPY (${sql}) TO '${filePath}' (FORMAT PARQUET, COMPRESSION ZSTD)`);
   }
 
-  /** Import a Parquet file as a queryable view. */
-  async importParquet(filePath: string, viewName: string): Promise<void> {
-    await this.exec(`CREATE OR REPLACE VIEW ${viewName} AS SELECT * FROM read_parquet('${filePath}')`);
+  /** Export with Hive-style partitioning. */
+  async exportPartitioned(sql: string, dirPath: string, partitionBy: string[]): Promise<void> {
+    const partCols = partitionBy.join(', ');
+    await this.exec(
+      `COPY (${sql}) TO '${dirPath}' (FORMAT PARQUET, COMPRESSION ZSTD, PARTITION_BY (${partCols}))`
+    );
   }
 
-  /** Query Parquet files directly using glob pattern. */
-  async queryParquet(globPattern: string, sql?: string): Promise<QueryResult> {
-    const baseSql = sql
-      ? sql.replace('$PARQUET', `read_parquet('${globPattern}')`)
-      : `SELECT * FROM read_parquet('${globPattern}')`;
-    return this.query(baseSql);
+  /** Query Parquet files directly using glob pattern with Hive partitioning. */
+  async queryParquet(globPattern: string, whereSql?: string, limit?: number): Promise<QueryResult> {
+    let sql = `SELECT * FROM read_parquet('${globPattern}', hive_partitioning = true)`;
+    if (whereSql) sql += ` WHERE ${whereSql}`;
+    return this.query(sql, limit);
+  }
+
+  // ── Instrument helpers ───────────────────────────────────
+
+  /** Register an instrument in the master table. Returns the iid. */
+  async registerInstrument(params: {
+    exchange: string;
+    symbol: string;
+    assetClass: string;
+    instrumentType: string;
+    base?: string;
+    quote?: string;
+    tickSize?: number;
+    lotSize?: number;
+  }): Promise<string> {
+    const iid = `${params.exchange}:${params.symbol}`;
+    await this.insertRows('instruments', [
+      'iid', 'symbol', 'asset_class', 'instrument_type',
+      'base', 'quote', 'exchange', 'tick_size', 'lot_size',
+    ], [[
+      iid, params.symbol, params.assetClass, params.instrumentType,
+      params.base ?? null, params.quote ?? null, params.exchange,
+      params.tickSize ?? null, params.lotSize ?? null,
+    ]]);
+    return iid;
+  }
+
+  /** Look up an instrument by exchange and symbol. */
+  async getInstrument(exchange: string, symbol: string): Promise<Record<string, unknown> | null> {
+    const iid = `${exchange}:${symbol}`;
+    const result = await this.query(
+      `SELECT * FROM instruments WHERE iid = '${iid}'`, 1
+    );
+    return result.rows[0] ?? null;
+  }
+
+  /** List all registered instruments, optionally filtered by asset class. */
+  async listInstruments(assetClass?: string): Promise<QueryResult> {
+    const where = assetClass ? ` WHERE asset_class = '${assetClass}'` : '';
+    return this.query(`SELECT * FROM instruments${where} ORDER BY exchange, symbol`, 0);
   }
 
   /** Close the database connection. */

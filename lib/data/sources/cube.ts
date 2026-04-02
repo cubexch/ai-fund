@@ -5,7 +5,7 @@
  * Public endpoints (no auth required):
  *   GET /ir/v0/markets              — list all markets
  *   GET /ir/v0/history/klines       — OHLCV candles (max 1000 per request)
- *   GET /md/parsed/tickers          — current tickers
+ *   GET /md/parsed/tickers          — current tickers with 24h summary
  *   GET /md/parsed/book/{sym}/snapshot       — order book snapshot
  *   GET /md/parsed/book/{sym}/recent-trades  — recent trades
  */
@@ -46,6 +46,38 @@ export interface CubeTrade {
   timestamp: number;
 }
 
+export interface CubeTicker {
+  symbol: string;
+  lastPrice: number | null;
+  bid: number | null;
+  ask: number | null;
+  baseVolume24h: number;
+  quoteVolume24h: number;
+  high24h: number | null;
+  low24h: number | null;
+  open24h: number | null;
+}
+
+// ── Instrument helpers ─────────────────────────────────────
+
+/** Parse a Cube market symbol like 'BTCUSDC' into base/quote. */
+export function parseSymbol(symbol: string): { base: string; quote: string } {
+  // Cube symbols are concatenated without separator: BTCUSDC, ETHUSDC, SOLUSDC
+  // Quote is typically USDC or USDT (4 chars)
+  const quoteAssets = ['USDC', 'USDT', 'BTC', 'ETH'];
+  for (const q of quoteAssets) {
+    if (symbol.endsWith(q) && symbol.length > q.length) {
+      return { base: symbol.slice(0, -q.length), quote: q };
+    }
+  }
+  return { base: symbol, quote: 'USD' };
+}
+
+/** Build the canonical instrument ID for a Cube market. */
+export function cubeIid(symbol: string): string {
+  return `cube:${symbol}`;
+}
+
 // ── API calls ──────────────────────────────────────────────
 
 async function cubeGet<T>(url: string): Promise<T> {
@@ -61,6 +93,33 @@ async function cubeGet<T>(url: string): Promise<T> {
 export async function fetchMarkets(): Promise<CubeMarket[]> {
   const data = await cubeGet<{ markets: CubeMarket[] }>(`${REST_URL}/markets`);
   return data.markets.filter(m => m.status === 1); // active only
+}
+
+/** Fetch current tickers for all markets. */
+export async function fetchTickers(): Promise<CubeTicker[]> {
+  const raw = await cubeGet<Array<{
+    ticker_id: string;
+    last_price: number | null;
+    bid: number | null;
+    ask: number | null;
+    base_volume: number;
+    quote_volume: number;
+    high: number | null;
+    low: number | null;
+    open: number | null;
+  }>>(`${MD_URL}/parsed/tickers`);
+
+  return raw.map(t => ({
+    symbol: t.ticker_id,
+    lastPrice: t.last_price,
+    bid: t.bid,
+    ask: t.ask,
+    baseVolume24h: t.base_volume,
+    quoteVolume24h: t.quote_volume,
+    high24h: t.high,
+    low24h: t.low,
+    open24h: t.open,
+  }));
 }
 
 /**
@@ -88,12 +147,11 @@ export async function fetchKlines(
 }
 
 /**
- * Fetch all available OHLCV history for a market by paginating backwards.
+ * Fetch all available OHLCV history for a market by paginating.
  * Yields batches of klines (oldest-first within each batch).
  *
  * Cube's klines endpoint returns the most recent `limit` candles.
- * To go further back, we track the oldest timestamp we've seen and
- * use the interval math to determine if more data exists.
+ * We track the oldest timestamp to detect end-of-history.
  */
 export async function* fetchAllKlines(
   marketId: number,
@@ -105,7 +163,6 @@ export async function* fetchAllKlines(
   if (!intervalMs) throw new Error(`Unknown interval: ${interval}`);
 
   let oldestSeen: number | undefined;
-  let totalFetched = 0;
   const pageSize = 1000;
 
   while (true) {
@@ -123,7 +180,6 @@ export async function* fetchAllKlines(
 
     if (filtered.length > 0) {
       yield filtered;
-      totalFetched += filtered.length;
     }
 
     const batchOldest = klines[0].startTime;
