@@ -7,7 +7,7 @@ import type { OsmiumClient } from '../client/osmium.js';
  * Convert a human-readable price/quantity to lot units using market tick sizes.
  * e.g. price 83.69 with priceTickSize 0.01 → 8369
  */
-function toLots(humanValue: string, tickSize: string): number {
+export function toLots(humanValue: string, tickSize: string): number {
   const hv = parseFloat(humanValue);
   const ts = parseFloat(tickSize);
   if (ts === 0) throw new Error(`Invalid tick size: ${tickSize}`);
@@ -17,14 +17,14 @@ function toLots(humanValue: string, tickSize: string): number {
 /**
  * Convert lot units back to human-readable value.
  */
-function fromLots(lots: number, tickSize: string): string {
+export function fromLots(lots: number, tickSize: string): string {
   const ts = parseFloat(tickSize);
   return (lots * ts).toString();
 }
 
-const SIDE_MAP: Record<string, number> = { BID: 0, ASK: 1 };
-const TIF_MAP: Record<string, number> = { IOC: 0, GFS: 1, FOK: 2 };
-const ORDER_TYPE_MAP: Record<string, number> = {
+export const SIDE_MAP: Record<string, number> = { BID: 0, ASK: 1 };
+export const TIF_MAP: Record<string, number> = { IOC: 0, GFS: 1, FOK: 2 };
+export const ORDER_TYPE_MAP: Record<string, number> = {
   LIMIT: 0,
   MARKET_LIMIT: 1,
   MARKET_WITH_PROTECTION: 2,
