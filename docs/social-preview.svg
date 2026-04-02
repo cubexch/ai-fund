@@ -46,7 +46,7 @@
   <text x="72" y="130" font-family="Arial, Helvetica, sans-serif" font-size="56" font-weight="bold" fill="#ffffff" letter-spacing="4">AI FUND</text>
 
   <!-- Subtitle -->
-  <text x="72" y="172" font-family="Arial, Helvetica, sans-serif" font-size="22" fill="#8b949e">Open-Source AI Hedge Fund OS</text>
+  <text x="72" y="172" font-family="Arial, Helvetica, sans-serif" font-size="22" fill="#8b949e">Open-Source AI Hedge Fund</text>
 
   <!-- Divider -->
   <rect x="72" y="196" width="60" height="3" rx="2" fill="#3fb950"/>

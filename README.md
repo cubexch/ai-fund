@@ -1,4 +1,4 @@
-# AI Fund — Open-Source AI Hedge Fund OS for Claude Code
+# AI Fund — Open-Source AI Hedge Fund for Claude Code
 
 ### Hire your AI trading desk. Fire the ones that miss KPIs.
 

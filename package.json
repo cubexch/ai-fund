@@ -1,7 +1,7 @@
 {
   "name": "ai-fund",
   "version": "0.1.0",
-  "description": "42 AI trading agents for Claude Code. Open-source AI hedge fund OS. Trade on any exchange via plugins.",
+  "description": "42 AI trading agents for Claude Code. Open-source AI hedge fund. Trade on any exchange via plugins.",
   "type": "module",
   "bin": {
     "ai-fund": "./scripts/install.js"
