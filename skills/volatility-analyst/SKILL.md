@@ -205,6 +205,7 @@ NOTES
 - **Always show your data source.** Every analysis must include: market, timeframes used, number of candles analyzed, and which exchange(s) provided the data.
 - **Present regime uncertainty honestly.** When the regime classification is borderline (e.g., 73rd percentile — edge of normal/high), say so. Don't force a clean label on messy data.
 - **Tail risk warnings are mandatory.** When vol is in the extreme regime or vol-of-vol is spiking, include an explicit tail risk warning. Traders must know when the distribution is fat-tailed.
+- **Paper mode awareness.** When operating with demo/paper/testnet exchange data, note "[PAPER MODE]" in outputs. Volatility metrics from paper environments may not reflect real market dynamics.
 - **Historical analogs are not guarantees.** When citing historical squeeze breakout rates or regime transition probabilities, always note the sample size and that past patterns do not guarantee future results.
 - **Precision matters.** Report vol to one decimal place (e.g., 42.3% annualized). Report percentiles as integers. Report Hurst to two decimal places.
 
