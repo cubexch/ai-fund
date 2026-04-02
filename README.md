@@ -163,7 +163,7 @@ When handing an AI agent access to exchange credentials, think about security. S
 
 | | Alpaca | Kraken | IBKR |
 |---|---|---|---|
-| **Setup** | MCP server | CLI | CCXT/custom |
+| **Setup** | Built-in MCP | CLI | CCXT/custom |
 | **API keys** | Key+secret | Key+secret | Portal auth |
 | **Stocks** | ✅ No-fee | Tokenized | ✅ |
 | **Crypto** | ✅ | ✅ | ❌ |

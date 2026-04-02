@@ -15,9 +15,10 @@
     "CLAUDE.md"
   ],
   "scripts": {
-    "build": "npm run build --workspace=connectors/cube/mcp-server && npm run build --workspace=connectors/robinhood/mcp-server",
+    "build": "npm run build --workspace=connectors/cube/mcp-server && npm run build --workspace=connectors/robinhood/mcp-server && npm run build --workspace=connectors/alpaca/mcp-server",
     "build:cube": "npm run build --workspace=connectors/cube/mcp-server",
     "build:robinhood": "npm run build --workspace=connectors/robinhood/mcp-server",
+    "build:alpaca": "npm run build --workspace=connectors/alpaca/mcp-server",
     "dev": "npm run dev --workspace=connectors/cube/mcp-server",
     "typecheck": "tsc --noEmit",
     "test:evals": "vitest run --config evals/vitest.config.ts"
@@ -28,7 +29,8 @@
   },
   "workspaces": [
     "connectors/cube/mcp-server",
-    "connectors/robinhood/mcp-server"
+    "connectors/robinhood/mcp-server",
+    "connectors/alpaca/mcp-server"
   ],
   "engines": {
     "node": ">=20"
