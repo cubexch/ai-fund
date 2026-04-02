@@ -77,7 +77,7 @@ describe('ASSET_ICONS', () => {
     expect(ASSET_ICONS['BTC']).toBe('₿');
     expect(ASSET_ICONS['ETH']).toBe('Ξ');
     expect(ASSET_ICONS['SOL']).toBe('◎');
-    expect(ASSET_ICONS['USDC']).toBe('◉');
+    expect(ASSET_ICONS['USDC']).toBe('💵');
   });
 });
 

@@ -30,10 +30,11 @@ async function main() {
 
   if (!creds && !hasHmacEnv && !hasSigningEnv) {
     console.log('');
-    console.log(`  ${c.red}${c.bold}Not logged in${c.reset}`);
-    console.log(`  ${c.dim}Run npm run login to authenticate.${c.reset}`);
+    console.log(`  ${c.yellow}${c.bold}Not logged in${c.reset}`);
+    console.log(`  ${c.dim}Market data tools work without login.${c.reset}`);
+    console.log(`  ${c.dim}Run npm run login to enable trading.${c.reset}`);
     console.log('');
-    process.exit(1);
+    process.exit(0);
   }
 
   // Show active auth method

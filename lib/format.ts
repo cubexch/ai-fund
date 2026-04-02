@@ -79,7 +79,7 @@ export const ASSET_ICONS: Record<string, string> = {
   BTC:      '₿',
   ETH:      'Ξ',
   SOL:      '◎',
-  USDC:     '◉',
+  USDC:     '💵',
   USDT:     '₮',
   DOGE:     'Ð',
   LTC:      'Ł',

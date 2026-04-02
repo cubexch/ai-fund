@@ -6,6 +6,17 @@ import type { IridiumClient } from '../client/iridium.js';
 export function registerAccountTools(server: McpServer, iridium: IridiumClient) {
   const defaultSubaccountId = () => iridium.getDefaultSubaccountId();
 
+  /** Resolve a symbol string to a marketId for optional filters */
+  async function resolveMarketId(symbol?: string, marketId?: number): Promise<number | undefined> {
+    if (marketId !== undefined) return marketId;
+    if (!symbol) return undefined;
+    const markets = await iridium.getMarkets();
+    const upper = symbol.toUpperCase();
+    const market = markets.find(m => m.symbol.toUpperCase() === upper);
+    if (!market) throw new Error(`Market not found for symbol: ${symbol}. Use get_assets to list available markets.`);
+    return market.marketId;
+  }
+
   server.tool(
     'get_positions',
     'Get all current positions (asset holdings) for the trading subaccount. Shows amounts per asset grouped by accounting type.',
@@ -114,13 +125,15 @@ export function registerAccountTools(server: McpServer, iridium: IridiumClient) 
     'Get historical orders for the subaccount. Shows past orders with their status, fills, and execution details.',
     {
       subaccountId: z.number().optional().describe('Subaccount ID (defaults to configured subaccount)'),
-      marketId: z.number().optional().describe('Filter by market ID (omit for all markets)'),
+      symbol: z.string().optional().describe('Filter by market symbol (e.g. "BTCUSDC")'),
+      marketId: z.number().optional().describe('Filter by numeric market ID (alternative to symbol)'),
       limit: z.number().default(50).describe('Number of orders to return'),
     },
     async params => {
       try {
+        const filterMarketId = await resolveMarketId(params.symbol, params.marketId);
         const orders = await iridium.getOrderHistory(params.subaccountId ?? await defaultSubaccountId(), {
-          marketId: params.marketId,
+          marketId: filterMarketId,
           limit: params.limit,
         });
         return {
@@ -145,13 +158,15 @@ export function registerAccountTools(server: McpServer, iridium: IridiumClient) 
     'Get trade fills (executed trades) for the subaccount. Shows price, quantity, fees, and timestamps for each fill.',
     {
       subaccountId: z.number().optional().describe('Subaccount ID (defaults to configured subaccount)'),
-      marketId: z.number().optional().describe('Filter by market ID (omit for all markets)'),
+      symbol: z.string().optional().describe('Filter by market symbol (e.g. "BTCUSDC")'),
+      marketId: z.number().optional().describe('Filter by numeric market ID (alternative to symbol)'),
       limit: z.number().default(50).describe('Number of fills to return'),
     },
     async params => {
       try {
+        const filterMarketId = await resolveMarketId(params.symbol, params.marketId);
         const fills = await iridium.getFills(params.subaccountId ?? await defaultSubaccountId(), {
-          marketId: params.marketId,
+          marketId: filterMarketId,
           limit: params.limit,
         });
         return {

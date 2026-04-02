@@ -213,16 +213,19 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
     'cancel_order',
     'Cancel a specific resting order by its client order ID.',
     {
-      marketId: z.number().describe('Market ID the order is on'),
+      symbol: z.string().optional().describe('Market symbol (e.g. "BTCUSDC", "SOLUSDC")'),
+      marketId: z.number().optional().describe('Numeric market ID (alternative to symbol)'),
       clientOrderId: z.number().describe('Client-assigned order ID to cancel'),
     },
     async params => {
       try {
+        const resolvedMarketId = await resolveMarketId(params.symbol, params.marketId);
+
         // Try WebSocket first
         if (osmium?.isConnected) {
           try {
             const wsResult = await osmium.cancelOrder({
-              marketId: params.marketId,
+              marketId: resolvedMarketId,
               clientOrderId: String(params.clientOrderId),
             });
             return {
@@ -237,7 +240,7 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
         }
 
         const result = await iridium.cancelOrderRest({
-          marketId: params.marketId,
+          marketId: resolvedMarketId,
           clientOrderId: params.clientOrderId,
         });
 
@@ -267,7 +270,8 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
     'modify_order',
     "Modify an existing resting order's price and/or quantity. Values in human-readable units.",
     {
-      marketId: z.number().describe('Market ID the order is on'),
+      symbol: z.string().optional().describe('Market symbol (e.g. "BTCUSDC", "SOLUSDC")'),
+      marketId: z.number().optional().describe('Numeric market ID (alternative to symbol)'),
       clientOrderId: z.number().describe('Client-assigned order ID to modify'),
       newPrice: z.string().optional().describe('New price in human-readable units'),
       newQuantity: z.string().describe('New quantity in human-readable units'),
@@ -275,13 +279,14 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
     },
     async params => {
       try {
-        const market = await getMarket(params.marketId);
+        const resolvedMarketId = await resolveMarketId(params.symbol, params.marketId);
+        const market = await getMarket(resolvedMarketId);
 
         // Try WebSocket first
         if (osmium?.isConnected) {
           try {
             const wsResult = await osmium.modifyOrder({
-              marketId: params.marketId,
+              marketId: resolvedMarketId,
               clientOrderId: String(params.clientOrderId),
               newPrice: params.newPrice !== undefined
                 ? String(toLots(params.newPrice, market.priceTickSize))
@@ -301,7 +306,7 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
         }
 
         const result = await iridium.modifyOrderRest({
-          marketId: params.marketId,
+          marketId: resolvedMarketId,
           clientOrderId: params.clientOrderId,
           newPrice: params.newPrice !== undefined
             ? toLots(params.newPrice, market.priceTickSize)
@@ -336,16 +341,21 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
     'cancel_all_orders',
     'Cancel all resting orders. Optionally filter by market and/or side.',
     {
-      marketId: z.number().optional().describe('Market ID to cancel on (omit for all markets)'),
+      symbol: z.string().optional().describe('Market symbol to cancel on (e.g. "BTCUSDC")'),
+      marketId: z.number().optional().describe('Numeric market ID to cancel on (alternative to symbol)'),
       side: z.enum(['BID', 'ASK']).optional().describe('Side to cancel (omit for both sides)'),
     },
     async params => {
       try {
+        const resolvedMktId = params.symbol || params.marketId !== undefined
+          ? await resolveMarketId(params.symbol, params.marketId)
+          : undefined;
+
         // Try WebSocket first
         if (osmium?.isConnected) {
           try {
             const wsResult = await osmium.massCancel({
-              marketId: params.marketId,
+              marketId: resolvedMktId,
               side: params.side,
             });
             return {
@@ -354,7 +364,7 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
                 text: JSON.stringify({
                   status: 'mass_cancelled',
                   via: 'websocket',
-                  marketId: params.marketId ?? 'all',
+                  marketId: resolvedMktId ?? 'all',
                   side: params.side ?? 'both',
                   ...wsResult,
                 }, null, 2),
@@ -366,7 +376,7 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
         }
 
         const result = await iridium.massCancelRest({
-          marketId: params.marketId,
+          marketId: resolvedMktId,
           side: params.side !== undefined ? SIDE_MAP[params.side] : undefined,
         });
 
@@ -378,7 +388,7 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
                 {
                   status: 'mass_cancelled',
                   via: 'rest',
-                  marketId: params.marketId ?? 'all',
+                  marketId: resolvedMktId ?? 'all',
                   side: params.side ?? 'both',
                   ...result as object,
                 },
@@ -407,14 +417,18 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
     'Get open/resting orders, optionally filtered by market. Returns orders that are still live on the book.',
     {
       subaccountId: z.number().optional().describe('Subaccount ID (auto-detected if omitted)'),
-      marketId: z.number().optional().describe('Filter by market ID'),
+      symbol: z.string().optional().describe('Filter by market symbol (e.g. "BTCUSDC")'),
+      marketId: z.number().optional().describe('Filter by numeric market ID (alternative to symbol)'),
       status: z.enum(['open', 'all']).default('open').describe("'open' returns only resting/live orders, 'all' returns full history"),
     },
     async params => {
       try {
+        const filterMarketId = params.symbol || params.marketId !== undefined
+          ? await resolveMarketId(params.symbol, params.marketId)
+          : undefined;
         const subId = params.subaccountId ?? await iridium.getDefaultSubaccountId();
         const orders = await iridium.getOrderHistory(subId, {
-          marketId: params.marketId,
+          marketId: filterMarketId,
         });
 
         // Open order statuses — orders still resting on the book

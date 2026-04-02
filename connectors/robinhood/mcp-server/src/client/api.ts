@@ -95,9 +95,8 @@ export class RobinhoodClient {
       const res = await httpRequest(url, options as any);
       const text = await res.text();
 
-      // Auto-refresh on 401
+      // Auto-refresh on 401 — getAccessToken() handles refresh internally
       if (res.status === 401 && attempt < MAX_RETRIES) {
-        await this.auth.refresh();
         continue;
       }
 

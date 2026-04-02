@@ -86,7 +86,7 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
           symbol: t.symbol,
           name: t.metadata.currencyName ?? t.symbol,
           mint: t.metadata.mint ?? null,
-          route: t.metadata.route ?? 'defi',
+          route: t.metadata.route ?? 'onchain',
           decimals: t.decimals,
           price: t.metadata.snapshotPrice ?? null,
           marketCap: t.metadata.liquidity ?? null,
@@ -145,120 +145,144 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
 
   server.tool(
     'get_quote',
-    `Get a price quote for a trade. Routes through available liquidity venues for best execution. Accepts asset symbols or on-chain addresses. If a symbol is ambiguous, returns matching assets to choose from.`,
+    'Get a price quote for a trade. Checks both the orderbook and on-chain liquidity. Accepts asset symbols or on-chain addresses. If a symbol is ambiguous, returns matching assets to choose from.',
     {
-      assetIn: z.string().describe('Asset to sell — symbol (e.g. "SOL", "USDC") or on-chain address'),
-      assetOut: z.string().describe('Asset to buy — symbol (e.g. "BONK", "JUP") or on-chain address'),
-      amount: z.string().describe('Amount in smallest units (lamports for SOL, base units for SPL tokens)'),
-      direction: z.enum(['in', 'out']).default('in').describe('"in" = specify amount to sell, "out" = specify amount to buy'),
+      base: z.string().describe('Asset to trade — symbol (e.g. "SOL", "BONK") or on-chain address'),
+      quote: z.string().default('USDC').describe('Quote asset (default "USDC")'),
+      side: z.enum(['buy', 'sell']).describe('Buy or sell the base asset'),
+      amount: z.string().describe('Amount of base asset in human-readable units (e.g. "1.5")'),
     },
     async params => {
       try {
-        const tokenIn = params.assetIn;
-        const tokenOut = params.assetOut;
+        const baseSymbol = params.base.toUpperCase();
+        const quoteSymbol = params.quote.toUpperCase();
 
-        // Resolve both tokens
-        const inResolved = await resolveToken(iridium, tokenIn);
-        const outResolved = await resolveToken(iridium, tokenOut);
+        // ── Orderbook quote ──
+        let orderbookPrice: number | null = null;
+        let orderbookSpread: string | null = null;
 
-        // If either is ambiguous, return candidates for the user to pick
-        if ('candidates' in inResolved) {
-          if (inResolved.candidates.length === 0) {
-            return {
-              content: [{ type: 'text' as const, text: `No asset found for "${tokenIn}". Use search_assets to find the correct asset.` }],
-              isError: true,
-            };
+        try {
+          const tickers = await iridium.getTickers();
+          const ticker = tickers.find(
+            t => t.baseAsset.toUpperCase() === baseSymbol && t.quoteAsset.toUpperCase() === quoteSymbol
+          );
+          if (ticker) {
+            orderbookPrice = params.side === 'buy' ? (ticker.askPrice ?? null) : (ticker.bidPrice ?? null);
+            if (ticker.bidPrice && ticker.askPrice) {
+              orderbookSpread = `${((ticker.askPrice - ticker.bidPrice) / ticker.askPrice * 100).toFixed(3)}%`;
+            }
           }
-          return {
-            content: [{
-              type: 'text' as const,
-              text: JSON.stringify({
-                error: `Multiple assets match "${tokenIn}". Please specify the address or use a more specific name.`,
-                matches: inResolved.candidates.map(formatToken),
-              }, null, 2),
-            }],
-            isError: true,
-          };
+        } catch {
+          // Orderbook unavailable
         }
 
-        if ('candidates' in outResolved) {
-          if (outResolved.candidates.length === 0) {
-            return {
-              content: [{ type: 'text' as const, text: `No asset found for "${tokenOut}". Use search_assets to find the correct asset.` }],
-              isError: true,
-            };
+        // ── On-chain quote ──
+        let onchainPrice: number | null = null;
+        let onchainFee: string | null = null;
+        let onchainError: string | null = null;
+
+        try {
+          const baseRes = await resolveToken(iridium, params.base);
+          const quoteRes = await resolveToken(iridium, params.quote);
+
+          if ('candidates' in baseRes) {
+            if (baseRes.candidates.length > 1) {
+              return {
+                content: [{
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: `Multiple assets match "${params.base}". Specify the address.`,
+                    matches: baseRes.candidates.map(formatToken),
+                  }, null, 2),
+                }],
+                isError: true,
+              };
+            }
+            onchainError = `Asset "${params.base}" not found on-chain.`;
+          } else if ('candidates' in quoteRes) {
+            onchainError = `Quote asset "${params.quote}" not found on-chain.`;
+          } else {
+            const rawAmount = Math.round(parseFloat(params.amount) * Math.pow(10, baseRes.decimals)).toString();
+            const tokenIn = params.side === 'buy' ? quoteRes.mint : baseRes.mint;
+            const tokenOut = params.side === 'buy' ? baseRes.mint : quoteRes.mint;
+
+            const estimate = await iridium.getSwapEstimate({
+              tokenIn, tokenOut,
+              direction: params.side === 'buy' ? 'out' : 'in',
+              ...(params.side === 'buy' ? { amountOut: rawAmount } : { amountIn: rawAmount }),
+            });
+
+            if (estimate.route) {
+              const outMeta = estimate.metadata?.find(m => m.address === tokenOut);
+              const outDecimals = outMeta?.decimals ?? 6;
+              const outputAmount = Number(estimate.route.amount) / Math.pow(10, outDecimals);
+
+              if (params.side === 'buy') {
+                const inMeta = estimate.metadata?.find(m => m.address === tokenIn);
+                const inDecimals = inMeta?.decimals ?? 6;
+                const quoteSpent = Number(estimate.route.amount) / Math.pow(10, inDecimals);
+                onchainPrice = quoteSpent / parseFloat(params.amount);
+              } else {
+                onchainPrice = outputAmount / parseFloat(params.amount);
+              }
+            }
+
+            if (estimate.fee) {
+              onchainFee = `${(estimate.fee.bps / 100).toFixed(2)}%`;
+            }
           }
-          return {
-            content: [{
-              type: 'text' as const,
-              text: JSON.stringify({
-                error: `Multiple assets match "${tokenOut}". Please specify the address or use a more specific name.`,
-                matches: outResolved.candidates.map(formatToken),
-              }, null, 2),
-            }],
-            isError: true,
-          };
+        } catch (e: any) {
+          onchainError = e.message;
         }
 
-        const estimate = await iridium.getSwapEstimate({
-          tokenIn: inResolved.mint,
-          tokenOut: outResolved.mint,
-          direction: params.direction,
-          ...(params.direction === 'in' ? { amountIn: params.amount } : { amountOut: params.amount }),
-        });
+        // ── Build result ──
+        let recommendation: string;
+        let spreadBps: number | null = null;
 
-        if (estimate.error) {
-          return {
-            content: [{ type: 'text' as const, text: `Quote failed: ${estimate.error}` }],
-            isError: true,
-          };
-        }
+        if (orderbookPrice && onchainPrice) {
+          const diff = params.side === 'buy'
+            ? (orderbookPrice - onchainPrice) / orderbookPrice
+            : (onchainPrice - orderbookPrice) / onchainPrice;
+          spreadBps = Math.round(diff * 10000);
 
-        const inMeta = estimate.metadata?.find(m => m.address === inResolved.mint);
-        const outMeta = estimate.metadata?.find(m => m.address === outResolved.mint);
-        const inDecimals = inMeta?.decimals ?? inResolved.decimals;
-        const outDecimals = outMeta?.decimals ?? outResolved.decimals;
-
-        const result: Record<string, unknown> = {
-          trade: `${inResolved.symbol} → ${outResolved.symbol}`,
-          direction: params.direction,
-          assetIn: { address: inResolved.mint, symbol: inMeta?.symbol ?? inResolved.symbol, decimals: inDecimals },
-          assetOut: { address: outResolved.mint, symbol: outMeta?.symbol ?? outResolved.symbol, decimals: outDecimals },
-        };
-
-        if (estimate.fee) {
-          result.fee = { bps: estimate.fee.bps, percent: `${(estimate.fee.bps / 100).toFixed(2)}%` };
-        }
-
-        if (estimate.route) {
-          const routeAmount = estimate.route.amount;
-          result.route = {
-            outputAmount: routeAmount,
-            steps: estimate.route.steps.length,
-            mints: Object.keys(estimate.route.mints).length,
-          };
-
-          if (outDecimals) {
-            result.estimatedOutput = `${Number(routeAmount) / Math.pow(10, outDecimals)} ${outResolved.symbol}`;
+          if (Math.abs(spreadBps) < 10) {
+            recommendation = 'NEUTRAL — venues within 10bps, prefer orderbook for speed';
+          } else if (spreadBps > 0) {
+            recommendation = `On-chain is ${spreadBps}bps cheaper`;
+          } else {
+            recommendation = `Orderbook is ${Math.abs(spreadBps)}bps cheaper`;
           }
-          if (inDecimals) {
-            result.inputAmount = `${Number(params.amount) / Math.pow(10, inDecimals)} ${inResolved.symbol}`;
-          }
+        } else if (orderbookPrice) {
+          recommendation = 'Orderbook only — no on-chain liquidity';
+        } else if (onchainPrice) {
+          recommendation = 'On-chain only — not listed on orderbook';
+        } else {
+          recommendation = 'No pricing available';
         }
-
-        if (estimate.metadata && estimate.metadata.length > 0) {
-          result.tokenMetadata = estimate.metadata.map(m => ({
-            symbol: m.symbol,
-            name: m.currencyName,
-            decimals: m.decimals,
-            usdRate: m.usdRate,
-          }));
-        }
-
-        result.note = 'Quote via on-chain aggregator. Routes through available liquidity venues for best execution.';
 
         return {
-          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              base: baseSymbol,
+              quote: quoteSymbol,
+              side: params.side,
+              amount: params.amount,
+              orderbook: {
+                price: orderbookPrice,
+                spread: orderbookSpread,
+                available: orderbookPrice !== null,
+              },
+              onchain: {
+                price: onchainPrice ? parseFloat(onchainPrice.toFixed(6)) : null,
+                fee: onchainFee,
+                available: onchainPrice !== null,
+                ...(onchainError ? { error: onchainError } : {}),
+              },
+              recommendation,
+              spreadBps,
+            }, null, 2),
+          }],
         };
       } catch (error: any) {
         return {
@@ -269,11 +293,11 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
     }
   );
 
-  // ── CEX/DEX Venue Comparison ──────────────────────────────
+  // ── Venue Comparison ─────────────────────────────────────
 
   server.tool(
     'compare_venues',
-    `Compare prices between Cube's central order book and on-chain liquidity router for an asset. Essential for market-making between venues, cross-venue arbitrage, and best execution routing. Shows the spread between venues and recommends the optimal route.`,
+    'Compare prices between the orderbook and on-chain liquidity for an asset. Shows spread between venues and recommends optimal routing.',
     {
       symbol: z.string().describe('Asset symbol to compare (e.g. "SOL", "BONK", "JUP")'),
       side: z.enum(['buy', 'sell']).describe('Are you buying or selling this asset?'),
@@ -281,16 +305,16 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
     },
     async params => {
       try {
-        // 1. Get CEX orderbook price
+        // 1. Get orderbook price
         const tickers = await iridium.getTickers();
-        const cexTicker = tickers.find(
+        const orderbookTicker = tickers.find(
           t => t.baseAsset.toUpperCase() === params.symbol.toUpperCase() && t.quoteAsset === 'USDC'
         );
 
         // 2. Get on-chain quote
-        let dexPrice: number | null = null;
-        let dexRoute: string | null = null;
-        let dexError: string | null = null;
+        let onchainPrice: number | null = null;
+        let onchainRoute: string | null = null;
+        let onchainError: string | null = null;
 
         try {
           const tokenResolved = await resolveToken(iridium, params.symbol);
@@ -298,7 +322,6 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
             const usdcMint = KNOWN_MINTS.USDC.mint;
             const decimals = tokenResolved.decimals || 9;
 
-            // If amount provided, use it; otherwise estimate for 1 unit
             const humanAmount = params.amount ?? '1';
             const rawAmount = Math.round(parseFloat(humanAmount) * Math.pow(10, decimals)).toString();
 
@@ -318,48 +341,46 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
               const outputAmount = Number(estimate.route.amount) / Math.pow(10, outDecimals);
 
               if (isBuy) {
-                // We spent `humanAmount` USDC, got `outputAmount` tokens
-                dexPrice = parseFloat(humanAmount) / outputAmount;
+                onchainPrice = parseFloat(humanAmount) / outputAmount;
               } else {
-                // We sold `humanAmount` tokens, got `outputAmount` USDC
-                dexPrice = outputAmount / parseFloat(humanAmount);
+                onchainPrice = outputAmount / parseFloat(humanAmount);
               }
 
-              dexRoute = `${estimate.route.steps.length} hops via ${Object.keys(estimate.route.mints).length} mints`;
+              onchainRoute = `${estimate.route.steps.length} hops via ${Object.keys(estimate.route.mints).length} pools`;
             }
           } else {
-            dexError = 'Asset not found on-chain — may not have a listed address';
+            onchainError = 'Asset not found on-chain';
           }
         } catch (e: any) {
-          dexError = e.message;
+          onchainError = e.message;
         }
 
         // 3. Build comparison
-        const cexBid = cexTicker?.bidPrice ?? null;
-        const cexAsk = cexTicker?.askPrice ?? null;
-        const cexPrice = params.side === 'buy' ? cexAsk : cexBid;
-        const cexSpread = (cexBid && cexAsk) ? ((cexAsk - cexBid) / cexAsk * 100).toFixed(3) : null;
+        const bid = orderbookTicker?.bidPrice ?? null;
+        const ask = orderbookTicker?.askPrice ?? null;
+        const orderbookPrice = params.side === 'buy' ? ask : bid;
+        const spread = (bid && ask) ? ((ask - bid) / ask * 100).toFixed(3) : null;
 
         let recommendation: string;
         let spreadBps: number | null = null;
 
-        if (cexPrice && dexPrice) {
+        if (orderbookPrice && onchainPrice) {
           const diff = params.side === 'buy'
-            ? (cexPrice - dexPrice) / cexPrice   // Negative = CEX cheaper
-            : (dexPrice - cexPrice) / dexPrice;   // Negative = CEX better for selling
+            ? (orderbookPrice - onchainPrice) / orderbookPrice
+            : (onchainPrice - orderbookPrice) / onchainPrice;
           spreadBps = Math.round(diff * 10000);
 
           if (Math.abs(spreadBps) < 10) {
-            recommendation = 'NEUTRAL — venues within 10bps, prefer CEX for speed';
+            recommendation = 'NEUTRAL — venues within 10bps, prefer orderbook for speed';
           } else if (spreadBps > 0) {
-            recommendation = `On-chain is ${spreadBps}bps cheaper — route via decentralized venue`;
+            recommendation = `On-chain is ${spreadBps}bps cheaper`;
           } else {
-            recommendation = `CEX is ${Math.abs(spreadBps)}bps cheaper — route via orderbook`;
+            recommendation = `Orderbook is ${Math.abs(spreadBps)}bps cheaper`;
           }
-        } else if (cexPrice && !dexPrice) {
-          recommendation = 'CEX only — asset not available or no on-chain liquidity';
-        } else if (!cexPrice && dexPrice) {
-          recommendation = 'On-chain only — no CEX orderbook liquidity';
+        } else if (orderbookPrice && !onchainPrice) {
+          recommendation = 'Orderbook only — no on-chain liquidity';
+        } else if (!orderbookPrice && onchainPrice) {
+          recommendation = 'On-chain only — not listed on orderbook';
         } else {
           recommendation = 'No pricing available on either venue';
         }
@@ -368,21 +389,21 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
           symbol: params.symbol.toUpperCase(),
           side: params.side,
           amount: params.amount ?? '1',
-          cex: {
+          orderbook: {
             venue: 'Cube Orderbook',
-            bidPrice: cexBid,
-            askPrice: cexAsk,
-            effectivePrice: cexPrice,
-            spread: cexSpread ? `${cexSpread}%` : null,
-            volume24h: cexTicker?.quoteVolume24h ?? 0,
-            available: cexPrice !== null,
+            bidPrice: bid,
+            askPrice: ask,
+            effectivePrice: orderbookPrice,
+            spread: spread ? `${spread}%` : null,
+            volume24h: orderbookTicker?.quoteVolume24h ?? 0,
+            available: orderbookPrice !== null,
           },
-          dex: {
-            venue: 'Cube On-Chain Router (Jupiter/Phantom/1inch/Kamino)',
-            effectivePrice: dexPrice ? parseFloat(dexPrice.toFixed(6)) : null,
-            route: dexRoute,
-            available: dexPrice !== null,
-            ...(dexError ? { error: dexError } : {}),
+          onchain: {
+            venue: 'On-Chain Router',
+            effectivePrice: onchainPrice ? parseFloat(onchainPrice.toFixed(6)) : null,
+            route: onchainRoute,
+            available: onchainPrice !== null,
+            ...(onchainError ? { error: onchainError } : {}),
           },
           comparison: {
             spreadBps,
@@ -402,78 +423,318 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
     }
   );
 
+  // ── Swap: on-chain market order ───────────────────────────
+
   server.tool(
-    'execute_trade',
-    `Execute a trade via the best available venue. Routes through on-chain liquidity aggregators for best execution. First get a quote with get_quote, then execute here. NOTE: Requires Cube account with trading access enabled.`,
+    'swap',
+    'Swap one asset for another via on-chain liquidity. Like a market order routed through liquidity aggregators. Use this when you specifically want on-chain execution. For smart routing across all venues, use execute_trade instead.',
     {
-      assetIn: z.string().describe('Asset to sell — symbol (e.g. "SOL") or on-chain address'),
-      assetOut: z.string().describe('Asset to buy — symbol (e.g. "BONK") or on-chain address'),
-      amount: z.string().describe('Amount in smallest units (lamports for SOL, base units for SPL)'),
-      direction: z.enum(['in', 'out']).default('in').describe('"in" = amount to sell, "out" = amount to buy'),
+      base: z.string().describe('Asset to trade — symbol (e.g. "SOL", "BONK") or on-chain mint address'),
+      quote: z.string().default('USDC').describe('Quote asset (default "USDC")'),
+      side: z.enum(['buy', 'sell']).describe('Buy or sell the base asset'),
+      amount: z.string().describe('Amount of base asset in human-readable units (e.g. "1.5")'),
       slippageBps: z.number().default(50).describe('Max slippage in basis points (default 50 = 0.5%)'),
     },
     async params => {
       try {
-        const tokenIn = params.assetIn;
-        const tokenOut = params.assetOut;
+        const baseResolved = await resolveToken(iridium, params.base);
+        const quoteResolved = await resolveToken(iridium, params.quote);
 
-        // Resolve tokens
-        const inResolved = await resolveToken(iridium, tokenIn);
-        const outResolved = await resolveToken(iridium, tokenOut);
-
-        if ('candidates' in inResolved) {
-          return {
-            content: [{
-              type: 'text' as const,
-              text: `Ambiguous assetIn "${tokenIn}". Specify address or use search_assets.`,
-            }],
-            isError: true,
-          };
+        if ('candidates' in baseResolved) {
+          if (baseResolved.candidates.length === 0) {
+            return { content: [{ type: 'text' as const, text: `No asset found for "${params.base}". Use search_assets to find the correct asset.` }], isError: true };
+          }
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ error: `Multiple assets match "${params.base}". Specify the address.`, matches: baseResolved.candidates.map(formatToken) }, null, 2) }], isError: true };
         }
-        if ('candidates' in outResolved) {
-          return {
-            content: [{
-              type: 'text' as const,
-              text: `Ambiguous assetOut "${tokenOut}". Specify address or use search_assets.`,
-            }],
-            isError: true,
-          };
+        if ('candidates' in quoteResolved) {
+          return { content: [{ type: 'text' as const, text: `Quote asset "${params.quote}" not found.` }], isError: true };
         }
 
-        // First get estimate to confirm route exists
+        const rawAmount = Math.round(parseFloat(params.amount) * Math.pow(10, baseResolved.decimals)).toString();
+        const tokenIn = params.side === 'buy' ? quoteResolved.mint : baseResolved.mint;
+        const tokenOut = params.side === 'buy' ? baseResolved.mint : quoteResolved.mint;
+        const tradeLabel = params.side === 'buy'
+          ? `Buy ${params.amount} ${baseResolved.symbol} with ${quoteResolved.symbol}`
+          : `Sell ${params.amount} ${baseResolved.symbol} for ${quoteResolved.symbol}`;
+
         const estimate = await iridium.getSwapEstimate({
-          tokenIn: inResolved.mint,
-          tokenOut: outResolved.mint,
-          direction: params.direction,
-          ...(params.direction === 'in' ? { amountIn: params.amount } : { amountOut: params.amount }),
+          tokenIn, tokenOut,
+          direction: params.side === 'buy' ? 'out' : 'in',
+          ...(params.side === 'buy' ? { amountOut: rawAmount } : { amountIn: rawAmount }),
         });
 
         if (estimate.error || !estimate.route) {
+          return { content: [{ type: 'text' as const, text: `No on-chain route: ${estimate.error ?? 'Empty route'}` }], isError: true };
+        }
+
+        const signingCreds = await getSigningCredentials();
+
+        if (signingCreds && osmium) {
+          try {
+            const subaccountId = await iridium.getDefaultSubaccountId();
+            const result = await osmium.submitIntent({
+              subaccountId, sourceId: 3, intentType: 1,
+              intentBytes: new TextEncoder().encode(JSON.stringify({
+                tokenIn, tokenOut,
+                direction: params.side === 'buy' ? 'out' : 'in',
+                amount: rawAmount, slippageBps: params.slippageBps,
+              })),
+            });
+            return { content: [{ type: 'text' as const, text: JSON.stringify({ status: 'executed', venue: 'onchain', trade: tradeLabel, intentId: result.intentId, txnHash: result.txnHash, deltas: result.deltas }, null, 2) }] };
+          } catch {
+            // Fall through to REST
+          }
+        }
+
+        try {
+          const executeResult = await iridium.executeSwap({
+            tokenIn, tokenOut,
+            direction: params.side === 'buy' ? 'out' : 'in',
+            ...(params.side === 'buy' ? { amountOut: rawAmount } : { amountIn: rawAmount }),
+            slippageBps: params.slippageBps,
+          });
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ status: 'executed', venue: 'onchain', trade: tradeLabel, result: executeResult }, null, 2) }] };
+        } catch (execError: any) {
+          const outDecimals = estimate.metadata?.find(m => m.address === tokenOut)?.decimals ?? 6;
+          const outputHuman = Number(estimate.route.amount) / Math.pow(10, outDecimals);
           return {
             content: [{
               type: 'text' as const,
-              text: `No route found: ${estimate.error ?? 'Empty route returned'}`,
+              text: JSON.stringify({
+                status: 'estimate_only', trade: tradeLabel,
+                estimatedOutput: `${outputHuman} ${params.side === 'buy' ? baseResolved.symbol : quoteResolved.symbol}`,
+                fee: estimate.fee ? `${(estimate.fee.bps / 100).toFixed(2)}%` : null,
+                action: signingCreds
+                  ? 'On-chain execution failed. Try again or execute at cube.exchange/swap.'
+                  : 'Run `npm run login` to enable trading, or execute at cube.exchange/swap.',
+                error: execError.message,
+              }, null, 2),
             }],
             isError: true,
           };
         }
+      } catch (error: any) {
+        return { content: [{ type: 'text' as const, text: `Failed: ${error.message}` }], isError: true };
+      }
+    }
+  );
 
-        // Check if we have signing credentials for wallet intent execution
+  // ── Execute Trade: unified best execution ───────────────
+
+  server.tool(
+    'execute_trade',
+    'Execute a trade with smart routing. Checks both the orderbook and on-chain liquidity, routes to the best price. Works like a market order — specify what you want to buy or sell and the amount. Accepts symbols or on-chain mint addresses. Quote asset defaults to USDC if omitted.',
+    {
+      base: z.string().describe('Asset to trade — symbol (e.g. "SOL", "BTC", "BONK") or on-chain mint address'),
+      quote: z.string().default('USDC').describe('Quote asset — symbol or mint address (default "USDC")'),
+      side: z.enum(['buy', 'sell']).describe('Buy or sell the base asset'),
+      amount: z.string().describe('Amount of base asset in human-readable units (e.g. "1.5")'),
+      venue: z.enum(['auto', 'orderbook', 'onchain']).default('auto').describe('Force a venue or let the system pick the best price'),
+      slippageBps: z.number().default(50).describe('Max slippage in basis points (default 50 = 0.5%)'),
+    },
+    async params => {
+      try {
+        const baseSymbol = params.base.toUpperCase();
+        const quoteSymbol = params.quote.toUpperCase();
+        const marketSymbol = `${baseSymbol}${quoteSymbol}`;
+
+        // ── Get orderbook price ──
+        let orderbookPrice: number | null = null;
+        let orderbookMarket: { marketId: number; symbol: string; priceTickSize: string; quantityTickSize: string } | null = null;
+
+        if (params.venue !== 'onchain') {
+          try {
+            const markets = await iridium.getMarkets();
+            orderbookMarket = markets.find(m => m.symbol.toUpperCase() === marketSymbol) ?? null;
+            if (orderbookMarket) {
+              const tickers = await iridium.getTickers();
+              const ticker = tickers.find(t => t.symbol === orderbookMarket!.symbol);
+              orderbookPrice = params.side === 'buy' ? (ticker?.askPrice ?? null) : (ticker?.bidPrice ?? null);
+            }
+          } catch {
+            // Orderbook unavailable
+          }
+        }
+
+        // ── Get on-chain price ──
+        let onchainPrice: number | null = null;
+        let onchainEstimate: any = null;
+        let baseResolved: { mint: string; symbol: string; decimals: number } | null = null;
+        let quoteResolved: { mint: string; symbol: string; decimals: number } | null = null;
+
+        if (params.venue !== 'orderbook') {
+          try {
+            const bRes = await resolveToken(iridium, params.base);
+            const qRes = await resolveToken(iridium, params.quote);
+
+            if (!('candidates' in bRes) && !('candidates' in qRes)) {
+              baseResolved = bRes;
+              quoteResolved = qRes;
+              const rawAmount = Math.round(parseFloat(params.amount) * Math.pow(10, bRes.decimals)).toString();
+
+              const tokenIn = params.side === 'buy' ? qRes.mint : bRes.mint;
+              const tokenOut = params.side === 'buy' ? bRes.mint : qRes.mint;
+
+              onchainEstimate = await iridium.getSwapEstimate({
+                tokenIn, tokenOut,
+                direction: params.side === 'buy' ? 'out' : 'in',
+                ...(params.side === 'buy' ? { amountOut: rawAmount } : { amountIn: rawAmount }),
+              });
+
+              if (onchainEstimate.route) {
+                const outMeta = onchainEstimate.metadata?.find((m: any) => m.address === tokenOut);
+                const outDecimals = outMeta?.decimals ?? 6;
+                const outputAmount = Number(onchainEstimate.route.amount) / Math.pow(10, outDecimals);
+
+                if (params.side === 'buy') {
+                  const inMeta = onchainEstimate.metadata?.find((m: any) => m.address === tokenIn);
+                  const inDecimals = inMeta?.decimals ?? 6;
+                  const quoteSpent = Number(onchainEstimate.route.amount) / Math.pow(10, inDecimals);
+                  onchainPrice = quoteSpent / parseFloat(params.amount);
+                } else {
+                  onchainPrice = outputAmount / parseFloat(params.amount);
+                }
+              }
+            }
+          } catch {
+            // On-chain unavailable
+          }
+        }
+
+        // ── Route decision ──
+        let chosenVenue: 'orderbook' | 'onchain';
+
+        if (params.venue === 'orderbook') {
+          if (!orderbookPrice || !orderbookMarket) {
+            return { content: [{ type: 'text' as const, text: `No orderbook market found for ${marketSymbol}. Try venue: "onchain" or "auto".` }], isError: true };
+          }
+          chosenVenue = 'orderbook';
+        } else if (params.venue === 'onchain') {
+          if (!onchainPrice || !baseResolved || !quoteResolved) {
+            return { content: [{ type: 'text' as const, text: `No on-chain route found for ${baseSymbol}/${quoteSymbol}. Try venue: "orderbook" or "auto".` }], isError: true };
+          }
+          chosenVenue = 'onchain';
+        } else {
+          // Auto: pick better price
+          if (orderbookPrice && onchainPrice) {
+            if (params.side === 'buy') {
+              chosenVenue = orderbookPrice <= onchainPrice ? 'orderbook' : 'onchain';
+            } else {
+              chosenVenue = orderbookPrice >= onchainPrice ? 'orderbook' : 'onchain';
+            }
+          } else if (orderbookPrice) {
+            chosenVenue = 'orderbook';
+          } else if (onchainPrice) {
+            chosenVenue = 'onchain';
+          } else {
+            return { content: [{ type: 'text' as const, text: `No liquidity found for ${baseSymbol}/${quoteSymbol} on any venue.` }], isError: true };
+          }
+        }
+
+        const tradeLabel = params.side === 'buy'
+          ? `Buy ${params.amount} ${baseSymbol} with ${quoteSymbol}`
+          : `Sell ${params.amount} ${baseSymbol} for ${quoteSymbol}`;
+
+        // ── Execute on orderbook ──
+        if (chosenVenue === 'orderbook') {
+          const market = orderbookMarket!;
+          const { toLots, fromLots, SIDE_MAP, ORDER_TYPE_MAP, TIF_MAP } = await import('./orders.js');
+          const quantityLots = toLots(params.amount, market.quantityTickSize);
+          const normalizedSide = params.side === 'buy' ? 'BID' : 'ASK';
+
+          // Try WebSocket first
+          if (osmium) {
+            try {
+              if (!osmium.isConnected) {
+                const subId = await iridium.getDefaultSubaccountId();
+                osmium.setSubaccountId(subId);
+              }
+              const wsResult = await osmium.placeOrder({
+                marketId: market.marketId,
+                side: normalizedSide,
+                quantity: String(quantityLots),
+                orderType: 'MARKET_WITH_PROTECTION',
+                timeInForce: 'IOC',
+                postOnly: false,
+                cancelOnDisconnect: false,
+              });
+
+              const humanQty = fromLots(Number(wsResult.quantity), market.quantityTickSize);
+              const humanPrice = wsResult.price ? fromLots(Number(wsResult.price), market.priceTickSize) : undefined;
+
+              return {
+                content: [{
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    status: 'executed',
+                    venue: 'orderbook',
+                    trade: tradeLabel,
+                    market: market.symbol,
+                    price: humanPrice,
+                    quantity: humanQty,
+                    clientOrderId: wsResult.clientOrderId,
+                    exchangeOrderId: wsResult.exchangeOrderId,
+                    ...(onchainPrice ? { onchainPriceWas: onchainPrice.toFixed(6) } : {}),
+                    ...(orderbookPrice && onchainPrice ? { savingBps: Math.abs(Math.round((orderbookPrice - onchainPrice) / orderbookPrice * 10000)) } : {}),
+                  }, null, 2),
+                }],
+              };
+            } catch {
+              // Fall through to REST
+            }
+          }
+
+          // REST fallback
+          const result = await iridium.placeOrderRest({
+            marketId: market.marketId,
+            side: SIDE_MAP[normalizedSide],
+            quantity: quantityLots,
+            orderType: ORDER_TYPE_MAP['MARKET_WITH_PROTECTION'],
+            timeInForce: TIF_MAP['IOC'],
+            postOnly: 0,
+            cancelOnDisconnect: false,
+          });
+
+          const humanQty = fromLots(result.quantity, market.quantityTickSize);
+          const humanPrice = result.price ? fromLots(result.price, market.priceTickSize) : undefined;
+
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({
+                status: 'executed',
+                venue: 'orderbook',
+                trade: tradeLabel,
+                market: market.symbol,
+                price: humanPrice,
+                quantity: humanQty,
+                clientOrderId: result.clientOrderId,
+                exchangeOrderId: result.exchangeOrderId,
+              }, null, 2),
+            }],
+          };
+        }
+
+        // ── Execute on-chain ──
+        const bRes = baseResolved!;
+        const qRes = quoteResolved!;
+        const rawAmount = Math.round(parseFloat(params.amount) * Math.pow(10, bRes.decimals)).toString();
+        const tokenIn = params.side === 'buy' ? qRes.mint : bRes.mint;
+        const tokenOut = params.side === 'buy' ? bRes.mint : qRes.mint;
+
         const signingCreds = await getSigningCredentials();
 
         if (signingCreds && osmium) {
-          // Attempt execution via wallet WebSocket with Ed25519 signed intent
           try {
             const subaccountId = await iridium.getDefaultSubaccountId();
             const result = await osmium.submitIntent({
               subaccountId,
-              sourceId: 3, // Solana
-              intentType: 1, // Swap (TBD — may need adjustment)
+              sourceId: 3,
+              intentType: 1,
               intentBytes: new TextEncoder().encode(JSON.stringify({
-                tokenIn: inResolved.mint,
-                tokenOut: outResolved.mint,
-                direction: params.direction,
-                amount: params.amount,
+                tokenIn, tokenOut,
+                direction: params.side === 'buy' ? 'out' : 'in',
+                amount: rawAmount,
                 slippageBps: params.slippageBps,
               })),
             });
@@ -483,42 +744,25 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
                 type: 'text' as const,
                 text: JSON.stringify({
                   status: 'executed',
-                  trade: `${inResolved.symbol} → ${outResolved.symbol}`,
+                  venue: 'onchain',
+                  trade: tradeLabel,
                   intentId: result.intentId,
                   txnHash: result.txnHash,
                   deltas: result.deltas,
+                  ...(orderbookPrice ? { orderbookPriceWas: orderbookPrice } : {}),
                 }, null, 2),
               }],
             };
-          } catch (intentError: any) {
-            // Fall through to REST attempt
-            const inDecimals = estimate.metadata?.find(m => m.address === inResolved.mint)?.decimals ?? 9;
-            const outDecimals = estimate.metadata?.find(m => m.address === outResolved.mint)?.decimals ?? 6;
-
-            return {
-              content: [{
-                type: 'text' as const,
-                text: JSON.stringify({
-                  status: 'intent_failed',
-                  trade: `${inResolved.symbol} → ${outResolved.symbol}`,
-                  inputAmount: `${Number(params.amount) / Math.pow(10, inDecimals)} ${inResolved.symbol}`,
-                  estimatedOutput: `${Number(estimate.route.amount) / Math.pow(10, outDecimals)} ${outResolved.symbol}`,
-                  error: intentError.message,
-                  action: 'Intent execution failed. Try again or execute at cube.exchange/swap.',
-                }, null, 2),
-              }],
-              isError: true,
-            };
+          } catch {
+            // Fall through to REST
           }
         }
 
-        // No signing credentials — try REST execute endpoint, fall back to estimate
         try {
           const executeResult = await iridium.executeSwap({
-            tokenIn: inResolved.mint,
-            tokenOut: outResolved.mint,
-            direction: params.direction,
-            ...(params.direction === 'in' ? { amountIn: params.amount } : { amountOut: params.amount }),
+            tokenIn, tokenOut,
+            direction: params.side === 'buy' ? 'out' : 'in',
+            ...(params.side === 'buy' ? { amountOut: rawAmount } : { amountIn: rawAmount }),
             slippageBps: params.slippageBps,
           });
 
@@ -527,33 +771,26 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
               type: 'text' as const,
               text: JSON.stringify({
                 status: 'executed',
-                trade: `${inResolved.symbol} → ${outResolved.symbol}`,
+                venue: 'onchain',
+                trade: tradeLabel,
                 result: executeResult,
               }, null, 2),
             }],
           };
         } catch (execError: any) {
-          const inDecimals = estimate.metadata?.find(m => m.address === inResolved.mint)?.decimals ?? 9;
-          const outDecimals = estimate.metadata?.find(m => m.address === outResolved.mint)?.decimals ?? 6;
-
           return {
             content: [{
               type: 'text' as const,
               text: JSON.stringify({
                 status: 'estimate_only',
-                reason: signingCreds
-                  ? 'Trade execution failed via both intent and REST.'
-                  : 'No signing credentials. Run `npm run login` in the cube connector to authenticate.',
-                trade: `${inResolved.symbol} → ${outResolved.symbol}`,
-                inputAmount: `${Number(params.amount) / Math.pow(10, inDecimals)} ${inResolved.symbol}`,
-                estimatedOutput: `${Number(estimate.route.amount) / Math.pow(10, outDecimals)} ${outResolved.symbol}`,
-                route: {
-                  steps: estimate.route.steps.length,
-                  fee: estimate.fee ? `${(estimate.fee.bps / 100).toFixed(2)}%` : null,
-                },
+                trade: tradeLabel,
+                venue: 'onchain',
+                estimatedPrice: onchainPrice?.toFixed(6),
+                ...(orderbookPrice ? { orderbookPrice } : {}),
+                fee: onchainEstimate?.fee ? `${(onchainEstimate.fee.bps / 100).toFixed(2)}%` : null,
                 action: signingCreds
-                  ? 'Execute this trade at cube.exchange/swap.'
-                  : 'Run `npm run login` to enable agent signing, or execute at cube.exchange/swap.',
+                  ? 'On-chain execution failed. Try again or execute at cube.exchange/swap.'
+                  : 'Run `npm run login` to enable trading, or execute at cube.exchange/swap.',
                 error: execError.message,
               }, null, 2),
             }],
@@ -561,10 +798,7 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
           };
         }
       } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+        return { content: [{ type: 'text' as const, text: `Failed: ${error.message}` }], isError: true };
       }
     }
   );

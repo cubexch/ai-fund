@@ -48,7 +48,7 @@ describe('AssetRegistry', () => {
 
     const usdc = registry.getById(2);
     expect(usdc).toBeDefined();
-    expect(usdc!.icon).toBe('◉');
+    expect(usdc!.icon).toBe('💵');
   });
 
   it('supports symbol → assetId lookup', () => {

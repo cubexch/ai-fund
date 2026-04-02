@@ -249,13 +249,21 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
     'get_bars',
     'Get historical OHLCV candlestick data for an asset. Useful for technical analysis, backtesting, and charting.',
     {
-      marketId: z.number().describe('Market ID to get history for'),
+      symbol: z.string().optional().describe('Market symbol (e.g. "BTCUSDC", "SOLUSDC")'),
+      marketId: z.number().optional().describe('Numeric market ID (alternative to symbol)'),
       interval: z.enum(['1s', '1m', '15m', '1h', '4h', '1d']).default('1h').describe('Candlestick interval'),
       limit: z.number().default(100).describe('Number of candles to return (max 1000)'),
     },
     async params => {
       try {
-        const candles = await iridium.getPriceHistory(params.marketId, params.interval, params.limit);
+        if (!params.symbol && params.marketId === undefined) {
+          return {
+            content: [{ type: 'text' as const, text: 'Either symbol or marketId must be provided' }],
+            isError: true,
+          };
+        }
+        const { market } = await resolveMarket(params);
+        const candles = await iridium.getPriceHistory(market.marketId, params.interval, params.limit);
 
         let freshnessWarning: string | undefined;
         if (candles.length > 0) {
@@ -299,7 +307,8 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
     'Get estimated trading fees for a specific trade. Returns maker and taker fee rates.',
     {
       subaccountId: z.number().optional().describe('Subaccount ID (defaults to configured subaccount)'),
-      marketId: z.number().describe('Market ID'),
+      symbol: z.string().optional().describe('Market symbol (e.g. "BTCUSDC", "SOLUSDC")'),
+      marketId: z.number().optional().describe('Numeric market ID (alternative to symbol)'),
       side: z.enum(['Bid', 'Ask']).describe('Trade side'),
       price: z.number().describe('Order price'),
       postOnly: z.enum(['Disabled', 'Enabled']).default('Disabled').describe('Post-only mode'),
@@ -308,9 +317,16 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
     },
     async params => {
       try {
+        if (!params.symbol && params.marketId === undefined) {
+          return {
+            content: [{ type: 'text' as const, text: 'Either symbol or marketId must be provided' }],
+            isError: true,
+          };
+        }
+        const { market } = await resolveMarket(params);
         const fees = await iridium.getEstimatedFees(
           params.subaccountId ?? await defaultSubaccountId(),
-          params.marketId,
+          market.marketId,
           params.side,
           params.price,
           params.postOnly,
@@ -338,7 +354,8 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
     'get_technical_analysis',
     'Run technical analysis on an asset: SMA, EMA, RSI, MACD, Bollinger Bands, ATR, ADX, OBV, and Stochastic.',
     {
-      marketId: z.number().describe('Market ID to analyze'),
+      symbol: z.string().optional().describe('Market symbol (e.g. "BTCUSDC", "SOLUSDC")'),
+      marketId: z.number().optional().describe('Numeric market ID (alternative to symbol)'),
       interval: z.enum(['1s', '1m', '15m', '1h', '4h', '1d']).default('1h').describe('Candlestick interval'),
       limit: z.number().default(200).describe('Number of candles to fetch (more = better indicator accuracy)'),
       indicators: z
@@ -348,7 +365,14 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
     },
     async params => {
       try {
-        const candles = await iridium.getPriceHistory(params.marketId, params.interval, params.limit);
+        if (!params.symbol && params.marketId === undefined) {
+          return {
+            content: [{ type: 'text' as const, text: 'Either symbol or marketId must be provided' }],
+            isError: true,
+          };
+        }
+        const { market: resolvedMarket } = await resolveMarket(params);
+        const candles = await iridium.getPriceHistory(resolvedMarket.marketId, params.interval, params.limit);
 
         if (candles.length < 30) {
           return {
@@ -374,7 +398,7 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
         }));
 
         const result: Record<string, unknown> = {
-          market: params.marketId,
+          market: resolvedMarket.symbol,
           interval: params.interval,
           candleCount: candles.length,
           latestClose: closes[closes.length - 1],

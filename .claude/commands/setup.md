@@ -26,12 +26,12 @@ Walk the user through connecting their exchange(s) step by step.
    ```
    Available Exchanges:
 
-   ★ Cube Exchange (recommended)        — Built-in. 200μs matching, lowest fees, paper trading.
-     OKX                                 — 107 tools. Spot, futures, options, earn, bots.
-     Kraken                              — 134 commands. Stocks, futures, earn, staking.
-     Binance (via CCXT)                  — World's largest exchange. Spot + futures.
-     Coinbase                            — US-regulated. Spot + wallet.
-     Any CCXT exchange                   — 100+ exchanges via universal adapter.
+   1) Cube Exchange (recommended)       — Built-in. 200μs matching, lowest fees, paper trading.
+   2) Alpaca (US equities + ETFs)       — Commission-free stocks. Full paper trading.
+   3) Hyperliquid (on-chain perps)      — Non-custodial. Testnet available.
+   4) OKX                               — 500+ crypto pairs. Demo mode.
+   5) Kraken                            — Crypto + tokenized stocks. Paper trading.
+   6) Other exchange via CCXT           — 100+ exchanges (Binance, Bybit, Coinbase, etc.)
 
    Which exchanges would you like to connect? (You can add more later)
    ```

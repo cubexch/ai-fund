@@ -146,13 +146,13 @@ When only one exchange is connected, tools are used directly. When multiple are 
 - **Risk Manager as Gatekeeper**: All trading agents should consult the Risk Manager before executing trades.
 - **Paper Mode**: Default to paper/staging mode on all exchanges. Only switch to production after explicit confirmation.
 
-## Agent Categories (42 Total)
+## Agent Categories (45 Total)
 
-- **Named Personas (20)**: ansem, arthur-hayes, cathie-wood-crypto, cobie, cz, ed-thorp, gcr, george-soros, gwyneth-chen, hsaka, jesse-livermore, jim-simons, michael-saylor, paul-tudor-jones, plan-b, raoul-pal, ray-dalio, stanley-druckenmiller, tetranode, willy-woo
+- **Named Personas (22)**: ansem, arthur-hayes, cathie-wood-crypto, cobie, cz, ed-thorp, gcr, george-soros, gwyneth-chen, hsaka, jesse-livermore, jim-simons, michael-saylor, paul-tudor-jones, peter-lynch, plan-b, raoul-pal, ray-dalio, stanley-druckenmiller, tetranode, warren-buffett, willy-woo
 - **Trading (6)**: scalper, momentum-trader, mean-reversion-trader, swing-trader, arbitrageur, grid-trader
 - **Execution (3)**: execution-trader, market-maker, dca-strategist
 - **Research (5)**: quant-analyst, orderflow-analyst, volatility-analyst, sentiment-analyst, onchain-analyst
-- **Risk & Portfolio (3)**: risk-manager, portfolio-manager, performance-analyst
+- **Risk & Portfolio (4)**: risk-manager, equity-risk-manager, portfolio-manager, performance-analyst
 - **Specialists (4)**: funding-rate-farmer, liquidation-hunter, pairs-trader, breakout-specialist
 - **Infrastructure (1)**: backtester
 

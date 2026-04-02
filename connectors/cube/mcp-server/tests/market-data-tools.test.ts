@@ -11,10 +11,12 @@ function createMockServer() {
   };
 }
 
+const DEFAULT_MARKET = { marketId: 1, symbol: 'BTCUSDC', priceTickSize: '0.01', quantityTickSize: '0.001' };
+
 function createMockIridium(overrides: Record<string, any> = {}) {
   return {
     getDefaultSubaccountId: vi.fn().mockResolvedValue(1),
-    getMarkets: vi.fn().mockResolvedValue([]),
+    getMarkets: vi.fn().mockResolvedValue([DEFAULT_MARKET]),
     getTickers: vi.fn().mockResolvedValue([]),
     getOrderBook: vi.fn().mockResolvedValue({ bids: [], asks: [] }),
     getRecentTrades: vi.fn().mockResolvedValue([]),
@@ -85,7 +87,6 @@ describe('registerMarketDataTools', () => {
   describe('get_order_book', () => {
     it('falls back to REST when no mendelev', async () => {
       const book = { bids: [[60000, 1]], asks: [[60001, 0.5]] };
-      iridium.getMarkets.mockResolvedValue([{ marketId: 1, symbol: 'BTCUSDC', priceTickSize: '0.01', quantityTickSize: '0.001' }]);
       iridium.getOrderBook.mockResolvedValue(book);
 
       const handler = server.getHandler('get_order_book')!;
@@ -100,7 +101,6 @@ describe('registerMarketDataTools', () => {
   describe('get_trades', () => {
     it('returns trades from REST fallback', async () => {
       const trades = [{ price: 60000, qty: 0.1, side: 'buy', ts: Date.now() }];
-      iridium.getMarkets.mockResolvedValue([{ marketId: 1, symbol: 'BTCUSDC', priceTickSize: '0.01', quantityTickSize: '0.001' }]);
       iridium.getRecentTrades.mockResolvedValue(trades);
 
       const handler = server.getHandler('get_trades')!;
@@ -118,7 +118,7 @@ describe('registerMarketDataTools', () => {
       iridium.getPriceHistory.mockResolvedValue(candles);
 
       const handler = server.getHandler('get_bars')!;
-      const result = await handler({ marketId: 1, interval: '1h', limit: 100 });
+      const result = await handler({ symbol: 'BTCUSDC', interval: '1h', limit: 100 });
       const data = JSON.parse(result.content[0].text);
 
       expect(data.freshnessWarning).toBeDefined();
@@ -130,7 +130,7 @@ describe('registerMarketDataTools', () => {
       iridium.getPriceHistory.mockResolvedValue(candles);
 
       const handler = server.getHandler('get_bars')!;
-      const result = await handler({ marketId: 1, interval: '1h', limit: 100 });
+      const result = await handler({ symbol: 'BTCUSDC', interval: '1h', limit: 100 });
       const data = JSON.parse(result.content[0].text);
 
       expect(data.freshnessWarning).toBeUndefined();
@@ -147,7 +147,7 @@ describe('registerMarketDataTools', () => {
       iridium.getPriceHistory.mockResolvedValue(candles);
 
       const handler = server.getHandler('get_technical_analysis')!;
-      const result = await handler({ marketId: 1, interval: '1h', limit: 200, indicators: ['rsi'] });
+      const result = await handler({ symbol: 'BTCUSDC', interval: '1h', limit: 200, indicators: ['rsi'] });
 
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('Insufficient data');
@@ -167,7 +167,7 @@ describe('registerMarketDataTools', () => {
 
       const handler = server.getHandler('get_technical_analysis')!;
       const result = await handler({
-        marketId: 1,
+        symbol: 'BTCUSDC',
         interval: '1h',
         limit: 200,
         indicators: ['rsi', 'macd', 'bollinger', 'atr'],
