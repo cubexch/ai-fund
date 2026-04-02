@@ -105,22 +105,53 @@ With multiple exchanges connected, the desk unlocks powerful strategies:
 | **Multi-Venue Market Making** | The Market Maker quotes on multiple exchanges simultaneously, capturing spreads across venues. |
 | **Best Execution** | Compare fill quality across exchanges. Route to the venue that consistently delivers the best fills. |
 
-## Building a Custom Connector
+## Unified Tool API
 
-Any MCP server that exposes trading tools works with the hedge fund skills. At minimum, your connector should provide:
+All connectors follow a standard tool naming convention (inspired by Alpaca). This makes skills exchange-agnostic — the same skill works with Cube, OKX, Robinhood, or any other connector.
 
-**Required tools:**
-- `place_order` — Submit an order (market, limit)
-- `cancel_order` — Cancel an order
-- `get_positions` — Current positions
-- `get_balances` — Account balances
-- `get_tickers` — Current prices
+### Required tools (minimum viable connector):
 
-**Recommended tools:**
-- `get_price_history` — OHLCV candles
-- `get_fills` — Trade history
-- `get_order_history` — Order history
-- `modify_order` — Modify an existing order
-- `mass_cancel` — Cancel all orders
+| Tool | Description |
+|------|-------------|
+| `place_order` | Submit an order (market, limit). Accept `symbol` or `marketId`. Side: `buy`/`sell`. |
+| `cancel_order` | Cancel an order by ID |
+| `get_positions` | Current positions/holdings |
+| `get_account` | Account summary with balances and total portfolio value |
+| `get_tickers` | Current prices for all assets |
 
-See `cube/mcp-server/` for a reference implementation.
+### Recommended tools:
+
+| Tool | Description |
+|------|-------------|
+| `get_bars` | OHLCV candlestick history |
+| `get_fills` | Trade execution history |
+| `get_orders` | Open/resting orders (with `status` filter: `open` \| `all`) |
+| `get_order_history` | Historical orders |
+| `get_order_book` | Order book depth (bids/asks) |
+| `get_trades` | Recent trades for a market |
+| `modify_order` | Modify an existing order |
+| `cancel_all_orders` | Cancel all resting orders |
+| `close_position` | Close a position by symbol (with optional `percentage`) |
+
+### Advanced tools:
+
+| Tool | Description |
+|------|-------------|
+| `get_quote` | Get a price quote across venues (CEX orderbook, DEX aggregator, etc.) |
+| `execute_trade` | Execute via best available venue |
+| `compare_venues` | Compare execution across venues (CEX vs DEX, cross-exchange) |
+| `search_assets` | Search for tradable assets by name or symbol |
+| `get_trending` | Currently trending assets |
+| `get_portfolio` | Portfolio with allocations and current prices |
+| `get_fees` | Fee estimates for a trade |
+| `get_technical_analysis` | Technical indicators (RSI, MACD, Bollinger, etc.) |
+| `calculate_position_size` | Risk-based position sizing (Kelly criterion, fixed fractional) |
+
+### Naming conventions:
+- **snake_case** everywhere (not kebab-case or camelCase)
+- **`get_`** prefix for read operations
+- **`place_`** / **`cancel_`** / **`modify_`** for write operations
+- Accept both `symbol` (string) and `marketId` (number) where applicable
+- `side` accepts both `'buy'`/`'sell'` and `'BID'`/`'ASK'`
+
+See `cube/mcp-server/` for the reference implementation (25 tools).

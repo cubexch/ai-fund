@@ -33,8 +33,8 @@ export function registerAccountTools(server: McpServer, iridium: IridiumClient) 
   );
 
   server.tool(
-    'get_balances',
-    'Get human-readable asset balances with symbols, amounts, and USD values for the trading subaccount.',
+    'get_account',
+    'Get account summary with balances, total portfolio value, and holdings.',
     {
       subaccountId: z.number().optional().describe('Subaccount ID (defaults to configured subaccount)'),
     },

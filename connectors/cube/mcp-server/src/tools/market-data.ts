@@ -8,9 +8,25 @@ import type { OHLCV } from '../../../../../lib/indicators.js';
 export function registerMarketDataTools(server: McpServer, iridium: IridiumClient, mendelev?: MendelevClient) {
   const defaultSubaccountId = () => iridium.getDefaultSubaccountId();
 
+  // Helper: resolve a symbol string to a market object
+  async function resolveMarket(params: { symbol?: string; marketId?: number }) {
+    const markets = await iridium.getMarkets();
+    if (params.symbol) {
+      const market = markets.find(m => m.symbol === params.symbol);
+      if (!market) throw new Error(`Unknown symbol: ${params.symbol}`);
+      return { market, markets };
+    }
+    if (params.marketId !== undefined) {
+      const market = markets.find(m => m.marketId === params.marketId);
+      if (!market) throw new Error(`Unknown marketId: ${params.marketId}`);
+      return { market, markets };
+    }
+    throw new Error('Either symbol or marketId must be provided');
+  }
+
   server.tool(
-    'get_markets',
-    'List all available markets on Cube Exchange with their trading pairs, lot sizes, tick sizes, and status. No login required.',
+    'get_assets',
+    'List all available trading assets with their trading pairs, lot sizes, tick sizes, and status.',
     {},
     async () => {
       try {
@@ -34,7 +50,7 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
 
   server.tool(
     'get_tickers',
-    'Get real-time ticker data for all markets: last price, bid/ask, 24h volume, 24h high/low/open, and 24h change %. No login required. Uses WebSocket for real-time data when available.',
+    'Get real-time ticker data for all assets: last price, bid/ask, 24h volume, 24h high/low/open, and 24h change %. Uses WebSocket for real-time data when available.',
     {},
     async () => {
       try {
@@ -95,17 +111,26 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
 
   server.tool(
     'get_order_book',
-    'Get the current order book (bids and asks with prices and quantities) for a market. No login required. Uses WebSocket for real-time data when subscribed.',
+    'Get the current order book (bids and asks with prices and quantities) for an asset. Uses WebSocket for real-time data when subscribed.',
     {
-      marketSymbol: z.string().describe('Market symbol, e.g. "BTCUSDC", "ETHUSDC", "SOLUSDC"'),
+      symbol: z.string().optional().describe('Asset symbol, e.g. "BTCUSDC", "ETHUSDC", "SOLUSDC"'),
+      marketId: z.number().optional().describe('Numeric market ID (alternative to symbol)'),
     },
     async params => {
       try {
+        if (!params.symbol && params.marketId === undefined) {
+          return {
+            content: [{ type: 'text' as const, text: 'Either symbol or marketId must be provided' }],
+            isError: true,
+          };
+        }
+
+        const { market } = await resolveMarket(params);
+        const marketSymbol = market.symbol;
+
         // Try WebSocket first if we have a subscription
         if (mendelev) {
-          const markets = await iridium.getMarkets();
-          const market = markets.find(m => m.symbol === params.marketSymbol);
-          if (market && mendelev.isSubscribed(market.marketId)) {
+          if (mendelev.isSubscribed(market.marketId)) {
             const book = mendelev.getOrderBook(market.marketId);
             if (book) {
               const tickSize = parseFloat(market.priceTickSize);
@@ -114,7 +139,7 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
                 content: [{
                   type: 'text' as const,
                   text: JSON.stringify({
-                    ticker_id: params.marketSymbol,
+                    ticker_id: marketSymbol,
                     source: 'websocket',
                     bids: book.bids.slice(0, 20).map(l => [
                       Number(l.price) * tickSize,
@@ -131,13 +156,13 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
           }
 
           // Auto-subscribe for future calls (non-blocking)
-          if (market && !mendelev.isSubscribed(market.marketId)) {
+          if (!mendelev.isSubscribed(market.marketId)) {
             mendelev.subscribe(market.marketId).catch(() => {});
           }
         }
 
         // Fall back to REST
-        const book = await iridium.getOrderBook(params.marketSymbol);
+        const book = await iridium.getOrderBook(marketSymbol);
         return {
           content: [
             {
@@ -156,18 +181,27 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
   );
 
   server.tool(
-    'get_recent_trades',
-    'Get recent trades for a market. Shows trade price, volume, timestamp, and side (buy/sell). No login required.',
+    'get_trades',
+    'Get recent trades for an asset. Shows trade price, volume, timestamp, and side (buy/sell).',
     {
-      marketSymbol: z.string().describe('Market symbol, e.g. "BTCUSDC", "ETHUSDC", "SOLUSDC"'),
+      symbol: z.string().optional().describe('Asset symbol, e.g. "BTCUSDC", "ETHUSDC", "SOLUSDC"'),
+      marketId: z.number().optional().describe('Numeric market ID (alternative to symbol)'),
     },
     async params => {
       try {
+        if (!params.symbol && params.marketId === undefined) {
+          return {
+            content: [{ type: 'text' as const, text: 'Either symbol or marketId must be provided' }],
+            isError: true,
+          };
+        }
+
+        const { market } = await resolveMarket(params);
+        const marketSymbol = market.symbol;
+
         // Try WebSocket first if subscribed
         if (mendelev) {
-          const markets = await iridium.getMarkets();
-          const market = markets.find(m => m.symbol === params.marketSymbol);
-          if (market && mendelev.isSubscribed(market.marketId)) {
+          if (mendelev.isSubscribed(market.marketId)) {
             const trades = mendelev.getRecentTrades(market.marketId);
             if (trades.length > 0) {
               const tickSize = parseFloat(market.priceTickSize);
@@ -176,7 +210,7 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
                 content: [{
                   type: 'text' as const,
                   text: JSON.stringify({
-                    ticker_id: params.marketSymbol,
+                    ticker_id: marketSymbol,
                     source: 'websocket',
                     trades: trades.map(t => ({
                       id: t.tradeId,
@@ -193,7 +227,7 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
         }
 
         // Fall back to REST
-        const trades = await iridium.getRecentTrades(params.marketSymbol);
+        const trades = await iridium.getRecentTrades(marketSymbol);
         return {
           content: [
             {
@@ -212,8 +246,8 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
   );
 
   server.tool(
-    'get_price_history',
-    'Get historical OHLCV candlestick data for a market. Useful for technical analysis, backtesting, and charting. No login required.',
+    'get_bars',
+    'Get historical OHLCV candlestick data for an asset. Useful for technical analysis, backtesting, and charting.',
     {
       marketId: z.number().describe('Market ID to get history for'),
       interval: z.enum(['1s', '1m', '15m', '1h', '4h', '1d']).default('1h').describe('Candlestick interval'),
@@ -261,8 +295,8 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
   );
 
   server.tool(
-    'get_estimated_fees',
-    'Get estimated trading fees for a specific trade. Returns maker and taker fee rates. Requires login.',
+    'get_fees',
+    'Get estimated trading fees for a specific trade. Returns maker and taker fee rates.',
     {
       subaccountId: z.number().optional().describe('Subaccount ID (defaults to configured subaccount)'),
       marketId: z.number().describe('Market ID'),
@@ -302,7 +336,7 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
 
   server.tool(
     'get_technical_analysis',
-    'Run technical analysis on a market: SMA, EMA, RSI, MACD, Bollinger Bands, ATR, ADX, OBV, and Stochastic. No login required.',
+    'Run technical analysis on an asset: SMA, EMA, RSI, MACD, Bollinger Bands, ATR, ADX, OBV, and Stochastic.',
     {
       marketId: z.number().describe('Market ID to analyze'),
       interval: z.enum(['1s', '1m', '15m', '1h', '4h', '1d']).default('1h').describe('Candlestick interval'),

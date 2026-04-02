@@ -1,0 +1,198 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 720" width="800" height="720">
+  <defs>
+    <filter id="center-glow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="16" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="trunk-glow" x="-300%" y="-10%" width="700%" height="120%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+    <pattern id="dots" width="14" height="14" patternUnits="userSpaceOnUse">
+      <circle cx="7" cy="7" r="0.6" fill="#ffffff" opacity="0.035"/>
+    </pattern>
+    <radialGradient id="center-aura" cx="50%" cy="50%">
+      <stop offset="0%" stop-color="#F0B90B" stop-opacity="0.3"/>
+      <stop offset="25%" stop-color="#F0B90B" stop-opacity="0.1"/>
+      <stop offset="60%" stop-color="#F0B90B" stop-opacity="0.02"/>
+      <stop offset="100%" stop-color="#F0B90B" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="720" fill="#1a1510"/>
+  <rect width="800" height="720" fill="url(#dots)"/>
+
+  <!-- ═══ BOTTOM CABLE BUNDLE ═══ -->
+  <!-- 4 thick cables fanning out from center to exchange pills -->
+  <g fill="none" stroke="#302819" stroke-linecap="round">
+    <!-- Far left: Cube -->
+    <path d="M 396 405 C 396 480, 340 520, 145 600" stroke-width="16"/>
+    <!-- Center-left: Kraken -->
+    <path d="M 400 405 C 400 490, 380 540, 310 600" stroke-width="14"/>
+    <!-- Center-right: Binance -->
+    <path d="M 400 405 C 400 490, 420 540, 490 600" stroke-width="14"/>
+    <!-- Far right: Robinhood -->
+    <path d="M 404 405 C 404 480, 460 520, 655 600" stroke-width="16"/>
+  </g>
+  <!-- Inner cable highlights -->
+  <g fill="none" stroke="#443822" stroke-linecap="round">
+    <path d="M 396 405 C 396 480, 340 520, 145 600" stroke-width="5"/>
+    <path d="M 400 405 C 400 490, 380 540, 310 600" stroke-width="4"/>
+    <path d="M 400 405 C 400 490, 420 540, 490 600" stroke-width="4"/>
+    <path d="M 404 405 C 404 480, 460 520, 655 600" stroke-width="5"/>
+  </g>
+
+  <!-- ═══ GOLDEN TRUNK ═══ -->
+  <!-- Glow -->
+  <rect x="394" y="10" width="12" height="270" rx="6" fill="#F0B90B" opacity="0.25" filter="url(#trunk-glow)"/>
+  <rect x="394" y="405" width="12" height="60" rx="6" fill="#F0B90B" opacity="0.15" filter="url(#trunk-glow)"/>
+  <!-- Solid -->
+  <rect x="397" y="10" width="6" height="270" rx="3" fill="#F0B90B"/>
+  <rect x="397" y="415" width="6" height="50" rx="3" fill="#F0B90B" opacity="0.5"/>
+
+  <!-- Animated pulses -->
+  <circle r="6" fill="#F0B90B" filter="url(#trunk-glow)" opacity="0">
+    <animateMotion path="M 400,30 L 400,275" dur="1.8s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.1;0.85;1" dur="1.8s" repeatCount="indefinite"/>
+  </circle>
+  <circle r="6" fill="#F0B90B" filter="url(#trunk-glow)" opacity="0">
+    <animateMotion path="M 400,30 L 400,275" dur="1.8s" repeatCount="indefinite" begin="0.9s"/>
+    <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.1;0.85;1" dur="1.8s" repeatCount="indefinite" begin="0.9s"/>
+  </circle>
+
+  <!-- ═══ LEFT BRANCH PATHS (smooth curves from hub) ═══ -->
+  <g fill="none" stroke="#4a3f2c" stroke-width="1.5" stroke-linecap="round">
+    <path d="M 355 310 C 310 310, 280 305, 245 290"/>
+    <path d="M 352 325 C 300 325, 270 325, 245 320"/>
+    <path d="M 350 340 C 295 340, 260 340, 245 350"/>
+    <path d="M 352 355 C 300 355, 270 360, 245 380"/>
+    <path d="M 355 368 C 310 368, 280 380, 245 410"/>
+    <path d="M 358 380 C 320 380, 290 400, 245 440"/>
+  </g>
+
+  <!-- ═══ RIGHT BRANCH PATHS (smooth curves from hub) ═══ -->
+  <g fill="none" stroke="#4a3f2c" stroke-width="1.5" stroke-linecap="round">
+    <path d="M 445 310 C 490 310, 520 305, 555 290"/>
+    <path d="M 448 325 C 500 325, 530 325, 555 320"/>
+    <path d="M 450 340 C 505 340, 540 340, 555 350"/>
+    <path d="M 448 355 C 500 355, 530 360, 555 380"/>
+    <path d="M 445 368 C 490 368, 520 380, 555 410"/>
+    <path d="M 442 380 C 480 380, 510 400, 555 440"/>
+  </g>
+
+  <!-- ═══ TOP PILL ═══ -->
+  <g filter="url(#shadow)">
+    <rect x="315" y="85" width="170" height="52" rx="26" fill="#2a2318" stroke="#3d3428" stroke-width="1.5"/>
+    <circle cx="355" cy="109" r="7" fill="none" stroke="#F0B90B" stroke-width="1.3"/>
+    <circle cx="355" cy="106" r="2.8" fill="#F0B90B"/>
+    <path d="M 349 114 Q 352 110 355 110 Q 358 110 361 114" fill="none" stroke="#F0B90B" stroke-width="1.2" stroke-linecap="round"/>
+    <text x="420" y="116" text-anchor="middle" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:18px;font-weight:700;fill:#ffffff;">You</text>
+  </g>
+
+  <!-- ═══ CENTER HUB ═══ -->
+  <circle cx="400" cy="345" r="110" fill="url(#center-aura)"/>
+  <circle cx="400" cy="345" r="55" fill="#ffffff" filter="url(#center-glow)"/>
+  <circle cx="400" cy="345" r="55" fill="#ffffff"/>
+  <circle cx="400" cy="345" r="57" fill="none" stroke="#F0B90B" stroke-width="3"/>
+  <text x="400" y="338" text-anchor="middle" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:22px;font-weight:800;fill:#1a1510;">AI</text>
+  <text x="400" y="362" text-anchor="middle" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;font-weight:600;fill:#555;letter-spacing:1px;">Fund</text>
+  <!-- Pulse ring -->
+  <circle cx="400" cy="345" r="57" fill="none" stroke="#F0B90B" stroke-width="1.5" opacity="0">
+    <animate attributeName="r" values="57;88" dur="3s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.4;0" dur="3s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- ═══ SECTION HEADERS ═══ -->
+  <text x="135" y="258" text-anchor="middle" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:10px;font-weight:700;fill:#F0B90B;letter-spacing:2.5px;">MARKETS</text>
+  <text x="665" y="258" text-anchor="middle" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:10px;font-weight:700;fill:#F0B90B;letter-spacing:2.5px;">THE DESK</text>
+
+  <!-- ═══ LEFT: MARKETS ═══ -->
+  <g style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+    <!-- Spot Trading -->
+    <circle cx="235" cy="290" r="12" fill="none" stroke="#F0B90B" stroke-width="1.2" opacity="0.7"/>
+    <text x="235" y="294" text-anchor="middle" style="font-size:10px;fill:#F0B90B;font-weight:600;">$</text>
+    <text x="218" y="294" text-anchor="end" style="font-size:14px;fill:#c4b896;font-weight:500;">Spot Trading</text>
+
+    <!-- Futures -->
+    <circle cx="235" cy="320" r="12" fill="none" stroke="#F0B90B" stroke-width="1.2" opacity="0.7"/>
+    <text x="235" y="324" text-anchor="middle" style="font-size:10px;fill:#F0B90B;font-weight:600;">F</text>
+    <text x="218" y="324" text-anchor="end" style="font-size:14px;fill:#c4b896;font-weight:500;">Futures / Perps</text>
+
+    <!-- Options -->
+    <circle cx="235" cy="350" r="12" fill="none" stroke="#F0B90B" stroke-width="1.2" opacity="0.7"/>
+    <text x="235" y="354" text-anchor="middle" style="font-size:11px;fill:#F0B90B;">&#916;</text>
+    <text x="218" y="354" text-anchor="end" style="font-size:14px;fill:#c4b896;font-weight:500;">Options</text>
+
+    <!-- Stocks -->
+    <circle cx="235" cy="380" r="12" fill="none" stroke="#F0B90B" stroke-width="1.2" opacity="0.7"/>
+    <path d="M 230 383 L 233 377 L 236 381 L 240 375" fill="none" stroke="#F0B90B" stroke-width="1.2" stroke-linecap="round"/>
+    <text x="218" y="384" text-anchor="end" style="font-size:14px;fill:#c4b896;font-weight:500;">Stocks</text>
+
+    <!-- DeFi -->
+    <circle cx="235" cy="410" r="12" fill="none" stroke="#F0B90B" stroke-width="1.2" opacity="0.7"/>
+    <text x="235" y="414" text-anchor="middle" style="font-size:11px;fill:#F0B90B;">&#8644;</text>
+    <text x="218" y="414" text-anchor="end" style="font-size:14px;fill:#c4b896;font-weight:500;">DeFi Swaps</text>
+
+    <!-- Yield -->
+    <circle cx="235" cy="440" r="12" fill="none" stroke="#F0B90B" stroke-width="1.2" opacity="0.7"/>
+    <text x="235" y="444" text-anchor="middle" style="font-size:11px;fill:#F0B90B;">%</text>
+    <text x="218" y="444" text-anchor="end" style="font-size:14px;fill:#c4b896;font-weight:500;">Yield / DCA</text>
+  </g>
+
+  <!-- ═══ RIGHT: THE DESK ═══ -->
+  <g style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+    <circle cx="565" cy="290" r="12" fill="none" stroke="#F0B90B" stroke-width="1.2" opacity="0.7"/>
+    <text x="565" y="294" text-anchor="middle" style="font-size:8px;fill:#F0B90B;font-weight:600;">AH</text>
+    <text x="582" y="294" style="font-size:14px;fill:#c4b896;font-weight:500;">Arthur Hayes</text>
+
+    <circle cx="565" cy="320" r="12" fill="none" stroke="#F0B90B" stroke-width="1.2" opacity="0.7"/>
+    <text x="565" y="324" text-anchor="middle" style="font-size:8px;fill:#F0B90B;font-weight:600;">JS</text>
+    <text x="582" y="324" style="font-size:14px;fill:#c4b896;font-weight:500;">Jim Simons</text>
+
+    <circle cx="565" cy="350" r="12" fill="none" stroke="#F0B90B" stroke-width="1.2" opacity="0.7"/>
+    <text x="565" y="354" text-anchor="middle" style="font-size:8px;fill:#F0B90B;font-weight:600;">GS</text>
+    <text x="582" y="354" style="font-size:14px;fill:#c4b896;font-weight:500;">George Soros</text>
+
+    <circle cx="565" cy="380" r="12" fill="none" stroke="#F0B90B" stroke-width="1.2" opacity="0.7"/>
+    <text x="565" y="384" text-anchor="middle" style="font-size:8px;fill:#F0B90B;font-weight:600;">JL</text>
+    <text x="582" y="384" style="font-size:14px;fill:#c4b896;font-weight:500;">Jesse Livermore</text>
+
+    <circle cx="565" cy="410" r="12" fill="none" stroke="#F0B90B" stroke-width="1.2" opacity="0.7"/>
+    <text x="565" y="414" text-anchor="middle" style="font-size:8px;fill:#F0B90B;font-weight:600;">CZ</text>
+    <text x="582" y="414" style="font-size:14px;fill:#c4b896;font-weight:500;">CZ</text>
+
+    <circle cx="565" cy="440" r="12" fill="none" stroke="#F0B90B" stroke-width="1.2" opacity="0.5" stroke-dasharray="3 2"/>
+    <text x="565" y="444" text-anchor="middle" style="font-size:11px;fill:#F0B90B;opacity:0.5;">+</text>
+    <text x="582" y="444" style="font-size:13px;fill:#6b6048;font-style:italic;">42 agents...</text>
+  </g>
+
+  <!-- ═══ EXCHANGE PILLS ═══ -->
+  <g filter="url(#shadow)">
+    <!-- Cube (gold border) -->
+    <rect x="68" y="585" width="160" height="52" rx="26" fill="#2a2318" stroke="#F0B90B" stroke-width="1.5"/>
+    <text x="148" y="616" text-anchor="middle" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;font-weight:700;fill:#fff;">Cube Exchange</text>
+
+    <!-- Kraken -->
+    <rect x="248" y="585" width="130" height="52" rx="26" fill="#2a2318" stroke="#3d3428" stroke-width="1.5"/>
+    <text x="313" y="616" text-anchor="middle" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;font-weight:600;fill:#bbb;">Kraken</text>
+
+    <!-- Binance -->
+    <rect x="398" y="585" width="130" height="52" rx="26" fill="#2a2318" stroke="#3d3428" stroke-width="1.5"/>
+    <text x="463" y="616" text-anchor="middle" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;font-weight:600;fill:#bbb;">Binance</text>
+
+    <!-- Robinhood -->
+    <rect x="548" y="585" width="155" height="52" rx="26" fill="#2a2318" stroke="#3d3428" stroke-width="1.5"/>
+    <text x="626" y="616" text-anchor="middle" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;font-weight:600;fill:#bbb;">Robinhood</text>
+  </g>
+
+  <!-- 100+ more -->
+  <text x="400" y="665" text-anchor="middle" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:12px;fill:#4a4438;letter-spacing:0.5px;">+ 100 more exchanges via CCXT</text>
+
+  <!-- Disclaimer -->
+  <text x="400" y="700" text-anchor="middle" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:10px;fill:#3d3428;font-style:italic;">* Names represent AI trading personas inspired by famous strategies — not real people</text>
+
+</svg>

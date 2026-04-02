@@ -6,8 +6,8 @@ export function registerRiskTools(server: McpServer, iridium: IridiumClient) {
   const defaultSubaccountId = () => iridium.getDefaultSubaccountId();
 
   server.tool(
-    'get_portfolio_summary',
-    'Get a comprehensive portfolio summary: all positions with current prices, total value, and allocation percentages. Essential for risk assessment.',
+    'get_portfolio',
+    'Get portfolio summary with all positions, current prices, total value, and allocation percentages.',
     {
       subaccountId: z.number().optional().describe('Subaccount ID (defaults to configured subaccount)'),
     },

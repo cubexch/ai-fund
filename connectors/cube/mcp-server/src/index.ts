@@ -12,7 +12,7 @@ import { registerAccountTools } from './tools/account.js';
 import { registerMarketDataTools } from './tools/market-data.js';
 import { registerOrderTools } from './tools/orders.js';
 import { registerRiskTools } from './tools/risk.js';
-import { registerDefiTools } from './tools/defi.js';
+import { registerTradingTools } from './tools/defi.js';
 
 const server = new McpServer({
   name: 'cube-trading',
@@ -66,7 +66,7 @@ registerAccountTools(server, iridium);
 registerRiskTools(server, iridium);
 
 // DeFi: REST via Iridium + WebSocket via Osmium wallet (requires auth)
-registerDefiTools(server, iridium, osmium);
+registerTradingTools(server, iridium, osmium);
 
 // ── Register resources ──────────────────────────────────────
 

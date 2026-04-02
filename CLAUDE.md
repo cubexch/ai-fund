@@ -101,13 +101,21 @@ Skills reference generic trading capabilities (place orders, get prices, check p
 - Arbitrage between exchanges
 - Compare execution quality across venues
 
+### Unified Tool API
+
+All connectors follow a standard tool naming convention (Alpaca-style, snake_case). See `connectors/README.md` for the full spec.
+
+**Core tools every connector provides:** `place_order`, `cancel_order`, `get_positions`, `get_account`, `get_tickers`, `get_bars`, `get_orders`, `get_fills`, `close_position`
+
+**Advanced tools (Cube reference implementation):** `get_quote`, `execute_trade`, `compare_venues`, `search_assets`, `get_trending`, `get_portfolio`, `get_fees`, `get_technical_analysis`, `calculate_position_size`
+
 ### Tool Namespacing
 
-With multiple MCP servers connected:
-- Cube tools: `place_order`, `get_tickers`, `get_positions`, etc.
+With multiple MCP servers connected, tools are namespaced by exchange:
+- Cube tools: `place_order`, `get_tickers`, `get_account`, etc.
 - OKX tools: `spot_place_order`, `market_get_ticker`, etc.
 - Kraken tools: via `kraken` CLI commands
-- CCXT tools: `place_order`, `get_ticker`, etc. (per configured exchange)
+- Alpaca tools: `place_stock_order`, `place_crypto_order`, `get_all_positions`, etc.
 
 When only one exchange is connected, tools are used directly. When multiple are connected, specify the exchange context.
 
