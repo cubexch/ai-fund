@@ -11,6 +11,7 @@ ai-fund connects to exchanges via MCP (Model Context Protocol) servers. Each exc
 | **[Kraken](https://kraken.com)** | `kraken-cli` | [Install Kraken CLI](https://github.com/krakenfx/kraken-cli) | ✅ Ready — 134 commands, built-in paper trading |
 | **[Binance](https://binance.com)** | `ccxt-mcp` | `npm i -g ccxt-mcp` | ✅ Via CCXT — 100+ exchanges |
 | **[Bybit](https://bybit.com)** | `ccxt-mcp` | `npm i -g ccxt-mcp` | ✅ Via CCXT |
+| **[Robinhood](https://robinhood.com)** | Built-in | Ships with this repo | ✅ Ready — commission-free stocks, ETFs, crypto |
 | **[Coinbase](https://coinbase.com)** | `@coinbase/agentkit` | [AgentKit docs](https://github.com/coinbase/agentkit) | ✅ Ready — wallet + trading |
 | **[Hyperliquid](https://hyperliquid.xyz)** | Community MCP | [Options](https://github.com/search?q=hyperliquid+mcp) | 🔧 Community |
 
@@ -75,7 +76,24 @@ Then enable it in `.mcp.json`:
 }
 ```
 
-### 4. Add Any CCXT Exchange (Binance, Bybit, 100+ more)
+### 4. Add Robinhood (built-in)
+
+Robinhood ships built-in. Authenticate with your Robinhood credentials:
+
+```bash
+cd connectors/robinhood/mcp-server && npm run login
+```
+
+Enter your email, password, and MFA code. Tokens are stored securely in your system keychain.
+
+Or use environment variables for non-interactive login:
+```bash
+ROBINHOOD_USERNAME=user@example.com ROBINHOOD_PASSWORD=... ROBINHOOD_MFA_CODE=123456 npm run login
+```
+
+> **Note:** Robinhood has no paper trading mode. All orders execute with real money. Start with small positions.
+
+### 5. Add Any CCXT Exchange (Binance, Bybit, 100+ more)
 
 ```bash
 npm install -g ccxt-mcp

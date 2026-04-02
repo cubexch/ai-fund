@@ -15,12 +15,19 @@
     "CLAUDE.md"
   ],
   "scripts": {
-    "build": "npm run build --workspace=connectors/cube/mcp-server",
+    "build": "npm run build --workspace=connectors/cube/mcp-server && npm run build --workspace=connectors/robinhood/mcp-server",
+    "build:cube": "npm run build --workspace=connectors/cube/mcp-server",
+    "build:robinhood": "npm run build --workspace=connectors/robinhood/mcp-server",
     "dev": "npm run dev --workspace=connectors/cube/mcp-server",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "duckdb": "^1.2.0",
+    "yahoo-finance2": "^2.14.0"
+  },
   "workspaces": [
-    "connectors/cube/mcp-server"
+    "connectors/cube/mcp-server",
+    "connectors/robinhood/mcp-server"
   ],
   "engines": {
     "node": ">=20"
