@@ -1,0 +1,39 @@
+{
+  "_comment_name": "Give your strategy a short, descriptive name.",
+  "name": "My Custom Strategy",
+
+  "_comment_description": "One sentence: what is your thesis? What market condition are you betting on?",
+  "description": "A starting desk with risk management, on-chain intelligence, and trend-following execution.",
+
+  "_comment_agents": "List agents to hire. Risk manager is always first. Browse skills/ for available agents, or create your own in skills/your-agent-name/SKILL.md.",
+  "agents": [
+    "risk-manager",
+    "onchain-analyst",
+    "momentum-trader"
+  ],
+
+  "_comment_risk_parameters": "These limits apply to ALL agents on the desk. The Risk Manager enforces them.",
+  "risk_parameters": {
+    "_comment_max_position": "Max percentage of portfolio in any single position. Conservative: 5, Moderate: 10, Aggressive: 20.",
+    "max_position_size_pct": 10,
+
+    "_comment_max_drawdown": "If portfolio drops by this percentage, all trading stops. Conservative: 10, Moderate: 15, Aggressive: 25.",
+    "max_portfolio_drawdown_pct": 15,
+
+    "_comment_max_leverage": "Maximum leverage allowed. Set to 1 for no leverage.",
+    "max_leverage": 2,
+
+    "_comment_stop_loss": "Require a stop-loss on every trade. Always keep this true.",
+    "stop_loss_required": true,
+
+    "_comment_correlation": "Max percentage of portfolio in correlated assets (correlation > 0.7).",
+    "max_correlated_exposure_pct": 30
+  },
+
+  "_comment_strategy_config": "Add strategy-specific settings below. This section varies by strategy — add whatever your agents need.",
+  "strategy_config": {
+    "markets": ["BTC-USDC", "ETH-USDC", "SOL-USDC"],
+    "timeframe": "4h",
+    "rebalance_frequency": "weekly"
+  }
+}
