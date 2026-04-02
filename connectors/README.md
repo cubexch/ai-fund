@@ -10,10 +10,11 @@ ai-fund connects to exchanges via MCP (Model Context Protocol) servers. Each exc
 | **[Alpaca](https://alpaca.markets)** | Built-in | Ships with this repo | ✅ Ready — stocks, ETFs, crypto, paper trading |
 | **[OKX](https://okx.com)** | `@okx_ai/okx-trade-mcp` | `npm i -g @okx_ai/okx-trade-mcp` | ✅ Ready — 107 tools, spot/futures/options |
 | **[Kraken](https://kraken.com)** | `kraken-cli` | [Install Kraken CLI](https://github.com/krakenfx/kraken-cli) | ✅ Ready — 134 commands, built-in paper trading |
-| **[Binance](https://binance.com)** | `ccxt-mcp` | `npm i -g ccxt-mcp` | ✅ Via CCXT — 100+ exchanges |
-| **[Bybit](https://bybit.com)** | `ccxt-mcp` | `npm i -g ccxt-mcp` | ✅ Via CCXT |
+| **[Coinbase](https://coinbase.com)** | Built-in (CCXT) | Ships with this repo | ✅ Ready — default exchange for CCXT connector |
+| **[Binance](https://binance.com)** | Built-in (CCXT) | Ships with this repo | ✅ Ready — via `--exchange binance` |
+| **[Bybit](https://bybit.com)** | Built-in (CCXT) | Ships with this repo | ✅ Ready — via `--exchange bybit` |
+| **100+ more** | Built-in (CCXT) | Ships with this repo | ✅ Any CCXT-supported exchange |
 | **[Robinhood](https://robinhood.com)** | Built-in | Ships with this repo | 🗓 Roadmap — crypto only (official API), no stocks |
-| **[Coinbase](https://coinbase.com)** | `@coinbase/agentkit` | [AgentKit docs](https://github.com/coinbase/agentkit) | ✅ Ready — wallet + trading |
 | **[Hyperliquid](https://hyperliquid.xyz)** | Community MCP | [Options](https://github.com/search?q=hyperliquid+mcp) | 🔧 Community |
 
 ## How It Works
@@ -77,21 +78,50 @@ Then enable it in `.mcp.json`:
 }
 ```
 
-### 4. Add Any CCXT Exchange (Binance, Bybit, 100+ more)
+### 4. Add Coinbase (or any CCXT exchange)
 
-```bash
-npm install -g ccxt-mcp
+The built-in CCXT connector supports Coinbase, Binance, Bybit, and 100+ exchanges. No extra install needed.
+
+**Coinbase (default):**
+```json
+{
+  "coinbase": {
+    "disabled": false,
+    "command": "npx",
+    "args": ["tsx", "connectors/ccxt/mcp-server/src/index.ts"],
+    "env": {
+      "CCXT_API_KEY": "your-api-key",
+      "CCXT_SECRET": "your-api-secret",
+      "CCXT_PASSWORD": "your-passphrase",
+      "CCXT_SANDBOX": "true"
+    }
+  }
+}
 ```
 
+**Binance:**
 ```json
 {
   "binance": {
     "disabled": false,
-    "args": ["ccxt-mcp", "--exchange", "binance"],
+    "command": "npx",
+    "args": ["tsx", "connectors/ccxt/mcp-server/src/index.ts", "--exchange", "binance"],
     "env": {
-      "BINANCE_API_KEY": "your-key",
-      "BINANCE_API_SECRET": "your-secret"
+      "CCXT_API_KEY": "your-key",
+      "CCXT_SECRET": "your-secret",
+      "CCXT_SANDBOX": "true"
     }
+  }
+}
+```
+
+**Market data only (no API key needed):**
+```json
+{
+  "coinbase": {
+    "disabled": false,
+    "command": "npx",
+    "args": ["tsx", "connectors/ccxt/mcp-server/src/index.ts"]
   }
 }
 ```

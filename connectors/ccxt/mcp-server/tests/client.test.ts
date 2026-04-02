@@ -1,0 +1,400 @@
+import { describe, it, expect } from 'vitest';
+import { ExchangeClient } from '../src/client/exchange.js';
+
+// ── Mock CCXT exchange for unit testing ─────────────────────
+
+function createMockCcxtExchange(overrides: Record<string, unknown> = {}) {
+  return {
+    apiKey: overrides.apiKey ?? '',
+    secret: overrides.secret ?? '',
+    name: overrides.name ?? 'MockExchange',
+    urls: { api: 'https://api.example.com' },
+    markets: {} as Record<string, any>,
+    setSandboxMode: () => {},
+    loadMarkets: async () => ({
+      'BTC/USDT': {
+        symbol: 'BTC/USDT', base: 'BTC', quote: 'USDT', type: 'spot',
+        active: true,
+        precision: { amount: 8, price: 2 },
+        limits: { amount: { min: 0.0001, max: 100 }, price: { min: 0.01, max: 1000000 } },
+      },
+      'ETH/USDT': {
+        symbol: 'ETH/USDT', base: 'ETH', quote: 'USDT', type: 'spot',
+        active: true,
+        precision: { amount: 8, price: 2 },
+        limits: { amount: { min: 0.001, max: 1000 }, price: { min: 0.01, max: 100000 } },
+      },
+      'DOGE/USDT': {
+        symbol: 'DOGE/USDT', base: 'DOGE', quote: 'USDT', type: 'spot',
+        active: false,
+        precision: { amount: 0, price: 6 },
+        limits: { amount: { min: 1, max: 10000000 }, price: { min: 0.000001, max: 10 } },
+      },
+    }),
+    fetchTicker: async (symbol: string) => ({
+      symbol,
+      last: 65000,
+      bid: 64990,
+      ask: 65010,
+      high: 66000,
+      low: 64000,
+      open: 64500,
+      close: 65000,
+      baseVolume: 1234.5,
+      quoteVolume: 80000000,
+      change: 500,
+      percentage: 0.77,
+      timestamp: 1700000000000,
+    }),
+    fetchTickers: async (symbols?: string[]) => {
+      const ticker = {
+        symbol: 'BTC/USDT',
+        last: 65000, bid: 64990, ask: 65010,
+        high: 66000, low: 64000, open: 64500, close: 65000,
+        baseVolume: 1234.5, quoteVolume: 80000000,
+        change: 500, percentage: 0.77, timestamp: 1700000000000,
+      };
+      return { 'BTC/USDT': ticker };
+    },
+    fetchOHLCV: async () => [
+      [1700000000000, 65000, 66000, 64000, 65500, 1000],
+      [1700086400000, 65500, 67000, 65000, 66800, 1200],
+    ],
+    fetchOrderBook: async (symbol: string) => ({
+      symbol,
+      bids: [[64990, 1.5], [64980, 2.0]],
+      asks: [[65010, 1.0], [65020, 1.8]],
+      timestamp: 1700000000000,
+    }),
+    fetchTrades: async (symbol: string) => [
+      { id: 't1', timestamp: 1700000000000, symbol, side: 'buy', price: 65000, amount: 0.5, cost: 32500 },
+      { id: 't2', timestamp: 1700000001000, symbol, side: 'sell', price: 65010, amount: 0.3, cost: 19503 },
+    ],
+    fetchBalance: async () => ({
+      total: { BTC: 1.5, USDT: 50000, ETH: 0 },
+      free: { BTC: 1.0, USDT: 40000, ETH: 0 },
+      used: { BTC: 0.5, USDT: 10000, ETH: 0 },
+    }),
+    createOrder: async (symbol: string, type: string, side: string, amount: number, price?: number) => ({
+      id: 'ord-123',
+      clientOrderId: 'co-1',
+      symbol, side, type,
+      amount, filled: 0, remaining: amount,
+      price: price ?? null,
+      average: null,
+      status: 'open',
+      timestamp: 1700000000000,
+      datetime: '2023-11-14T22:13:20.000Z',
+    }),
+    cancelOrder: async () => ({}),
+    cancelAllOrders: async () => ({}),
+    fetchOpenOrders: async () => [
+      {
+        id: 'ord-1', clientOrderId: 'co-1', symbol: 'BTC/USDT', side: 'buy',
+        type: 'limit', amount: 0.1, filled: 0, remaining: 0.1,
+        price: 64000, average: null, status: 'open',
+        timestamp: 1700000000000, datetime: '2023-11-14T22:13:20.000Z',
+      },
+    ],
+    fetchClosedOrders: async () => [
+      {
+        id: 'ord-2', clientOrderId: 'co-2', symbol: 'BTC/USDT', side: 'sell',
+        type: 'market', amount: 0.5, filled: 0.5, remaining: 0,
+        price: null, average: 65100, status: 'closed',
+        timestamp: 1699999000000, datetime: '2023-11-14T21:56:40.000Z',
+      },
+    ],
+    fetchOrder: async (id: string) => ({
+      id, clientOrderId: 'co-1', symbol: 'BTC/USDT', side: 'buy',
+      type: 'limit', amount: 0.1, filled: 0, remaining: 0.1,
+      price: 64000, average: null, status: 'open',
+      timestamp: 1700000000000, datetime: '2023-11-14T22:13:20.000Z',
+    }),
+    fetchMyTrades: async () => [
+      { id: 'mt1', timestamp: 1700000000000, symbol: 'BTC/USDT', side: 'buy', price: 65000, amount: 0.1, cost: 6500 },
+    ],
+    ...overrides,
+  };
+}
+
+// ── Constructor ─────────────────────────────────────────────
+
+describe('ExchangeClient constructor', () => {
+  it('accepts an exchange instance', () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({
+      exchangeId: 'coinbase',
+      exchangeInstance: mock as any,
+    });
+    expect(client.exchangeId).toBe('coinbase');
+    expect(client.name).toBe('MockExchange');
+  });
+
+  it('reports hasCredentials correctly', () => {
+    const withCreds = new ExchangeClient({
+      exchangeId: 'coinbase',
+      exchangeInstance: createMockCcxtExchange({ apiKey: 'k', secret: 's' }) as any,
+    });
+    expect(withCreds.hasCredentials).toBe(true);
+
+    const noCreds = new ExchangeClient({
+      exchangeId: 'coinbase',
+      exchangeInstance: createMockCcxtExchange() as any,
+    });
+    expect(noCreds.hasCredentials).toBe(false);
+  });
+
+  it('throws on unknown exchange ID', () => {
+    expect(() => new ExchangeClient({ exchangeId: 'not_a_real_exchange_xyz' })).toThrow('Unknown exchange');
+  });
+});
+
+// ── Market Data ─────────────────────────────────────────────
+
+describe('getTicker', () => {
+  it('returns formatted ticker', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const ticker = await client.getTicker('BTC/USDT');
+
+    expect(ticker.symbol).toBe('BTC/USDT');
+    expect(ticker.last).toBe(65000);
+    expect(ticker.bid).toBe(64990);
+    expect(ticker.ask).toBe(65010);
+    expect(ticker.high).toBe(66000);
+    expect(ticker.low).toBe(64000);
+    expect(ticker.volume).toBe(1234.5);
+    expect(ticker.percentage).toBe(0.77);
+    expect(ticker.timestamp).toBe(1700000000000);
+  });
+});
+
+describe('getTickers', () => {
+  it('returns array of formatted tickers', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const tickers = await client.getTickers();
+
+    expect(tickers).toHaveLength(1);
+    expect(tickers[0].symbol).toBe('BTC/USDT');
+    expect(tickers[0].last).toBe(65000);
+  });
+});
+
+describe('getBars', () => {
+  it('returns formatted OHLCV bars', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const bars = await client.getBars('BTC/USDT', '1d', undefined, 2);
+
+    expect(bars).toHaveLength(2);
+    expect(bars[0].timestamp).toBe(1700000000000);
+    expect(bars[0].open).toBe(65000);
+    expect(bars[0].high).toBe(66000);
+    expect(bars[0].low).toBe(64000);
+    expect(bars[0].close).toBe(65500);
+    expect(bars[0].volume).toBe(1000);
+    expect(bars[1].open).toBe(65500);
+  });
+});
+
+describe('getOrderBook', () => {
+  it('returns bids and asks', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const ob = await client.getOrderBook('BTC/USDT');
+
+    expect(ob.symbol).toBe('BTC/USDT');
+    expect(ob.bids).toHaveLength(2);
+    expect(ob.asks).toHaveLength(2);
+    expect(ob.bids[0][0]).toBe(64990);
+    expect(ob.asks[0][0]).toBe(65010);
+    expect(ob.timestamp).toBe(1700000000000);
+  });
+});
+
+describe('getTrades', () => {
+  it('returns formatted public trades', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const trades = await client.getTrades('BTC/USDT');
+
+    expect(trades).toHaveLength(2);
+    expect(trades[0].id).toBe('t1');
+    expect(trades[0].price).toBe(65000);
+    expect(trades[0].amount).toBe(0.5);
+    expect(trades[0].side).toBe('buy');
+    expect(trades[1].side).toBe('sell');
+  });
+});
+
+describe('loadMarkets', () => {
+  it('returns formatted market list', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const markets = await client.loadMarkets();
+
+    expect(markets).toHaveLength(3);
+    const btc = markets.find(m => m.symbol === 'BTC/USDT');
+    expect(btc).toBeDefined();
+    expect(btc!.base).toBe('BTC');
+    expect(btc!.quote).toBe('USDT');
+    expect(btc!.type).toBe('spot');
+    expect(btc!.active).toBe(true);
+    expect(btc!.precision.amount).toBe(8);
+  });
+});
+
+describe('searchMarkets', () => {
+  it('searches by symbol', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const results = await client.searchMarkets('BTC');
+
+    expect(results).toHaveLength(1);
+    expect(results[0].symbol).toBe('BTC/USDT');
+  });
+
+  it('searches by base currency', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const results = await client.searchMarkets('eth');
+
+    expect(results).toHaveLength(1);
+    expect(results[0].symbol).toBe('ETH/USDT');
+  });
+
+  it('excludes inactive markets', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const results = await client.searchMarkets('DOGE');
+
+    expect(results).toHaveLength(0);
+  });
+
+  it('limits results to 20', async () => {
+    const manyMarkets: Record<string, any> = {};
+    for (let i = 0; i < 30; i++) {
+      const sym = `TEST${i}/USDT`;
+      manyMarkets[sym] = {
+        symbol: sym, base: `TEST${i}`, quote: 'USDT', type: 'spot',
+        active: true, precision: { amount: 8, price: 2 },
+        limits: { amount: { min: 0.01, max: 1000 }, price: { min: 0.01, max: 100000 } },
+      };
+    }
+    const mock = createMockCcxtExchange({ loadMarkets: async () => manyMarkets, markets: manyMarkets });
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const results = await client.searchMarkets('test');
+
+    expect(results).toHaveLength(20);
+  });
+});
+
+// ── Account ────────────────────────────────────────────────
+
+describe('getBalance', () => {
+  it('returns non-zero balances', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const balances = await client.getBalance();
+
+    // ETH has 0 total, should be excluded
+    expect(balances).toHaveLength(2);
+    const btc = balances.find(b => b.currency === 'BTC');
+    expect(btc).toBeDefined();
+    expect(btc!.free).toBe(1.0);
+    expect(btc!.used).toBe(0.5);
+    expect(btc!.total).toBe(1.5);
+
+    const usdt = balances.find(b => b.currency === 'USDT');
+    expect(usdt).toBeDefined();
+    expect(usdt!.total).toBe(50000);
+  });
+});
+
+// ── Orders ─────────────────────────────────────────────────
+
+describe('placeOrder', () => {
+  it('returns formatted order', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const order = await client.placeOrder('BTC/USDT', 'limit', 'buy', 0.1, 64000);
+
+    expect(order.id).toBe('ord-123');
+    expect(order.symbol).toBe('BTC/USDT');
+    expect(order.side).toBe('buy');
+    expect(order.type).toBe('limit');
+    expect(order.amount).toBe(0.1);
+    expect(order.status).toBe('open');
+  });
+});
+
+describe('cancelOrder', () => {
+  it('cancels without error', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    await expect(client.cancelOrder('ord-1', 'BTC/USDT')).resolves.toBeUndefined();
+  });
+});
+
+describe('getOpenOrders', () => {
+  it('returns formatted open orders', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const orders = await client.getOpenOrders();
+
+    expect(orders).toHaveLength(1);
+    expect(orders[0].id).toBe('ord-1');
+    expect(orders[0].status).toBe('open');
+    expect(orders[0].price).toBe(64000);
+  });
+});
+
+describe('getClosedOrders', () => {
+  it('returns formatted closed orders', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const orders = await client.getClosedOrders();
+
+    expect(orders).toHaveLength(1);
+    expect(orders[0].id).toBe('ord-2');
+    expect(orders[0].status).toBe('closed');
+    expect(orders[0].average).toBe(65100);
+  });
+});
+
+describe('getOrder', () => {
+  it('returns a single order', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const order = await client.getOrder('ord-1');
+
+    expect(order.id).toBe('ord-1');
+    expect(order.symbol).toBe('BTC/USDT');
+  });
+});
+
+describe('getMyTrades', () => {
+  it('returns formatted personal trades', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const trades = await client.getMyTrades();
+
+    expect(trades).toHaveLength(1);
+    expect(trades[0].id).toBe('mt1');
+    expect(trades[0].price).toBe(65000);
+    expect(trades[0].amount).toBe(0.1);
+  });
+});
+
+// ── Error handling ──────────────────────────────────────────
+
+describe('error handling', () => {
+  it('propagates exchange errors', async () => {
+    const mock = createMockCcxtExchange({
+      fetchTicker: async () => { throw new Error('Exchange unavailable'); },
+    });
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    await expect(client.getTicker('BTC/USDT')).rejects.toThrow('Exchange unavailable');
+  });
+});

@@ -16,6 +16,12 @@ ai-fund/
 │       ├── src/tools/       # market-data, orders, account, defi, risk
 │       ├── src/resources/   # markets, portfolio
 │       └── tests/           # vitest test suites
+├── connectors/ccxt/     # Built-in CCXT MCP server (Coinbase, Binance, 100+ exchanges)
+│   └── mcp-server/
+│       ├── src/cli/         # status
+│       ├── src/client/      # universal CCXT exchange wrapper
+│       ├── src/tools/       # market-data, orders, account
+│       └── tests/           # vitest test suites
 ├── lib/                 # Shared TS: indicators, math, format
 ├── bin/desk-state       # CLI for .desk/ state management
 ├── scripts/install.js   # npx ai-fund install|list
@@ -35,7 +41,7 @@ ai-fund/
 
 - **Requirements**: Node >= 20, ES modules (`"type": "module"`)
 - **TypeScript**: Strict mode, ES2022 target, Node16 module resolution
-- **Build**: `npm run build` — compiles Cube, Robinhood, and Alpaca MCP server workspaces
+- **Build**: `npm run build` — compiles Cube, Robinhood, Alpaca, and CCXT MCP server workspaces
 - **Dev**: `npm run dev` — runs Cube MCP server with watch
 - **Typecheck**: `npm run typecheck` — runs `tsc --noEmit` across project
 - **Test**: `cd connectors/cube/mcp-server && npm test` — vitest (auth, signing, indicators, format, REST orders, WebSocket, credential store, device auth, integration)
@@ -181,12 +187,10 @@ commands:
 |----------|-----------|-------|
 | Cube | Built-in (`connectors/cube/`) | Recommended — 200us matching, lowest fees |
 | Alpaca | Built-in (`connectors/alpaca/`) | Stocks, ETFs, crypto — paper trading built-in |
+| CCXT (Coinbase, Binance, 100+) | Built-in (`connectors/ccxt/`) | Universal adapter — any CCXT exchange, sandbox support |
 | OKX | `@okx_ai/okx-trade-mcp` | 107 tools, spot/futures/options |
 | Kraken | `kraken-cli` | Rust binary, built-in paper trading |
-| Binance | `ccxt-mcp` | Via CCXT universal adapter |
-| Coinbase | `@coinbase/agentkit` | Wallet + trading |
 | Robinhood | Built-in (`connectors/robinhood/`) | Roadmap — crypto only (official API) |
-| 100+ more | `ccxt-mcp` | Any CCXT-supported exchange |
 
 ## Desk State (`.desk/`)
 
