@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sma, ema, rsi, macd, bollingerBands, atr, adx, obv, stochastic } from '../../../../lib/indicators.js';
+import { sma, ema, rsi, macd, bollingerBands, atr, adx, obv, stochastic, hurst, momentum, historicalVolatility, vwap, volumeSpike } from '../../../../lib/indicators.js';
 import type { OHLCV } from '../../../../lib/indicators.js';
 
 // Helper: generate simple OHLCV data
@@ -168,5 +168,120 @@ describe('Stochastic', () => {
       expect(v).toBeGreaterThanOrEqual(0);
       expect(v).toBeLessThanOrEqual(100);
     }
+  });
+});
+
+// ── New Indicators ──────────────────────────────────────────
+
+describe('Hurst Exponent', () => {
+  it('returns ~0.5 for random walk', () => {
+    // Generate pseudo-random walk
+    const data: number[] = [100];
+    for (let i = 1; i < 200; i++) {
+      data.push(data[i - 1] + Math.sin(i * 1.7) * 2 + Math.cos(i * 3.1));
+    }
+    const h = hurst(data);
+    expect(h).toBeGreaterThanOrEqual(0);
+    expect(h).toBeLessThanOrEqual(1);
+  });
+
+  it('returns 0.5 for insufficient data', () => {
+    expect(hurst([1, 2, 3])).toBe(0.5);
+  });
+
+  it('detects trending behavior (H > 0.5) in a trend', () => {
+    // Strong uptrend
+    const trending = Array.from({ length: 100 }, (_, i) => 100 + i * 2);
+    const h = hurst(trending);
+    expect(h).toBeGreaterThan(0.5);
+  });
+
+  it('is bounded between 0 and 1', () => {
+    const candles = generateCandles(100);
+    const closes = candles.map(c => c.close);
+    const h = hurst(closes);
+    expect(h).toBeGreaterThanOrEqual(0);
+    expect(h).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('Momentum', () => {
+  it('calculates multi-period returns', () => {
+    const prices = Array.from({ length: 130 }, (_, i) => 100 + i);
+    const result = momentum(prices, [21, 63, 126]);
+    expect(result[21]).toBeCloseTo((229 - 208) / 208, 4);
+    expect(result[63]).toBeCloseTo((229 - 166) / 166, 4);
+    expect(result[126]).toBeCloseTo((229 - 103) / 103, 4);
+  });
+
+  it('returns null for insufficient data', () => {
+    const prices = [100, 110, 120];
+    const result = momentum(prices, [5, 10]);
+    expect(result[5]).toBeNull();
+    expect(result[10]).toBeNull();
+  });
+});
+
+describe('Historical Volatility', () => {
+  it('returns annualized vol from returns', () => {
+    const dailyReturns = [0.01, -0.02, 0.005, -0.01, 0.015, -0.005, 0.02, -0.015, 0.01, -0.01];
+    const vol = historicalVolatility(dailyReturns);
+    expect(vol).toBeGreaterThan(0);
+    // Should be in reasonable range for crypto (annualized)
+    expect(vol).toBeLessThan(5); // 500% would be extreme
+  });
+
+  it('returns 0 for insufficient data', () => {
+    expect(historicalVolatility([0.01])).toBe(0);
+  });
+
+  it('accepts custom annualization factor', () => {
+    const returns = [0.01, -0.02, 0.005, -0.01, 0.015];
+    const crypto = historicalVolatility(returns, 365);
+    const equities = historicalVolatility(returns, 252);
+    expect(crypto).toBeGreaterThan(equities);
+  });
+});
+
+describe('VWAP', () => {
+  it('returns cumulative VWAP for each bar', () => {
+    const candles = generateCandles(20);
+    const result = vwap(candles);
+    expect(result.length).toBe(candles.length);
+    // VWAP should be within the price range
+    for (let i = 0; i < result.length; i++) {
+      expect(result[i]).toBeGreaterThan(0);
+    }
+  });
+
+  it('first bar VWAP equals typical price', () => {
+    const candles = generateCandles(5);
+    const typical = (candles[0].high + candles[0].low + candles[0].close) / 3;
+    const result = vwap(candles);
+    expect(result[0]).toBeCloseTo(typical);
+  });
+});
+
+describe('Volume Spike', () => {
+  it('detects above-average volume', () => {
+    // Low volume followed by a spike
+    const volumes = Array(63).fill(100);
+    volumes.push(500, 500, 500, 500, 500); // spike
+    const result = volumeSpike(volumes);
+    expect(result[result.length - 1]).toBeGreaterThan(1);
+  });
+
+  it('returns ~1 for constant volume', () => {
+    const volumes = Array(100).fill(1000);
+    const result = volumeSpike(volumes);
+    for (const v of result) {
+      expect(v).toBeCloseTo(1, 1);
+    }
+  });
+
+  it('returns correct number of data points', () => {
+    const volumes = Array(100).fill(1000);
+    const result = volumeSpike(volumes, 5, 63);
+    expect(result.length).toBe(100 - 63 + 1);
   });
 });

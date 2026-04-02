@@ -27,14 +27,11 @@ auth.init().then(authenticated => {
 }).catch(() => {});
 
 // ── Register tools ──────────────────────────────────────────
+// Placeholder — tools will be added when official crypto API is implemented.
+// See connectors/robinhood/README.md
 
-// Market data: quotes, historicals, instrument search
 registerMarketDataTools(server, client);
-
-// Account: positions, balances, fills
 registerAccountTools(server, client);
-
-// Orders: place, cancel, status
 registerOrderTools(server, client);
 
 // ── Start server ────────────────────────────────────────────

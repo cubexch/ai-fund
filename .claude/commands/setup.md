@@ -31,7 +31,6 @@ Walk the user through connecting their exchange(s) step by step.
      Kraken                              — 134 commands. Stocks, futures, earn, staking.
      Binance (via CCXT)                  — World's largest exchange. Spot + futures.
      Coinbase                            — US-regulated. Spot + wallet.
-     Robinhood (built-in)                — Stocks, ETFs, crypto. Commission-free. No paper trading.
      Any CCXT exchange                   — 100+ exchanges via universal adapter.
 
    Which exchanges would you like to connect? (You can add more later)
@@ -57,13 +56,6 @@ Walk the user through connecting their exchange(s) step by step.
    - Install Kraken CLI: `curl -sSf https://raw.githubusercontent.com/krakenfx/kraken-cli/main/install.sh | sh`
    - Run: `kraken auth login`
    - Enable `kraken` in `.mcp.json`
-
-   **Robinhood** (built-in, no extra install):
-   - Run: `cd connectors/robinhood/mcp-server && npm run login`
-   - Enter email, password, and MFA code when prompted
-   - Or set `ROBINHOOD_USERNAME`, `ROBINHOOD_PASSWORD`, `ROBINHOOD_MFA_CODE` env vars
-   - Tokens stored securely in system keychain
-   - WARNING: Robinhood has no paper trading — all orders use real money
 
    **Binance/Bybit/Others** (via CCXT):
    - Run: `npm install -g ccxt-mcp`

@@ -4,6 +4,10 @@ import {
   sharpeRatio, sortinoRatio, calmarRatio,
   correlation, correlationMatrix,
   mean, standardDeviation, zScore, returns, winRate, profitFactor,
+  skewness, kurtosis, annualizedVolatility, volatilityPercentile, tailRatio,
+  beta, alpha, informationRatio, upsideCapture, downsideCapture,
+  linearRegressionSlope, coefficientOfVariation, drawdownSeries,
+  rollingReturns, benchmarkReturn, trackingError, maxConsecutiveLosses, expectancy,
 } from '../../../../lib/math.js';
 
 // ── Position Sizing ──────────────────────────────────────────
@@ -339,5 +343,293 @@ describe('profitFactor', () => {
   it('returns Infinity for empty array (0/0 case)', () => {
     // No losses → gross loss = 0 → Infinity
     expect(profitFactor([])).toBe(Infinity);
+  });
+});
+
+// ── Distribution Shape ──────────────────────────────────────
+
+describe('skewness', () => {
+  it('returns ~0 for symmetric data', () => {
+    const symmetric = [-3, -2, -1, 0, 1, 2, 3];
+    expect(Math.abs(skewness(symmetric))).toBeLessThan(0.1);
+  });
+
+  it('returns positive for right-skewed data', () => {
+    const rightSkewed = [1, 2, 2, 3, 3, 3, 4, 4, 10, 20];
+    expect(skewness(rightSkewed)).toBeGreaterThan(0);
+  });
+
+  it('returns 0 for insufficient data', () => {
+    expect(skewness([1, 2])).toBe(0);
+  });
+
+  it('returns 0 for constant data', () => {
+    expect(skewness([5, 5, 5, 5, 5])).toBe(0);
+  });
+});
+
+describe('kurtosis', () => {
+  it('returns ~0 for normal-like data', () => {
+    // Approximate normal distribution (large sample)
+    const normal = [-2.5, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 2.5,
+      -2, -1, 0, 1, 2, -1.5, -0.5, 0.5, 1.5];
+    const k = kurtosis(normal);
+    expect(Math.abs(k)).toBeLessThan(2); // loosely normal
+  });
+
+  it('returns positive for heavy-tailed data', () => {
+    const heavyTails = [0, 0, 0, 0, 0, 0, 0, 0, -10, 10];
+    expect(kurtosis(heavyTails)).toBeGreaterThan(0);
+  });
+
+  it('returns 0 for insufficient data', () => {
+    expect(kurtosis([1, 2, 3])).toBe(0);
+  });
+});
+
+// ── Volatility ──────────────────────────────────────────────
+
+describe('annualizedVolatility', () => {
+  it('annualizes daily standard deviation', () => {
+    const dailyReturns = [0.01, -0.02, 0.005, -0.01, 0.015, -0.005, 0.02, -0.015, 0.01, -0.01];
+    const vol = annualizedVolatility(dailyReturns);
+    const dailySd = standardDeviation(dailyReturns);
+    expect(vol).toBeCloseTo(dailySd * Math.sqrt(365));
+  });
+
+  it('returns 0 for insufficient data', () => {
+    expect(annualizedVolatility([0.01])).toBe(0);
+  });
+});
+
+describe('volatilityPercentile', () => {
+  it('returns high percentile during high vol', () => {
+    // Low vol period then high vol at the end
+    const lowVol = Array(300).fill(0).map((_, i) => Math.sin(i * 0.1) * 0.001);
+    const highVol = Array(30).fill(0).map((_, i) => Math.sin(i * 0.5) * 0.05);
+    const combined = [...lowVol, ...highVol];
+    const pct = volatilityPercentile(combined, 30, 252);
+    expect(pct).toBeGreaterThan(0.7);
+  });
+
+  it('returns 0.5 for insufficient data', () => {
+    expect(volatilityPercentile([0.01, 0.02], 30, 252)).toBe(0.5);
+  });
+});
+
+describe('tailRatio', () => {
+  it('returns ~1 for symmetric returns', () => {
+    const symmetric = Array(100).fill(0).map((_, i) => Math.sin(i * 0.3) * 0.02);
+    const ratio = tailRatio(symmetric);
+    expect(ratio).toBeGreaterThan(0.5);
+    expect(ratio).toBeLessThan(2);
+  });
+
+  it('returns 1 for insufficient data', () => {
+    expect(tailRatio([0.01, 0.02])).toBe(1);
+  });
+});
+
+// ── Benchmark Comparison ────────────────────────────────────
+
+describe('beta', () => {
+  it('returns ~1 for identical series', () => {
+    const r = [0.01, -0.02, 0.015, -0.01, 0.005];
+    expect(beta(r, r)).toBeCloseTo(1);
+  });
+
+  it('returns ~2 for 2x leveraged returns', () => {
+    const bench = [0.01, -0.02, 0.015, -0.01, 0.005, 0.02, -0.005];
+    const leveraged = bench.map(r => r * 2);
+    expect(beta(leveraged, bench)).toBeCloseTo(2, 0);
+  });
+
+  it('returns 1 for insufficient data', () => {
+    expect(beta([0.01], [0.01])).toBe(1);
+  });
+});
+
+describe('alpha', () => {
+  it('returns positive for outperforming asset', () => {
+    const asset = [0.05, 0.03, 0.04, 0.06, 0.02, 0.05, 0.03];
+    const bench = [0.01, -0.02, 0.01, 0.02, -0.01, 0.01, 0.00];
+    expect(alpha(asset, bench)).toBeGreaterThan(0);
+  });
+
+  it('returns ~0 for identical series', () => {
+    const r = [0.01, -0.02, 0.015, -0.01, 0.005];
+    expect(alpha(r, r)).toBeCloseTo(0, 4);
+  });
+});
+
+describe('informationRatio', () => {
+  it('returns positive for consistent outperformance', () => {
+    const asset = [0.02, 0.03, 0.02, 0.03, 0.02];
+    const bench = [0.01, 0.01, 0.01, 0.01, 0.01];
+    expect(informationRatio(asset, bench)).toBeGreaterThan(0);
+  });
+
+  it('returns 0 for insufficient data', () => {
+    expect(informationRatio([0.01], [0.01])).toBe(0);
+  });
+});
+
+describe('upsideCapture', () => {
+  it('returns > 1 for asset that gains more on up days', () => {
+    const bench = [0.02, -0.01, 0.03, -0.02, 0.01];
+    const asset = [0.04, -0.005, 0.06, -0.01, 0.02]; // 2x on up days
+    expect(upsideCapture(asset, bench)).toBeGreaterThan(1);
+  });
+
+  it('returns 0 when no up days', () => {
+    const bench = [-0.01, -0.02, -0.01];
+    const asset = [-0.005, -0.01, -0.005];
+    expect(upsideCapture(asset, bench)).toBe(0);
+  });
+});
+
+describe('downsideCapture', () => {
+  it('returns < 1 for asset that loses less on down days', () => {
+    const bench = [0.02, -0.04, 0.03, -0.06, 0.01];
+    const asset = [0.01, -0.02, 0.02, -0.03, 0.005]; // half the losses
+    expect(downsideCapture(asset, bench)).toBeLessThan(1);
+  });
+
+  it('returns 0 when no down days', () => {
+    const bench = [0.01, 0.02, 0.01];
+    const asset = [0.02, 0.03, 0.02];
+    expect(downsideCapture(asset, bench)).toBe(0);
+  });
+});
+
+// ── Trend Analysis ──────────────────────────────────────────
+
+describe('linearRegressionSlope', () => {
+  it('returns positive slope for uptrend', () => {
+    const uptrend = [10, 12, 14, 16, 18, 20];
+    expect(linearRegressionSlope(uptrend)).toBeCloseTo(2);
+  });
+
+  it('returns negative slope for downtrend', () => {
+    const downtrend = [20, 18, 16, 14, 12, 10];
+    expect(linearRegressionSlope(downtrend)).toBeCloseTo(-2);
+  });
+
+  it('returns 0 for flat data', () => {
+    const flat = [10, 10, 10, 10];
+    expect(linearRegressionSlope(flat)).toBeCloseTo(0);
+  });
+
+  it('returns 0 for insufficient data', () => {
+    expect(linearRegressionSlope([42])).toBe(0);
+  });
+});
+
+describe('coefficientOfVariation', () => {
+  it('calculates std / |mean|', () => {
+    const data = [10, 12, 14, 16, 18];
+    const cv = coefficientOfVariation(data);
+    expect(cv).toBeCloseTo(standardDeviation(data) / mean(data));
+  });
+
+  it('returns Infinity for zero mean', () => {
+    expect(coefficientOfVariation([-1, 0, 1])).toBe(Infinity);
+  });
+});
+
+// ── Drawdown Analysis ───────────────────────────────────────
+
+describe('drawdownSeries', () => {
+  it('all values are <= 0', () => {
+    const values = [100, 110, 90, 80, 95, 120, 115];
+    const dd = drawdownSeries(values);
+    for (const v of dd) {
+      expect(v).toBeLessThanOrEqual(0);
+    }
+  });
+
+  it('is 0 at new highs', () => {
+    const values = [100, 110, 120, 130];
+    const dd = drawdownSeries(values);
+    for (const v of dd) {
+      expect(v).toBe(0);
+    }
+  });
+
+  it('calculates correct drawdown values', () => {
+    const values = [100, 110, 88];
+    const dd = drawdownSeries(values);
+    expect(dd[0]).toBe(0);
+    expect(dd[1]).toBe(0); // new high
+    expect(dd[2]).toBeCloseTo((88 - 110) / 110); // -20%
+  });
+});
+
+// ── Rolling Returns ─────────────────────────────────────────
+
+describe('rollingReturns', () => {
+  it('calculates returns over multiple windows', () => {
+    const prices = [100, 110, 105, 115, 120];
+    const result = rollingReturns(prices, [1, 2]);
+    expect(result[1]).toHaveLength(4); // 5 - 1
+    expect(result[2]).toHaveLength(3); // 5 - 2
+    expect(result[1][0]).toBeCloseTo(0.10); // (110-100)/100
+  });
+});
+
+// ── Backtest Metrics ────────────────────────────────────────
+
+describe('benchmarkReturn', () => {
+  it('calculates buy-and-hold return', () => {
+    expect(benchmarkReturn([100, 110, 120])).toBeCloseTo(0.20);
+  });
+
+  it('returns 0 for single price', () => {
+    expect(benchmarkReturn([100])).toBe(0);
+  });
+
+  it('returns 0 for empty array', () => {
+    expect(benchmarkReturn([])).toBe(0);
+  });
+});
+
+describe('trackingError', () => {
+  it('returns 0 for identical series', () => {
+    const r = [0.01, -0.02, 0.015];
+    expect(trackingError(r, r)).toBeCloseTo(0);
+  });
+
+  it('returns positive for different series', () => {
+    const a = [0.02, -0.01, 0.03];
+    const b = [0.01, -0.02, 0.01];
+    expect(trackingError(a, b)).toBeGreaterThan(0);
+  });
+});
+
+describe('maxConsecutiveLosses', () => {
+  it('finds longest losing streak', () => {
+    const pnls = [10, -5, -3, -2, 20, -1, -4, 5];
+    expect(maxConsecutiveLosses(pnls)).toBe(3); // -5, -3, -2
+  });
+
+  it('returns 0 for all wins', () => {
+    expect(maxConsecutiveLosses([10, 20, 30])).toBe(0);
+  });
+
+  it('returns 0 for empty array', () => {
+    expect(maxConsecutiveLosses([])).toBe(0);
+  });
+});
+
+describe('expectancy', () => {
+  it('calculates expected value per trade', () => {
+    // 60% win rate, avg win $200, avg loss $100
+    // 0.6 * 200 - 0.4 * 100 = 120 - 40 = 80
+    expect(expectancy(0.6, 200, 100)).toBeCloseTo(80);
+  });
+
+  it('returns negative for losing system', () => {
+    // 30% win rate, avg win $100, avg loss $200
+    expect(expectancy(0.3, 100, 200)).toBeLessThan(0);
   });
 });

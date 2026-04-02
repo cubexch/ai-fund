@@ -11,46 +11,52 @@
  *   ROBINHOOD_USERNAME=user@example.com ROBINHOOD_PASSWORD=... ROBINHOOD_MFA_CODE=123456 npm run login
  */
 
-import * as readline from 'node:readline';
 import { AuthManager } from '../client/auth.js';
 import { getBackendName } from '../client/credential-store.js';
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stderr,
-});
-
 function prompt(question: string, hidden = false): Promise<string> {
   return new Promise(resolve => {
-    if (hidden) {
-      process.stderr.write(question);
-      // Read password without echo
-      const stdin = process.stdin;
-      const wasRaw = stdin.isRaw;
-      if (stdin.isTTY) stdin.setRawMode(true);
+    process.stderr.write(question);
 
-      let input = '';
-      const onData = (char: Buffer) => {
-        const c = char.toString();
+    const stdin = process.stdin;
+    if (stdin.isTTY) stdin.setRawMode(true);
+    stdin.resume();
+
+    let input = '';
+    const onData = (chunk: Buffer) => {
+      const str = chunk.toString();
+      for (const c of str) {
         if (c === '\n' || c === '\r') {
           stdin.removeListener('data', onData);
-          if (stdin.isTTY && wasRaw !== undefined) stdin.setRawMode(wasRaw);
+          if (stdin.isTTY) stdin.setRawMode(false);
+          stdin.pause();
           process.stderr.write('\n');
           resolve(input);
+          return;
         } else if (c === '\u0003') {
           // Ctrl+C
           process.exit(1);
         } else if (c === '\u007f' || c === '\b') {
-          // Backspace
-          input = input.slice(0, -1);
-        } else {
+          if (input.length > 0) {
+            input = input.slice(0, -1);
+            process.stderr.write('\b \b');
+          }
+        } else if (c.charCodeAt(0) >= 32) {
+          // Printable characters only (ignores control chars like Ctrl+V's \x16)
           input += c;
+          process.stderr.write(hidden ? '*' : c);
         }
-      };
-      stdin.on('data', onData);
-    } else {
-      rl.question(question, answer => resolve(answer.trim()));
-    }
+      }
+    };
+    stdin.on('data', onData);
+  });
+}
+
+function loginSuccess(username: string): void {
+  getBackendName().then(backend => {
+    console.error(`\n✓ Authenticated as ${username} (${backend})`);
+    console.error('  Tokens saved securely. You can now start the MCP server.\n');
+    process.exit(0);
   });
 }
 
@@ -66,42 +72,71 @@ async function main() {
   }
 
   const auth = new AuthManager();
-  let mfaCode = process.env.ROBINHOOD_MFA_CODE;
+  const mfaCode = process.env.ROBINHOOD_MFA_CODE;
 
   // First attempt
-  const result = await auth.login(username, password, mfaCode);
+  let result = await auth.login(username, password, { mfaCode });
 
-  if (result === 'success') {
-    const backend = await getBackendName();
-    console.error(`\n✓ Authenticated as ${username} (${backend})`);
-    console.error('  Tokens saved securely. You can now start the MCP server.\n');
-    rl.close();
-    process.exit(0);
+  if (result.type === 'success') {
+    loginSuccess(username);
+    return;
   }
 
-  // MFA required
-  console.error(`\nMFA required (type: ${result})`);
+  // Verification workflow (new Robinhood flow — SMS/email/app approval via pathfinder)
+  if (result.type === 'verification') {
+    console.error('\nDevice verification required...');
 
-  if (!mfaCode) {
-    mfaCode = await prompt('MFA code: ');
+    const verified = await auth.handleVerificationWorkflow(
+      result.deviceToken,
+      result.workflowId,
+      async (type, message) => {
+        console.error(message);
+        if (type === 'sms' || type === 'email') {
+          return await prompt('Verification code: ');
+        }
+        // For 'prompt' type, user approves in app — no input needed
+      },
+      (msg) => console.error(msg),
+    );
+
+    if (!verified) {
+      console.error('\n✗ Verification failed.');
+      process.exit(1);
+    }
+
+    // Retry login after verification
+    result = await auth.login(username, password);
+
+    if (result.type === 'success') {
+      loginSuccess(username);
+      return;
+    }
   }
 
-  const mfaResult = await auth.login(username, password, mfaCode);
+  // MFA required (TOTP app)
+  if (result.type === 'mfa') {
+    console.error(`\nMFA required (type: ${result.mfaType})`);
 
-  if (mfaResult === 'success') {
-    const backend = await getBackendName();
-    console.error(`\n✓ Authenticated as ${username} (${backend})`);
-    console.error('  Tokens saved securely. You can now start the MCP server.\n');
-  } else {
-    console.error('\n✗ Authentication failed. Check your credentials and MFA code.');
+    const code = mfaCode || await prompt('MFA code: ');
+    const mfaResult = await auth.login(username, password, { mfaCode: code });
+
+    if (mfaResult.type === 'success') {
+      loginSuccess(username);
+      return;
+    }
+
+    console.error('\n✗ Authentication failed. Check your MFA code.');
     process.exit(1);
   }
 
-  rl.close();
+  // Error
+  if (result.type === 'error') {
+    console.error(`\n✗ ${result.message}`);
+    process.exit(1);
+  }
 }
 
 main().catch(err => {
   console.error(`\n✗ Login failed: ${err.message}`);
-  rl.close();
   process.exit(1);
 });

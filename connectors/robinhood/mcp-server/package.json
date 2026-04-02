@@ -10,7 +10,8 @@
     "start": "node dist/index.js",
     "login": "tsx src/cli/login.ts",
     "logout": "tsx src/cli/logout.ts",
-    "status": "tsx src/cli/status.ts"
+    "status": "tsx src/cli/status.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",

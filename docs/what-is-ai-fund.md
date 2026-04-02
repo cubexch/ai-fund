@@ -43,7 +43,7 @@ CLAUDE CODE (AI runtime)
   |
   ├── Exchange Connectors (MCP)    -- connect any exchange
   |   ├── Cube (built-in)
-  |   ├── Binance, Coinbase, Kraken, OKX, Robinhood...
+  |   ├── Binance, Coinbase, Kraken, OKX, Alpaca...
   |   └── 100+ via CCXT
   |
   v

@@ -1,28 +1,22 @@
 /**
- * Robinhood REST API client.
+ * Robinhood API client — auth scaffolding only.
  *
- * Thin wrapper around fetch with:
- * - Bearer token auth
- * - Auto-refresh on 401
- * - Rate limit handling (429 → exponential backoff)
- * - Pagination support
+ * All unofficial stock/crypto endpoints have been removed.
+ * This file preserves the base client infrastructure (auth, retry, pagination)
+ * for future use with the official crypto API at docs.robinhood.com/crypto/trading.
  */
 
 import { AuthManager } from './auth.js';
+import { httpRequest } from './http.js';
 
 // ── Constants ────────────────────────────────────────────────
 
 const BASE_URL = 'https://api.robinhood.com';
 
-const DEFAULT_HEADERS = {
-  'Accept': 'application/json',
-  'X-Robinhood-API-Version': '1.431.4',
-};
-
 const MAX_RETRIES = 3;
 const BACKOFF_BASE_MS = 1000;
 
-// ── Types ────────────────────────────────────────────────────
+// ── Pagination ──────────────────────────────────────────────
 
 export interface PaginatedResponse<T> {
   next: string | null;
@@ -30,40 +24,35 @@ export interface PaginatedResponse<T> {
   results: T[];
 }
 
-// ── Client ───────────────────────────────────────────────────
+// ── Client ──────────────────────────────────────────────────
 
 export class RobinhoodClient {
   constructor(private auth: AuthManager) {}
 
   /**
-   * GET request with auth and auto-retry.
+   * Authenticated GET request with auto-refresh on 401 and backoff on 429.
    */
   async get<T>(path: string, params?: Record<string, string>): Promise<T> {
-    let url = path.startsWith('http') ? path : `${BASE_URL}${path}`;
-    if (params) {
-      const search = new URLSearchParams(params);
-      url += (url.includes('?') ? '&' : '?') + search.toString();
-    }
-    return this.request<T>('GET', url);
+    return this.request<T>('GET', path, undefined, params);
   }
 
   /**
-   * POST request with auth and auto-retry.
+   * Authenticated POST request.
    */
   async post<T>(path: string, body: Record<string, unknown>): Promise<T> {
-    const url = path.startsWith('http') ? path : `${BASE_URL}${path}`;
-    return this.request<T>('POST', url, body);
+    return this.request<T>('POST', path, body);
   }
 
   /**
-   * Fetch all pages of a paginated endpoint.
+   * Paginated GET — follows `next` links to collect all results.
    */
   async getAll<T>(path: string, params?: Record<string, string>): Promise<T[]> {
     const results: T[] = [];
     let url = path.startsWith('http') ? path : `${BASE_URL}${path}`;
+
     if (params) {
-      const search = new URLSearchParams(params);
-      url += (url.includes('?') ? '&' : '?') + search.toString();
+      const qs = new URLSearchParams(params).toString();
+      url += (url.includes('?') ? '&' : '?') + qs;
     }
 
     while (url) {
@@ -77,41 +66,55 @@ export class RobinhoodClient {
 
   // ── Internal ────────────────────────────────────────────────
 
-  private async request<T>(method: string, url: string, body?: Record<string, unknown>): Promise<T> {
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: Record<string, unknown>,
+    params?: Record<string, string>,
+  ): Promise<T> {
+    let url = path.startsWith('http') ? path : `${BASE_URL}${path}`;
+
+    if (params) {
+      const qs = new URLSearchParams(params).toString();
+      url += (url.includes('?') ? '&' : '?') + qs;
+    }
+
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       const token = await this.auth.getAccessToken();
+      const headers: Record<string, string> = {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json',
+      };
 
-      const res = await fetch(url, {
-        method,
-        headers: {
-          ...DEFAULT_HEADERS,
-          'Authorization': `Bearer ${token}`,
-          ...(body ? { 'Content-Type': 'application/json' } : {}),
-        },
-        body: body ? JSON.stringify(body) : undefined,
-      });
-
-      // Handle 401 — refresh and retry
-      if (res.status === 401 && attempt < MAX_RETRIES) {
-        const refreshed = await this.auth.handleUnauthorized();
-        if (refreshed) continue;
+      const options: Record<string, unknown> = { method, headers };
+      if (body) {
+        headers['Content-Type'] = 'application/json';
+        options.body = JSON.stringify(body);
       }
 
-      // Handle 429 — rate limited, backoff and retry
-      if (res.status === 429 && attempt < MAX_RETRIES) {
-        const delay = BACKOFF_BASE_MS * Math.pow(2, attempt);
-        await new Promise(resolve => setTimeout(resolve, delay));
+      const res = await httpRequest(url, options as any);
+      const text = await res.text();
+
+      // Auto-refresh on 401
+      if (res.status === 401 && attempt < MAX_RETRIES) {
+        await this.auth.refresh();
         continue;
       }
 
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`Robinhood API error ${res.status} ${method} ${url}: ${text}`);
+      // Exponential backoff on 429
+      if (res.status === 429 && attempt < MAX_RETRIES) {
+        const delay = BACKOFF_BASE_MS * Math.pow(2, attempt);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
       }
 
-      return await res.json() as T;
+      if (res.status >= 400) {
+        throw new Error(`Robinhood API error (${res.status}): ${text}`);
+      }
+
+      return JSON.parse(text) as T;
     }
 
-    throw new Error(`Robinhood API: max retries exceeded for ${method} ${url}`);
+    throw new Error('Max retries exceeded');
   }
 }

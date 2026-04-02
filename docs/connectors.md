@@ -3,7 +3,7 @@ title: Exchange Connectors
 description: >
   Connect AI Fund to 100+ cryptocurrency and equities exchanges via MCP connectors.
   Built-in support for Cube Exchange. Plugin connectors for Binance, Coinbase, Kraken,
-  OKX, Robinhood, and any CCXT-supported exchange. Multi-exchange trading, arbitrage,
+  OKX, and any CCXT-supported exchange. Multi-exchange trading, arbitrage,
   and smart order routing.
 keywords: exchange connectors, crypto exchange API, MCP trading, multi-exchange trading, CCXT, Binance API, Coinbase API, Kraken API, OKX API, exchange plugin, Model Context Protocol, smart order routing
 ---
@@ -49,7 +49,7 @@ Each connector is an independent MCP server. When multiple connectors are active
 
 ### Equities, Multi-Asset, and 100+ More
 
-Robinhood and Alpaca (via MCP), IBKR (via CCXT/custom), and any exchange supported by the [CCXT library](https://github.com/ccxt/ccxt) works via `ccxt-mcp` (`npm i -g ccxt-mcp`).
+Alpaca (via MCP), IBKR (via CCXT/custom), and any exchange supported by the [CCXT library](https://github.com/ccxt/ccxt) works via `ccxt-mcp` (`npm i -g ccxt-mcp`). Robinhood crypto support is on the roadmap (official API only — no stocks).
 
 ## Setup Instructions
 

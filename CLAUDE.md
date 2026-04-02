@@ -1,6 +1,6 @@
 # AI Fund
 
-An AI trading desk with 42 hedge fund agent personas (including 20 named personas like Arthur Hayes, Jim Simons, George Soros, and Jesse Livermore) for Claude Code. Trade on any exchange — Cube, OKX, Kraken, Binance, Coinbase, Robinhood, and 100+ more via CCXT.
+An AI trading desk with 42 hedge fund agent personas (including 20 named personas like Arthur Hayes, Jim Simons, George Soros, and Jesse Livermore) for Claude Code. Trade on any exchange — Cube, OKX, Kraken, Binance, Coinbase, and 100+ more via CCXT.
 
 ## Project Structure
 
@@ -182,7 +182,7 @@ commands:
 | Kraken | `kraken-cli` | Rust binary, built-in paper trading |
 | Binance | `ccxt-mcp` | Via CCXT universal adapter |
 | Coinbase | `@coinbase/agentkit` | Wallet + trading |
-| Robinhood | Built-in (`connectors/robinhood/`) | Commission-free stocks, ETFs, crypto |
+| Robinhood | Built-in (`connectors/robinhood/`) | Roadmap — crypto only (official API) |
 | 100+ more | `ccxt-mcp` | Any CCXT-supported exchange |
 
 ## Desk State (`.desk/`)

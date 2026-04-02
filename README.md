@@ -84,7 +84,7 @@ CLAUDE CODE (AI runtime)
   │
   ├── Exchange Connectors (MCP)   ← connect any exchange
   │   ├── Cube (built-in)
-  │   ├── Binance, Coinbase, Kraken, OKX, Robinhood...
+  │   ├── Binance, Coinbase, Kraken, OKX...
   │   └── 100+ via CCXT
   │
   ▼
@@ -161,14 +161,14 @@ When handing an AI agent access to exchange credentials, think about security. S
 
 ### Equities and Multi-Asset Platforms
 
-| | Robinhood | Alpaca | Kraken | IBKR |
-|---|---|---|---|---|
-| **Setup** | Alpaca MCP | MCP server | CLI | CCXT/custom |
-| **API keys** | Key+secret | Key+secret | Key+secret | Portal auth |
-| **Stocks** | ✅ No-fee | ✅ No-fee | Tokenized | ✅ |
-| **Crypto** | Limited | ✅ | ✅ | ❌ |
-| **Options** | ✅ | ❌ | ❌ | ✅ |
-| **Paper** | ❌ | ✅ | ✅ | ✅ |
+| | Alpaca | Kraken | IBKR |
+|---|---|---|---|
+| **Setup** | MCP server | CLI | CCXT/custom |
+| **API keys** | Key+secret | Key+secret | Portal auth |
+| **Stocks** | ✅ No-fee | Tokenized | ✅ |
+| **Crypto** | ✅ | ✅ | ❌ |
+| **Options** | ❌ | ❌ | ✅ |
+| **Paper** | ✅ | ✅ | ✅ |
 
 ### API Key Security — Why This Matters With AI Agents
 
@@ -409,7 +409,7 @@ An open-source AI crypto trading framework with 42 agents running inside Claude 
 42. 20 named personas (Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Michael Saylor, and 15 more) plus 22 role-based agents across six desks.
 
 ### What exchanges work with ai-fund?
-100+ exchanges via plugin connectors. Cube ships built-in. Binance, Coinbase, Kraken, OKX, Robinhood, and many more work via CCXT or dedicated MCP servers.
+100+ exchanges via plugin connectors. Cube ships built-in. Binance, Coinbase, Kraken, OKX, and many more work via CCXT or dedicated MCP servers.
 
 ### Is ai-fund free?
 MIT-licensed, fully open source. You need Claude Pro or Team ($20/month) for the Claude Code runtime.
@@ -424,7 +424,7 @@ virattt's project does stocks with investor personas (Buffett, etc.). ai-fund is
 Yes. Everything starts in paper/testnet. The Risk Manager reviews all trades. You have to explicitly confirm before anything goes live.
 
 ### Does ai-fund work for stocks?
-If the exchange supports them. Kraken has tokenized stocks. Robinhood and Alpaca do US equities.
+If the exchange supports them. Kraken has tokenized stocks. Alpaca does US equities with full paper trading support.
 
 ### Which exchange should I start with?
 Any exchange you already use. The architecture is venue-agnostic — agents work the same way regardless of connector. If you want zero-config to try things out, Cube's built-in connector needs no API keys. For maximum exchange coverage, use CCXT.

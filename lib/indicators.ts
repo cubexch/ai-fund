@@ -217,3 +217,143 @@ export function stochastic(candles: OHLCV[], kPeriod: number = 14, dPeriod: numb
   const d = sma(k, dPeriod);
   return { k, d };
 }
+
+// ── Hurst Exponent ────────────────────────────────────────
+
+/**
+ * Hurst exponent via rescaled range (R/S) analysis.
+ * H < 0.5 → mean-reverting, H = 0.5 → random walk, H > 0.5 → trending.
+ * @param data - price or return series (minimum ~20 data points)
+ * @param maxLag - maximum lag for R/S calculation (default 20)
+ */
+export function hurst(data: number[], maxLag: number = 20): number {
+  if (data.length < maxLag + 1) return 0.5; // insufficient data → assume random walk
+
+  const logN: number[] = [];
+  const logRS: number[] = [];
+
+  for (let lag = 2; lag <= maxLag; lag++) {
+    const rsValues: number[] = [];
+
+    for (let start = 0; start + lag <= data.length; start += lag) {
+      const segment = data.slice(start, start + lag);
+      if (segment.length < lag) break;
+
+      const segMean = segment.reduce((a, b) => a + b, 0) / segment.length;
+      const deviations = segment.map(v => v - segMean);
+
+      // Cumulative deviations
+      const cumDev: number[] = [];
+      let sum = 0;
+      for (const d of deviations) {
+        sum += d;
+        cumDev.push(sum);
+      }
+
+      const range = Math.max(...cumDev) - Math.min(...cumDev);
+      const stdDev = Math.sqrt(deviations.reduce((s, d) => s + d * d, 0) / deviations.length);
+
+      if (stdDev > 0) {
+        rsValues.push(range / stdDev);
+      }
+    }
+
+    if (rsValues.length > 0) {
+      const avgRS = rsValues.reduce((a, b) => a + b, 0) / rsValues.length;
+      if (avgRS > 0) {
+        logN.push(Math.log(lag));
+        logRS.push(Math.log(avgRS));
+      }
+    }
+  }
+
+  if (logN.length < 2) return 0.5;
+
+  // Linear regression of log(R/S) on log(n)
+  const n = logN.length;
+  const sumX = logN.reduce((a, b) => a + b, 0);
+  const sumY = logRS.reduce((a, b) => a + b, 0);
+  const sumXY = logN.reduce((s, x, i) => s + x * logRS[i], 0);
+  const sumX2 = logN.reduce((s, x) => s + x * x, 0);
+
+  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+  return Math.max(0, Math.min(1, slope)); // clamp to [0, 1]
+}
+
+// ── Momentum ──────────────────────────────────────────────
+
+/**
+ * Multi-period momentum as percentage returns over given windows.
+ * @param prices - price series
+ * @param windows - lookback windows in periods (e.g., [21, 63, 126] for 1m/3m/6m daily)
+ * @returns object mapping each window to its momentum value (most recent)
+ */
+export function momentum(prices: number[], windows: number[]): Record<number, number | null> {
+  const result: Record<number, number | null> = {};
+  for (const w of windows) {
+    if (prices.length > w) {
+      const current = prices[prices.length - 1];
+      const past = prices[prices.length - 1 - w];
+      result[w] = past === 0 ? null : (current - past) / past;
+    } else {
+      result[w] = null;
+    }
+  }
+  return result;
+}
+
+// ── Historical Volatility ─────────────────────────────────
+
+/**
+ * Annualized historical volatility from a return series.
+ * @param returnSeries - array of period returns (decimal)
+ * @param annualizationFactor - sqrt scaling factor (252 for daily equities, 365 for crypto)
+ */
+export function historicalVolatility(returnSeries: number[], annualizationFactor: number = 365): number {
+  if (returnSeries.length < 2) return 0;
+  const avg = returnSeries.reduce((a, b) => a + b, 0) / returnSeries.length;
+  const variance = returnSeries.reduce((s, r) => s + (r - avg) ** 2, 0) / (returnSeries.length - 1);
+  return Math.sqrt(variance) * Math.sqrt(annualizationFactor);
+}
+
+// ── VWAP ──────────────────────────────────────────────────
+
+/**
+ * Volume-weighted average price from intraday candles.
+ * Returns cumulative VWAP at each bar.
+ */
+export function vwap(candles: OHLCV[]): number[] {
+  const result: number[] = [];
+  let cumTypicalVolume = 0;
+  let cumVolume = 0;
+
+  for (const c of candles) {
+    const typical = (c.high + c.low + c.close) / 3;
+    cumTypicalVolume += typical * c.volume;
+    cumVolume += c.volume;
+    result.push(cumVolume === 0 ? typical : cumTypicalVolume / cumVolume);
+  }
+  return result;
+}
+
+// ── Volume Spike ──────────────────────────────────────────
+
+/**
+ * Volume spike ratio: short-term avg volume / long-term avg volume.
+ * Values > 1 indicate above-average volume activity.
+ * @param volumes - volume series
+ * @param shortWindow - short-term lookback (default 5)
+ * @param longWindow - long-term lookback (default 63)
+ */
+export function volumeSpike(volumes: number[], shortWindow: number = 5, longWindow: number = 63): number[] {
+  const result: number[] = [];
+  for (let i = longWindow - 1; i < volumes.length; i++) {
+    const longSlice = volumes.slice(i - longWindow + 1, i + 1);
+    const shortStart = Math.max(0, i - shortWindow + 1);
+    const shortSlice = volumes.slice(shortStart, i + 1);
+    const longAvg = longSlice.reduce((a, b) => a + b, 0) / longSlice.length;
+    const shortAvg = shortSlice.reduce((a, b) => a + b, 0) / shortSlice.length;
+    result.push(longAvg === 0 ? 0 : shortAvg / longAvg);
+  }
+  return result;
+}

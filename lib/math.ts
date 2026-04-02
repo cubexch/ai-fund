@@ -224,3 +224,281 @@ export function profitFactor(pnls: number[]): number {
   const grossLoss = Math.abs(pnls.filter(p => p < 0).reduce((a, b) => a + b, 0));
   return grossLoss === 0 ? Infinity : grossProfit / grossLoss;
 }
+
+// ── Distribution Shape ────────────────────────────────────
+
+/**
+ * Sample skewness (Fisher-Pearson).
+ * Positive → right-skewed (more extreme gains), Negative → left-skewed (more extreme losses).
+ */
+export function skewness(data: number[]): number {
+  const n = data.length;
+  if (n < 3) return 0;
+  const avg = mean(data);
+  const sd = standardDeviation(data);
+  if (sd === 0) return 0;
+  const m3 = data.reduce((s, v) => s + ((v - avg) / sd) ** 3, 0) / n;
+  return (n * m3) / ((n - 1) * (n - 2) / n); // adjusted Fisher-Pearson
+}
+
+/**
+ * Excess kurtosis (Fisher).
+ * > 0 → fat tails (leptokurtic), < 0 → thin tails (platykurtic), 0 → normal.
+ */
+export function kurtosis(data: number[]): number {
+  const n = data.length;
+  if (n < 4) return 0;
+  const avg = mean(data);
+  const sd = standardDeviation(data);
+  if (sd === 0) return 0;
+  const m4 = data.reduce((s, v) => s + ((v - avg) / sd) ** 4, 0) / n;
+  return m4 - 3; // excess kurtosis (subtract 3 for normal baseline)
+}
+
+// ── Volatility ────────────────────────────────────────────
+
+/**
+ * Annualized volatility from a return series.
+ * @param returnSeries - period returns (decimal)
+ * @param periodsPerYear - 365 for crypto daily, 252 for equities daily
+ */
+export function annualizedVolatility(returnSeries: number[], periodsPerYear: number = 365): number {
+  if (returnSeries.length < 2) return 0;
+  return standardDeviation(returnSeries) * Math.sqrt(periodsPerYear);
+}
+
+/**
+ * Volatility percentile: where current vol ranks historically.
+ * @param returnSeries - full return series
+ * @param currentWindow - window for current vol (e.g., 30)
+ * @param lookback - historical lookback for ranking (e.g., 252)
+ * @returns percentile 0-1 (0.9 means current vol is higher than 90% of history)
+ */
+export function volatilityPercentile(returnSeries: number[], currentWindow: number = 30, lookback: number = 252): number {
+  if (returnSeries.length < currentWindow + lookback) return 0.5;
+
+  const currentVol = standardDeviation(returnSeries.slice(-currentWindow));
+  const historicalVols: number[] = [];
+
+  const start = returnSeries.length - lookback - currentWindow;
+  for (let i = Math.max(0, start); i <= returnSeries.length - currentWindow; i++) {
+    historicalVols.push(standardDeviation(returnSeries.slice(i, i + currentWindow)));
+  }
+
+  const below = historicalVols.filter(v => v < currentVol).length;
+  return below / historicalVols.length;
+}
+
+// ── Tail Risk ─────────────────────────────────────────────
+
+/**
+ * Tail ratio: right tail magnitude / left tail magnitude.
+ * > 1 → fatter right tail (favorable), < 1 → fatter left tail (risky).
+ * @param returnSeries - return series
+ * @param percentile - tail cutoff (default 0.05 for 5th/95th)
+ */
+export function tailRatio(returnSeries: number[], percentile: number = 0.05): number {
+  if (returnSeries.length < 20) return 1;
+  const sorted = [...returnSeries].sort((a, b) => a - b);
+  const lowerIdx = Math.floor(sorted.length * percentile);
+  const upperIdx = Math.floor(sorted.length * (1 - percentile));
+  const leftTail = Math.abs(sorted[lowerIdx]);
+  const rightTail = Math.abs(sorted[upperIdx]);
+  return leftTail === 0 ? Infinity : rightTail / leftTail;
+}
+
+// ── Benchmark Comparison ──────────────────────────────────
+
+/**
+ * Market beta: sensitivity of asset returns to benchmark returns.
+ * beta > 1 → more volatile than market, beta < 1 → less volatile.
+ */
+export function beta(assetReturns: number[], benchmarkReturns: number[]): number {
+  const n = Math.min(assetReturns.length, benchmarkReturns.length);
+  if (n < 2) return 1;
+  const a = assetReturns.slice(0, n);
+  const b = benchmarkReturns.slice(0, n);
+  const bMean = mean(b);
+  const covariance = a.reduce((s, v, i) => s + (v - mean(a)) * (b[i] - bMean), 0) / (n - 1);
+  const benchVariance = b.reduce((s, v) => s + (v - bMean) ** 2, 0) / (n - 1);
+  return benchVariance === 0 ? 1 : covariance / benchVariance;
+}
+
+/**
+ * Jensen's alpha: excess return above what beta predicts.
+ * Positive alpha → outperformance, negative → underperformance.
+ */
+export function alpha(
+  assetReturns: number[],
+  benchmarkReturns: number[],
+  riskFreeRate: number = 0.05,
+  periodsPerYear: number = 365
+): number {
+  const n = Math.min(assetReturns.length, benchmarkReturns.length);
+  if (n < 2) return 0;
+  const a = assetReturns.slice(0, n);
+  const b = benchmarkReturns.slice(0, n);
+  const rfPerPeriod = riskFreeRate / periodsPerYear;
+  const assetAvg = mean(a);
+  const benchAvg = mean(b);
+  const b_ = beta(a, b);
+  return (assetAvg - rfPerPeriod) - b_ * (benchAvg - rfPerPeriod);
+}
+
+/**
+ * Information ratio: active return / tracking error.
+ * Higher → more consistent outperformance.
+ */
+export function informationRatio(assetReturns: number[], benchmarkReturns: number[]): number {
+  const n = Math.min(assetReturns.length, benchmarkReturns.length);
+  if (n < 2) return 0;
+  const activeReturns = assetReturns.slice(0, n).map((r, i) => r - benchmarkReturns[i]);
+  const te = standardDeviation(activeReturns);
+  return te === 0 ? 0 : mean(activeReturns) / te;
+}
+
+/**
+ * Upside capture ratio: how much of benchmark's up-moves the asset captures.
+ * > 1 → captures more than the benchmark on up-days.
+ */
+export function upsideCapture(assetReturns: number[], benchmarkReturns: number[]): number {
+  const n = Math.min(assetReturns.length, benchmarkReturns.length);
+  const upDays: { asset: number; bench: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    if (benchmarkReturns[i] > 0) {
+      upDays.push({ asset: assetReturns[i], bench: benchmarkReturns[i] });
+    }
+  }
+  if (upDays.length === 0) return 0;
+  const assetUp = mean(upDays.map(d => d.asset));
+  const benchUp = mean(upDays.map(d => d.bench));
+  return benchUp === 0 ? 0 : assetUp / benchUp;
+}
+
+/**
+ * Downside capture ratio: how much of benchmark's down-moves the asset captures.
+ * < 1 → loses less than the benchmark on down-days (good).
+ */
+export function downsideCapture(assetReturns: number[], benchmarkReturns: number[]): number {
+  const n = Math.min(assetReturns.length, benchmarkReturns.length);
+  const downDays: { asset: number; bench: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    if (benchmarkReturns[i] < 0) {
+      downDays.push({ asset: assetReturns[i], bench: benchmarkReturns[i] });
+    }
+  }
+  if (downDays.length === 0) return 0;
+  const assetDown = mean(downDays.map(d => d.asset));
+  const benchDown = mean(downDays.map(d => d.bench));
+  return benchDown === 0 ? 0 : assetDown / benchDown;
+}
+
+// ── Trend Analysis ────────────────────────────────────────
+
+/**
+ * Simple linear regression slope on data indices.
+ * Positive → uptrend, negative → downtrend. Magnitude = strength.
+ */
+export function linearRegressionSlope(data: number[]): number {
+  const n = data.length;
+  if (n < 2) return 0;
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+  for (let i = 0; i < n; i++) {
+    sumX += i;
+    sumY += data[i];
+    sumXY += i * data[i];
+    sumX2 += i * i;
+  }
+  const denom = n * sumX2 - sumX * sumX;
+  return denom === 0 ? 0 : (n * sumXY - sumX * sumY) / denom;
+}
+
+/**
+ * Coefficient of variation: std / |mean|.
+ * Lower → more stable. Useful for margin/FCF consistency analysis.
+ */
+export function coefficientOfVariation(data: number[]): number {
+  const avg = mean(data);
+  if (avg === 0) return Infinity;
+  return standardDeviation(data) / Math.abs(avg);
+}
+
+// ── Drawdown Analysis ─────────────────────────────────────
+
+/**
+ * Full drawdown series from portfolio values.
+ * Each element is the drawdown from the running peak (0 to -1 scale).
+ */
+export function drawdownSeries(values: number[]): number[] {
+  const result: number[] = [];
+  let peak = values[0];
+  for (const v of values) {
+    if (v > peak) peak = v;
+    result.push(peak === 0 ? 0 : (v - peak) / peak);
+  }
+  return result;
+}
+
+// ── Rolling Returns ───────────────────────────────────────
+
+/**
+ * Multi-window rolling returns from a price series.
+ * @param prices - price series
+ * @param windows - array of lookback periods
+ * @returns object mapping each window to an array of rolling returns
+ */
+export function rollingReturns(prices: number[], windows: number[]): Record<number, number[]> {
+  const result: Record<number, number[]> = {};
+  for (const w of windows) {
+    const series: number[] = [];
+    for (let i = w; i < prices.length; i++) {
+      series.push(prices[i - w] === 0 ? 0 : (prices[i] - prices[i - w]) / prices[i - w]);
+    }
+    result[w] = series;
+  }
+  return result;
+}
+
+// ── Backtest Metrics ──────────────────────────────────────
+
+/**
+ * Buy-and-hold benchmark return for a price series.
+ */
+export function benchmarkReturn(prices: number[]): number {
+  if (prices.length < 2 || prices[0] === 0) return 0;
+  return (prices[prices.length - 1] - prices[0]) / prices[0];
+}
+
+/**
+ * Tracking error: standard deviation of active returns vs benchmark.
+ */
+export function trackingError(assetReturns: number[], benchmarkReturns: number[]): number {
+  const n = Math.min(assetReturns.length, benchmarkReturns.length);
+  if (n < 2) return 0;
+  const activeReturns = assetReturns.slice(0, n).map((r, i) => r - benchmarkReturns[i]);
+  return standardDeviation(activeReturns);
+}
+
+/**
+ * Maximum consecutive losing trades.
+ */
+export function maxConsecutiveLosses(pnls: number[]): number {
+  let max = 0;
+  let current = 0;
+  for (const p of pnls) {
+    if (p < 0) {
+      current++;
+      if (current > max) max = current;
+    } else {
+      current = 0;
+    }
+  }
+  return max;
+}
+
+/**
+ * Expected value per trade: winRate * avgWin - lossRate * avgLoss.
+ */
+export function expectancy(tradeWinRate: number, avgWin: number, avgLoss: number): number {
+  return tradeWinRate * avgWin - (1 - tradeWinRate) * Math.abs(avgLoss);
+}
