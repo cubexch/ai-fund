@@ -673,6 +673,155 @@ You never need to think about the signing differences. Each MCP connector handle
 
 ---
 
+## Why Cube Keys Aren't in a TEE (And What We Can Learn from Coinbase)
+
+### Different Trust Models
+
+The reason comes down to what the key *controls*:
+
+```
+COINBASE (AgentKit / on-chain wallets):
+  Private key = THE MONEY
+  If key leaks → attacker owns the wallet, can drain everything
+  Key IS the custody mechanism (self-custodial)
+  ∴ TEE makes sense — isolate the key in hardware, never extract it
+
+CUBE (centralized exchange):
+  Private key = SESSION AUTHENTICATION
+  If key leaks → attacker can place trades (but not withdraw)
+  Funds are custodied by Cube (MPC vault: user + Cube + Guardians)
+  ∴ Short-lived key makes sense — key dies in days, exchange holds funds
+```
+
+Coinbase needs TEE because losing the key means losing the funds. Cube doesn't because the signing key is more like an OAuth session token — it authenticates you to an exchange that already holds your assets. The exchange can revoke the key, the key expires, and withdrawal requires separate authorization.
+
+### Where the Analogy Breaks Down
+
+But if you move the Cube signing key to a Cloudflare Worker for the Telegram bot, you've changed the threat model:
+
+```
+LOCAL MACHINE (current):
+  - Key in macOS Keychain / Linux libsecret / file (0600)
+  - Physical access required to extract
+  - Key expires in 1-30 days
+  - Blast radius: limited by expiry
+
+CLOUDFLARE WORKER (Telegram bot):
+  - Key in Cloudflare's infrastructure (Worker secret)
+  - Cloud provider has theoretical access
+  - Key still expires in 1-30 days
+  - Blast radius: limited by expiry + Cloudflare's security posture
+```
+
+The key is now in someone else's infrastructure. Short-lived expiry still limits blast radius, but you're trusting Cloudflare's isolation between Workers (V8 isolates, not hardware enclaves).
+
+### What Cube Could Learn from Coinbase
+
+#### 1. Policy Engine at the Signing Layer
+
+This is the biggest takeaway. Coinbase enforces spending limits *at the TEE*, not in the agent's prompts:
+
+```
+COINBASE:
+  Agent says "transfer 100 ETH" →
+  TEE checks policy: "max 1 ETH per tx" →
+  REJECTED before signing, at hardware level
+  
+  The agent literally cannot sign a transaction that violates the policy.
+  Prompt injection cannot bypass this.
+
+CUBE (current):
+  Agent says place_order(100 BTC) →
+  Risk Manager (AI) checks limits →
+  SOFT GATE — enforced by prompt, not infrastructure
+  
+  The MCP server CAN sign any order. Limits are advisory.
+```
+
+A Cube-side policy engine could enforce:
+- Max order size per signing key
+- Max daily volume per signing key
+- Allowed trading pairs per signing key
+- Rate limits per signing key
+
+These would be enforced by the exchange, not by the agent. Even if the agent is compromised, the exchange rejects orders that violate the policy.
+
+#### 2. TEE for Cloud Deployments
+
+For users running AI Fund on a VPS or Cloudflare Worker, Cube could offer TEE-backed signing:
+
+```
+Option A: Current (short-lived key on your machine)
+  Good for: local Claude Code sessions
+  
+Option B: TEE-backed signing (Cube-hosted or self-hosted enclave)
+  Good for: cloud deployments (Telegram bot, always-on VPS)
+  The signing key never exists outside the enclave
+  Even the VPS operator can't extract it
+  
+Option C: Hybrid (short-lived key + exchange-side policy)
+  Good for: Cloudflare Worker deployments
+  Key still expires, AND the exchange enforces limits
+  Defense in depth without TEE infrastructure overhead
+```
+
+#### 3. Attestation
+
+Coinbase's TEE provides attestation — cryptographic proof of *what code* is running. Cube could verify that the agent signing requests is running approved software, not a compromised binary. This matters less for API keys (which are opaque tokens) but matters for Ed25519 signing (where the key holder has real capabilities).
+
+### Why Short-Lived Keys May Actually Be Better
+
+TEEs aren't a silver bullet:
+
+```
+TEE RISKS:
+  - Side-channel attacks (Intel SGX has had multiple CVEs)
+  - Supply chain vulnerabilities (hardware backdoors)
+  - Vendor lock-in (AWS Nitro = AWS only)
+  - Operational complexity (no SSH, no persistent storage)
+  - Larger attack surface (full Linux in enclave)
+
+SHORT-LIVED KEY ADVANTAGES:
+  - Zero infrastructure overhead
+  - No vendor dependency
+  - No side-channel attack surface
+  - Key leaks are time-bounded (dead in days)
+  - Simple to reason about
+  - Works on any platform (laptop, VPS, Worker, phone)
+```
+
+The honest answer: **short-lived keys + exchange-side policy enforcement** gives you 90% of TEE's security benefit with 10% of the complexity. The missing 10% is the guarantee that the key *cannot be extracted from memory* during its lifetime — which TEE provides but short-lived expiry makes less critical.
+
+### Recommended Architecture for AI Fund on Cloudflare
+
+```
+DEFENSE IN DEPTH (no TEE required):
+
+1. Short-lived Cube signing key (expires in 7 days)
+   → Limits blast radius of any compromise
+
+2. Exchange-side policy (PROPOSED — not yet available from Cube):
+   → Max order size per key
+   → Allowed pairs per key
+   → Rate limit per key
+   → No withdrawal capability (already true for device auth)
+
+3. Worker-side hard limits (in YOUR code):
+   → Max order size, daily volume, allowed symbols
+   → Human approval required for every trade
+
+4. Cloudflare Worker secrets (encrypted at rest):
+   → Key encrypted, only decrypted at runtime in V8 isolate
+
+5. Telegram allowlist + HMAC-signed approvals:
+   → Only you can approve trades
+   → Approvals are one-time-use, time-bounded
+```
+
+This stack doesn't need a TEE. It achieves comparable security through layered, time-bounded controls. The key insight from Coinbase isn't "use TEE" — it's "enforce policy at the infrastructure layer, not in prompts."
+
+---
+
 ## Complete Security Chain Summary
 
 ```
