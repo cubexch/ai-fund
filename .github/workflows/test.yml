@@ -24,3 +24,6 @@ jobs:
 
       - name: Run tests
         run: npm test --workspace=connectors/cube/mcp-server
+
+      - name: Run skill evals
+        run: npm run test:evals
