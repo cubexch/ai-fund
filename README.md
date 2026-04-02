@@ -451,6 +451,14 @@ Create a folder in `skills/` with a `SKILL.md` file. Use `skills/_template/SKILL
 
 ---
 
+## Development
+
+**CI/CD**: GitHub Actions runs typecheck + vitest on every push and PR (`.github/workflows/test.yml`). PRs that fail CI will not be merged.
+
+**Testing**: `cd connectors/cube/mcp-server && npm test` — 12 vitest suites covering auth, signing, indicators, math, format, REST orders, WebSocket, credential store, device auth, defi helpers, asset registry, and integration.
+
+**Auth**: Agents authenticate via Device Authorization (RFC 8628) — no API keys needed. See [`docs/agent-auth-brief.md`](docs/agent-auth-brief.md).
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). New agents, exchange connectors, bug fixes all welcome.
