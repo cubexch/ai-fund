@@ -1,7 +1,7 @@
 {
   "name": "ai-fund",
   "version": "0.1.0",
-  "description": "22 AI hedge fund agents for Claude Code. Hire your trading desk. Trade on any exchange — Cube, OKX, Kraken, Binance, Coinbase, and 100+ more.",
+  "description": "42 AI trading agents for Claude Code. Open-source AI hedge fund. Trade on any exchange via plugins.",
   "type": "module",
   "bin": {
     "ai-fund": "./scripts/install.js"

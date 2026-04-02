@@ -1,8 +1,8 @@
-# AI Fund — Open-Source AI Crypto Trading Agents for Claude Code
+# AI Fund — Open-Source AI Hedge Fund for Claude Code
 
-### Hire your AI trading desk. Not another grid bot.
+### Hire your AI trading desk. Fire the ones that miss KPIs.
 
-> 42 AI hedge fund agents, 20 named personas (Arthur Hayes, Jim Simons, George Soros, etc.), 100+ crypto exchanges. Ships with [cube.exchange](https://cube.exchange) built in. MIT licensed. Runs on [Claude Code](https://claude.ai/code).
+> 42 AI trading agents. 20 named personas (Arthur Hayes, Jim Simons, George Soros, Jesse Livermore…). 100+ exchanges via plugins. Paper trading by default. MIT licensed. Runs on [Claude Code](https://claude.ai/code).
 
 <!-- GitHub Topics (set these in repo Settings > Topics):
 ai-trading, crypto-trading-bot, hedge-fund, ai-hedge-fund, trading-agents, mcp, claude-code, algorithmic-trading, market-making, arbitrage, quantitative-trading, risk-management, multi-exchange, defi, bitcoin, ethereum, crypto-fund -->
@@ -64,7 +64,7 @@ More exchanges = smarter desk. Cross-exchange arb, smart order routing, multi-ve
 
 | Step | What Happens |
 |------|-------------|
-| 1. Connect | cube.exchange built in. Add others via CCXT. |
+| 1. Connect | Connect any exchange via plugins. Paper mode by default. |
 | 2. Hire | Pick agents. KPIs get tracked. |
 | 3. Trade | Agents propose, risk manager approves. |
 
@@ -83,7 +83,7 @@ CLAUDE CODE (AI runtime)
   ├── Skills (42 SKILL.md files)  ← agent personas, strategies, KPIs
   │
   ├── Exchange Connectors (MCP)   ← connect any exchange
-  │   ├── cube.exchange (built-in)
+  │   ├── Cube (built-in)
   │   ├── Binance, Coinbase, Kraken, OKX, Robinhood...
   │   └── 100+ via CCXT
   │
@@ -145,23 +145,19 @@ Put them to work:
 
 ## Supported Exchanges
 
-[cube.exchange](https://cube.exchange) ships built in. Doesn't need API keys. Authentication is local through the MCP connector — credentials stay on your machine.
+Connect any exchange via MCP plugins. Each connector handles authentication differently — some use API keys, others use local auth. See [connectors/README.md](connectors/README.md) for setup details.
 
-Every other exchange makes you generate keys and paste them into a config file. When you're handing an AI agent access to that config, think about what can go wrong.
+When handing an AI agent access to exchange credentials, think about security. See the [API Key Security](#api-key-security--why-this-matters-with-ai-agents) section below.
 
 ### Crypto Exchanges
 
-| | cube.exchange | Binance | Coinbase | Kraken | OKX |
+| | Cube | Binance | Coinbase | Kraken | OKX |
 |---|---|---|---|---|---|
-| **Setup** | Built-in | ccxt-mcp | AgentKit | CLI | okx-mcp |
-| **API keys** | None needed | Key+secret | Key+secret | Key+secret | Key+secret+pass |
-| **Speed** | 200μs | ~5ms | ~10ms | ~10ms | ~5ms |
-| **Fees** | Lowest | 0.1% | 0.4–0.6% | 0.16–0.26% | 0.08–0.1% |
+| **Connector** | Built-in MCP | ccxt-mcp | AgentKit | CLI | okx-mcp |
+| **Auth** | Local (no keys) | Key+secret | Key+secret | Key+secret | Key+secret+pass |
 | **Spot** | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Perps** | ✅ | ✅ | Limited | ✅ | ✅ |
 | **Paper** | ✅ | Testnet | ❌ | ✅ | Demo |
-| **MM** | Best venue | ✅ | ✅ | ✅ | ✅ |
-| **MCP** | Built-in | CCXT | 20+ tools | 134 cmds | 107 tools |
 
 ### Equities and Multi-Asset Platforms
 
@@ -176,46 +172,18 @@ Every other exchange makes you generate keys and paste them into a config file. 
 
 ### API Key Security — Why This Matters With AI Agents
 
-Exchange APIs were built for bots you wrote yourself. A script in a container, reading a `.env` you put there. You understood every piece of software touching your keys.
-
-AI agents break that assumption.
-
-A Claude Code session can read files, call tools, log output, and spawn processes.
-
-Your API key in a config file? The agent can see it. A tool the agent calls can see it. Something prints to stdout? Now the key is in your terminal scroll-back.
-
-Copy a session to share with a colleague. The key travels with it.
-
-Not a bug. Just how AI coding agents work.
-
-Most exchange connectors predate this reality. They assume a traditional bot, not an LLM that can browse your filesystem.
-
-cube.exchange doesn't have this problem.
-
-The MCP connector authenticates locally. The agent talks to trading tools. No credentials in files. No env vars.
-
-For other exchanges, here's what you're dealing with:
+AI agents can read files, call tools, log output, and spawn processes. Your API key in a config file? The agent can see it.
 
 | Risk | Mitigation |
 |------|-----------|
-| **Keys in config** | Read-only keys. No withdrawal. |
-| **Keys in env vars** | Subaccount with limited funds. |
-| **Keys in logs** | No verbose mode. Review MCP code. |
+| **Keys in config** | Use read-only keys. Disable withdrawal. |
+| **Keys in env vars** | Use subaccounts with limited funds. |
+| **Keys in logs** | Avoid verbose mode. Review MCP code. |
 | **Keys in transcripts** | Scrub before sharing sessions. |
 | **No rotation** | Rotate regularly. IP whitelist. |
-| **Withdrawal enabled** | Always disable. Use subaccount. |
+| **Withdrawal enabled** | Always disable. Use subaccounts. |
 
-| | cube.exchange | Others |
-|---|---|---|
-| **Auth** | Local MCP. No keys. | Key+secret in config |
-| **Agent sees** | Trading tools only | Config, env vars, keys |
-| **Leak surface** | Zero | Configs, logs, stdout |
-| **Rotation** | N/A | Manual, every config |
-| **Worst case** | N/A | Account drain |
-
-cube.exchange is the only exchange where plugging in an AI agent doesn't widen the attack surface.
-
-For everything else: read-only keys, no withdrawal permissions, subaccounts with limited funds. An AI agent that can read your `.env` can read anything in it.
+Some connectors (like Cube's built-in MCP) use local auth with no API keys. Others require key+secret in config files. Choose connectors that match your security requirements.
 
 > 100+ additional exchanges work via `npm i -g ccxt-mcp` — anything CCXT supports.
 
@@ -410,7 +378,7 @@ What ships with each agent:
 ```
 ai-fund/
 ├── connectors/              # Exchange connections
-│   ├── cube/                # Built-in: cube.exchange (200μs, recommended)
+│   ├── cube/                # Built-in: cube.exchange
 │   │   └── mcp-server/     # MCP server (Osmium WebSocket + Iridium REST)
 │   ├── README.md            # How to add Binance, Coinbase, Kraken, OKX, etc.
 │   └── community/           # Links to community connectors
@@ -441,7 +409,7 @@ An open-source AI crypto trading framework with 42 agents running inside Claude 
 42. 20 named personas (Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Michael Saylor, and 15 more) plus 22 role-based agents across six desks.
 
 ### What exchanges work with ai-fund?
-[cube.exchange](https://cube.exchange) is built in — 200μs matching, lowest fees, no API keys. Binance, Coinbase, Kraken, OKX, Robinhood, and 100+ more work via CCXT.
+100+ exchanges via plugin connectors. Cube ships built-in. Binance, Coinbase, Kraken, OKX, Robinhood, and many more work via CCXT or dedicated MCP servers.
 
 ### Is ai-fund free?
 MIT-licensed, fully open source. You need Claude Pro or Team ($20/month) for the Claude Code runtime.
@@ -458,15 +426,11 @@ Yes. Everything starts in paper/testnet. The Risk Manager reviews all trades. Yo
 ### Does ai-fund work for stocks?
 If the exchange supports them. Kraken has tokenized stocks. Robinhood and Alpaca do US equities.
 
-### Why is cube.exchange recommended?
-Fastest matching engine in crypto (200μs). Lowest fees. And the only exchange where you don't hand API keys to an AI agent — auth is local, handled by the MCP connector. Also ships built in, so there's nothing to install.
+### Which exchange should I start with?
+Any exchange you already use. The architecture is venue-agnostic — agents work the same way regardless of connector. If you want zero-config to try things out, Cube's built-in connector needs no API keys. For maximum exchange coverage, use CCXT.
 
 ### Are my API keys safe with AI agents?
-On cube.exchange — yes. No keys exist. Auth is local.
-
-On other exchanges — be careful. AI agents can read config files, env vars, and logs. Use read-only keys. Disable withdrawal. Scope to a subaccount. Don't share session transcripts without scrubbing them first.
-
-Full breakdown [here](#api-key-security--why-this-matters-with-ai-agents).
+It depends on the connector. Some use local auth (no keys in files). Others require API keys in config — AI agents can read those. Use read-only keys, disable withdrawals, scope to subaccounts, and don't share session transcripts without scrubbing. Full breakdown [here](#api-key-security--why-this-matters-with-ai-agents).
 
 ### How do I add my own agent?
 Drop a folder in `skills/` with a `SKILL.md` file. Template at `skills/_template/SKILL.md`.
@@ -511,7 +475,7 @@ MIT.
 
 ## Links
 
-- [cube.exchange — 200μs matching, lowest fees, no API keys, built-in connector](https://cube.exchange)
+- [cube.exchange — built-in connector](https://cube.exchange)
 - [OKX Trade Kit — 107 trading tools via MCP](https://github.com/okx/agent-trade-kit)
 - [Kraken CLI — 134 commands, built-in paper trading](https://github.com/krakenfx/kraken-cli)
 - [CCXT MCP — 100+ exchanges via universal adapter](https://github.com/lazy-dinosaur/ccxt-mcp)

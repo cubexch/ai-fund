@@ -20,6 +20,9 @@ dist/
 *.swp
 *.swo
 
+# Demo output artifacts (per-user)
+out/
+
 # Desk state (per-user, per-session)
 .desk/
 

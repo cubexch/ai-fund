@@ -15,6 +15,7 @@
 import { existsSync, mkdirSync, cpSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { runDemo } from './demo.js';
 
 const SKILLS_SRC = resolve(import.meta.dirname, '..', 'skills');
 const CLAUDE_SKILLS_DIR = join(homedir(), '.claude', 'skills');
@@ -114,6 +115,9 @@ switch (command) {
     }
     break;
   }
+  case 'demo':
+    runDemo(args.slice(1));
+    break;
   default:
     console.log(`
 AI Fund — 22 AI trading agents for Claude Code
@@ -123,9 +127,12 @@ Usage:
   npx ai-fund install              Install all agents
   npx ai-fund install <role>       Install a specific agent
   npx ai-fund list                 List available agents
+  npx ai-fund demo                 Run a simulated trading desk demo
+  npx ai-fund demo --seed 42       Run demo with reproducible results
 
 Example:
   npx ai-fund install risk-manager
   npx ai-fund install market-maker
+  npx ai-fund demo
     `);
 }
