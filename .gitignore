@@ -23,6 +23,11 @@ dist/
 # Desk state (per-user, per-session)
 .desk/
 
+# Market data (DuckDB + Parquet)
+*.duckdb
+*.duckdb.wal
+*.parquet
+
 # OS
 .DS_Store
 Thumbs.db

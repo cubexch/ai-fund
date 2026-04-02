@@ -19,6 +19,9 @@
     "dev": "npm run dev --workspace=connectors/cube/mcp-server",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "duckdb": "^1.1.0"
+  },
   "workspaces": [
     "connectors/cube/mcp-server"
   ],
