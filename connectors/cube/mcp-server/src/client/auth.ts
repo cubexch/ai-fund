@@ -103,48 +103,6 @@ export async function generateEd25519Signature(privateKey: CryptoKey, timestamp:
   return Buffer.from(sig).toString('base64');
 }
 
-// ── TEE Signing Service ─────────────────────────────────
-
-/**
- * Request a signature from a TEE-backed signing service.
- *
- * The TEE holds the Ed25519 private key and never exports it.
- * It validates the request against a policy engine (max order size,
- * allowed pairs, rate limits) before signing.
- *
- * Returns a base64-encoded Ed25519 signature.
- */
-export async function requestTeeSignature(
-  signingUrl: string,
-  accessToken: string,
-  verificationKeyId: string,
-  payload: { timestamp: number; action?: string; params?: Record<string, unknown> },
-): Promise<string> {
-  const response = await fetch(`${signingUrl}/agent/sign`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {}),
-    },
-    body: JSON.stringify({
-      verificationKeyId,
-      ...payload,
-    }),
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    // Surface policy violations clearly
-    if (response.status === 403) {
-      throw new Error(`TEE policy violation: ${body}`);
-    }
-    throw new Error(`TEE signing failed: ${response.status} ${body}`);
-  }
-
-  const data = (await response.json()) as { signature: string };
-  return data.signature;
-}
-
 // ── Auth Resolution ──────────────────────────────────────
 
 /**
@@ -159,7 +117,6 @@ export async function requestTeeSignature(
  */
 
 export type AuthMethod =
-  | { type: 'tee'; verificationKeyId: string; signingUrl: string; accessToken: string }
   | { type: 'signing'; verificationKeyId: string; privateKey: CryptoKey; publicKeyHex: string }
   | { type: 'hmac'; apiKey: string; secretKey: string }
   | null;
@@ -173,19 +130,6 @@ let _resolvedAuth: AuthMethod | undefined;
  */
 export async function resolveAuth(): Promise<AuthMethod> {
   if (_resolvedAuth !== undefined) return _resolvedAuth;
-
-  // 0. CUBE_TEE_SIGNING_URL — TEE-backed signing service (most secure)
-  //    Private key never leaves the TEE. Agent only requests signatures.
-  const teeUrl = process.env.CUBE_TEE_SIGNING_URL;
-  if (teeUrl) {
-    const keyId = process.env.CUBE_VERIFICATION_KEY_ID;
-    if (!keyId) {
-      throw new Error('CUBE_TEE_SIGNING_URL requires CUBE_VERIFICATION_KEY_ID.');
-    }
-    const accessToken = process.env.CUBE_TEE_ACCESS_TOKEN || '';
-    _resolvedAuth = { type: 'tee', verificationKeyId: keyId, signingUrl: teeUrl, accessToken };
-    return _resolvedAuth;
-  }
 
   // 1. CUBE_SIGNING_KEY env var (CI/CD, Docker)
   const signingKeyEnv = process.env.CUBE_SIGNING_KEY;
@@ -264,22 +208,7 @@ export async function buildOsmiumAuthHeaders(): Promise<Record<string, string>> 
     };
   }
 
-  if (auth.type === 'tee') {
-    // Request signature from TEE signing service — private key never local
-    const signature = await requestTeeSignature(
-      auth.signingUrl,
-      auth.accessToken,
-      auth.verificationKeyId,
-      { timestamp },
-    );
-    return {
-      'x-verification-key-id': auth.verificationKeyId,
-      'x-api-signature': signature,
-      'x-api-timestamp': String(timestamp),
-    };
-  }
-
-  // Ed25519 signing auth for Osmium REST (local key)
+  // Ed25519 signing auth for Osmium REST
   const signature = await generateEd25519Signature(auth.privateKey, timestamp);
   return {
     'x-verification-key-id': auth.verificationKeyId,
@@ -385,44 +314,6 @@ export async function fetchAccessToken(): Promise<AccessToken> {
     return token;
   }
 
-  // TEE auth — request signature from TEE service for HMAC bridge
-  if (auth.type === 'tee') {
-    const env = getEnvironment(process.env.CUBE_ENV);
-    const timestamp = Math.floor(Date.now() / 1000);
-
-    // Ask TEE to sign the HMAC bridge request
-    const sig = await requestTeeSignature(
-      auth.signingUrl,
-      auth.accessToken,
-      auth.verificationKeyId,
-      { timestamp, action: 'hmac_bridge' },
-    );
-
-    const response = await fetch(`${env.restUrl}/users/hmac`, {
-      method: 'POST',
-      headers: {
-        'x-verification-key-id': auth.verificationKeyId,
-        'x-verification-key-signature': sig,
-        'x-verification-key-timestamp': String(timestamp),
-      },
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Failed to fetch access token via TEE: ${response.status} ${body}`);
-    }
-
-    const data = (await response.json()) as Record<string, unknown>;
-    const result = (data.result ?? data) as Record<string, unknown>;
-    const token: AccessToken = {
-      apiKey: String(result.apiKey ?? result.api_key),
-      signature: String(result.signature),
-      timestamp: Number(result.timestamp),
-    };
-    _accessTokenCache = { token, fetchedAt: Date.now() };
-    return token;
-  }
-
   // Verification key auth — call Iridium /users/hmac
   const env = getEnvironment(process.env.CUBE_ENV);
   const timestamp = Math.floor(Date.now() / 1000);
@@ -473,7 +364,7 @@ export async function hasAuth(): Promise<boolean> {
 /**
  * Check what auth method is available.
  */
-export async function getAuthType(): Promise<'tee' | 'hmac' | 'signing' | null> {
+export async function getAuthType(): Promise<'hmac' | 'signing' | null> {
   const auth = await resolveAuth();
   return auth?.type ?? null;
 }
