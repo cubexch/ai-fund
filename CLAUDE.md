@@ -39,6 +39,16 @@ ai-fund/
 - **Test**: `cd connectors/cube/mcp-server && npm test` — vitest (auth, signing, indicators, format, REST orders, WebSocket, credential store, device auth, integration)
 - **Install agents**: `npx ai-fund install` (all), `npx ai-fund install <role>` (one), `npx ai-fund list` (show available)
 
+### CI/CD
+
+GitHub Actions runs on every push to `main` and on every PR (`.github/workflows/test.yml`):
+
+1. `npm ci` — install dependencies
+2. `npm run typecheck` — TypeScript strict check
+3. `npm test --workspace=connectors/cube/mcp-server` — vitest suite
+
+PRs that fail CI will not be merged. Fix locally before pushing.
+
 ### Validation After Changes
 
 After every code change, run the following before considering the work done:
@@ -70,6 +80,18 @@ After every code change, run the following before considering the work done:
 - **`lib/indicators.ts`** — `sma`, `ema`, `rsi`, `macd`, `bollingerBands`, `atr`, `obv`, `stochastic`, `adx` + `OHLCV` interface
 - **`lib/math.ts`** — `kelly`, `fixedFractionalSize`, `valueAtRisk`, `maxDrawdown`, `sharpeRatio`, `sortinoRatio`, `calmarRatio`, `correlation`, `correlationMatrix`, `mean`, `standardDeviation`, `zScore`, `returns`, `winRate`, `profitFactor`
 - **`lib/format.ts`** — `usd`, `pct`, `qty`, `price`, `compact`, `timestamp`, `duration`, `signedValue`, `grade`, `assetIcon`, `labelAsset` + `ASSET_ICONS` map
+
+## Testing
+
+Tests live in `connectors/cube/mcp-server/tests/` using vitest. Run with `cd connectors/cube/mcp-server && npm test`.
+
+### Writing Tests
+
+- **Shared libs** (`lib/`): Import from `../../../../lib/<module>.js`. Use `describe`/`it`/`expect` from vitest. Test edge cases (empty arrays, zero values, insufficient data). See `indicators.test.ts` and `math.test.ts` for patterns.
+- **Connector tools** (`src/tools/`): Mock the exchange client (iridium/osmium). Test tool handler input validation, response shaping, and error paths. See `rest-order.test.ts`.
+- **Auth/signing** (`src/client/`): Test key generation, signature verification, credential persistence. See `signing.test.ts`, `credential-store.test.ts`.
+- **File naming**: `<module>.test.ts` matching the source file name
+- **Integration tests**: Suffix with `.integration.test.ts` — these hit real APIs and may be skipped in CI
 
 ## Multi-Exchange Design
 
@@ -184,7 +206,7 @@ Defined in `.claude/commands/` as markdown files:
 - **Paper mode by default.** All exchanges start in paper/staging/testnet. Only switch to production after explicit user confirmation.
 - **Write operations require confirmation.** Before placing, canceling, or modifying orders, summarize the action and get user consent.
 - **Risk Manager as gatekeeper.** Trading agents should consult the Risk Manager before executing trades. Firing risk-manager while trading agents are active triggers a warning.
-- **API key security.** Never log, display, or store API keys in plaintext outside the credential store. Use read-only keys on subaccounts where possible.
+- **API key security.** Never log, display, or store API keys in plaintext outside the credential store. Use read-only keys on subaccounts where possible. See `docs/agent-auth-brief.md` for the device authorization flow (RFC 8628) — agents register Ed25519 signing keys without ever handling API keys directly.
 
 ## Dependency Policy
 
