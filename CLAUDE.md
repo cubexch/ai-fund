@@ -2,11 +2,48 @@
 
 An AI trading desk with 42 hedge fund agent personas (including 20 named personas like Arthur Hayes, Jim Simons, George Soros, and Jesse Livermore) for Claude Code. Trade on any exchange — Cube, OKX, Kraken, Binance, Coinbase, Robinhood, and 100+ more via CCXT.
 
+## Project Structure
+
+```
+ai-fund/
+├── skills/              # 42 agent personas (SKILL.md each) + _template/
+├── connectors/cube/     # Built-in Cube Exchange MCP server
+│   └── mcp-server/
+│       ├── src/cli/         # device-login, login, logout, status
+│       ├── src/client/      # iridium (REST), osmium (WS), auth, signing, credential-store
+│       ├── src/tools/       # market-data, orders, account, defi, risk
+│       ├── src/resources/   # markets, portfolio
+│       └── tests/           # vitest test suites
+├── lib/                 # Shared TS: indicators, math, format
+├── bin/desk-state       # CLI for .desk/ state management
+├── scripts/install.js   # npx ai-fund install|list
+├── .claude/commands/    # Slash commands (hire, fire, desk, review, setup, backtest)
+├── docs/                # Architecture diagram, auth brief
+├── examples/            # Preset desk configurations (JSON)
+└── .desk/               # Runtime state (gitignored, per-user)
+```
+
 ## Architecture
 
 - **Skills** (`skills/`): Each skill is a complete hedge fund persona with personality, philosophy, KPIs, and self-evaluation. Skills are exchange-agnostic — they work with any connected exchange.
 - **Connectors** (`connectors/`): Exchange MCP servers that bridge Claude to exchange APIs. Cube ships built-in. Others install via npm.
 - **Shared Libs** (`lib/`): Technical indicators, financial math, formatting utilities.
+
+## Development Workflow
+
+- **Requirements**: Node >= 20, ES modules (`"type": "module"`)
+- **TypeScript**: Strict mode, ES2022 target, Node16 module resolution
+- **Build**: `npm run build` — compiles Cube MCP server workspace
+- **Dev**: `npm run dev` — runs Cube MCP server with watch
+- **Typecheck**: `npm run typecheck` — runs `tsc --noEmit` across project
+- **Test**: `cd connectors/cube/mcp-server && npm test` — vitest (auth, signing, indicators, format, REST orders, WebSocket, credential store, device auth, integration)
+- **Install agents**: `npx ai-fund install` (all), `npx ai-fund install <role>` (one), `npx ai-fund list` (show available)
+
+## Shared Libraries
+
+- **`lib/indicators.ts`** — `sma`, `ema`, `rsi`, `macd`, `bollingerBands`, `atr`, `obv`, `stochastic`, `adx` + `OHLCV` interface
+- **`lib/math.ts`** — `kelly`, `fixedFractionalSize`, `valueAtRisk`, `maxDrawdown`, `sharpeRatio`, `sortinoRatio`, `calmarRatio`, `correlation`, `correlationMatrix`, `mean`, `standardDeviation`, `zScore`, `returns`, `winRate`, `profitFactor`
+- **`lib/format.ts`** — `usd`, `pct`, `qty`, `price`, `compact`, `timestamp`, `duration`, `signedValue`, `grade`, `assetIcon`, `labelAsset` + `ASSET_ICONS` map
 
 ## Multi-Exchange Design
 
@@ -33,11 +70,38 @@ When only one exchange is connected, tools are used directly. When multiple are 
 - **Risk Manager as Gatekeeper**: All trading agents should consult the Risk Manager before executing trades.
 - **Paper Mode**: Default to paper/staging mode on all exchanges. Only switch to production after explicit confirmation.
 
+## Agent Categories (42 Total)
+
+- **Named Personas (20)**: ansem, arthur-hayes, cathie-wood-crypto, cobie, cz, ed-thorp, gcr, george-soros, gwyneth-chen, hsaka, jesse-livermore, jim-simons, michael-saylor, paul-tudor-jones, plan-b, raoul-pal, ray-dalio, stanley-druckenmiller, tetranode, willy-woo
+- **Trading (6)**: scalper, momentum-trader, mean-reversion-trader, swing-trader, arbitrageur, grid-trader
+- **Execution (3)**: execution-trader, market-maker, dca-strategist
+- **Research (5)**: quant-analyst, orderflow-analyst, volatility-analyst, sentiment-analyst, onchain-analyst
+- **Risk & Portfolio (3)**: risk-manager, portfolio-manager, performance-analyst
+- **Specialists (4)**: funding-rate-farmer, liquidation-hunter, pairs-trader, breakout-specialist
+- **Infrastructure (1)**: backtester
+
+## Skill File Structure
+
+Each `skills/<role>/SKILL.md` has YAML frontmatter + markdown sections:
+
+```yaml
+---
+name: agent-name
+description: >
+  One-line description with trigger phrases for Claude Code skill matching.
+commands:
+  - command-1        # brief description
+  - self-review      # evaluate own performance
+---
+```
+
+**Required sections**: Personality, Philosophy, Capabilities, How You Use Exchange APIs, Strategy / Framework, Safety Rules, When Other Agents Consult You, Performance Metrics (How I'm Measured, Self-Evaluation, When to Fire Me). See `skills/_template/SKILL.md` for the full template.
+
 ## Supported Exchanges
 
 | Exchange | Connector | Notes |
 |----------|-----------|-------|
-| Cube | Built-in (`connectors/cube/`) | Recommended — 200μs matching, lowest fees |
+| Cube | Built-in (`connectors/cube/`) | Recommended — 200us matching, lowest fees |
 | OKX | `@okx_ai/okx-trade-mcp` | 107 tools, spot/futures/options |
 | Kraken | `kraken-cli` | Rust binary, built-in paper trading |
 | Binance | `ccxt-mcp` | Via CCXT universal adapter |
@@ -55,10 +119,17 @@ Agent state, briefing books, and trade history persist between sessions in the `
 ├── orders.json         # Trade log (proposed, submitted, filled, rejected)
 ├── risk.json           # Risk parameters set by Risk Manager
 └── briefings/          # Compacted conversation history per agent
-    ├── cz.md           # CZ's evaluations, scores, recommendations
-    ├── jesse-livermore.md  # Livermore's pivot setups, tape reads, trade plans
+    ├── cz.md
+    ├── jesse-livermore.md
     └── ...
 ```
+
+### State CLI (`bin/desk-state`)
+
+- `desk-state hire <slug>` — creates state entry + briefing file, returns JSON
+- `desk-state fire <slug> [reason]` — marks agent inactive, warns if risk-manager fired with active traders
+- `desk-state update <slug> <key> <value>` — updates agent metadata
+- `desk-state show` — dumps full desk state as JSON
 
 ### Briefing Books (`.desk/briefings/<agent>.md`)
 
@@ -73,12 +144,21 @@ On `/hire`, the agent reads its briefing book and acknowledges prior context. On
 
 ## Commands
 
+Defined in `.claude/commands/` as markdown files:
+
 - `/setup` — Configure exchanges and API keys
 - `/desk` — Show active agents with KPI dashboard (loads `.desk/state.json`)
 - `/hire <role>` — Activate a trading agent (reads/writes `.desk/`)
 - `/fire <role>` — Deactivate an underperforming agent (updates `.desk/`)
 - `/review` — Run desk-wide performance evaluation
 - `/backtest` — Test a strategy on historical data
+
+## Safety Rules
+
+- **Paper mode by default.** All exchanges start in paper/staging/testnet. Only switch to production after explicit user confirmation.
+- **Write operations require confirmation.** Before placing, canceling, or modifying orders, summarize the action and get user consent.
+- **Risk Manager as gatekeeper.** Trading agents should consult the Risk Manager before executing trades. Firing risk-manager while trading agents are active triggers a warning.
+- **API key security.** Never log, display, or store API keys in plaintext outside the credential store. Use read-only keys on subaccounts where possible.
 
 ## When Writing Skills
 
@@ -90,3 +170,5 @@ Each SKILL.md must:
 5. Include **Multi-Exchange Awareness** — How they work across venues (where applicable)
 6. Include **Performance Metrics** — Primary KPIs, red flags, fire triggers
 7. Include **Self-Evaluation** — How they report on their own performance
+
+Use `skills/_template/SKILL.md` as the starting point for new agents.
