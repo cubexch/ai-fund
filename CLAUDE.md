@@ -84,6 +84,21 @@ On `/hire`, the agent reads its briefing book and acknowledges prior context. On
 
 **All new dependencies and dependency updates require explicit developer approval before being added.** This applies to both `dependencies` and `devDependencies` in any `package.json` across the monorepo. Do not run `npm install <package>` or add entries to `package.json` without the developer confirming the specific package name and version. This policy exists to minimize supply chain attack surface.
 
+## Security Validation
+
+**After every code change, explicitly audit for the following before committing:**
+
+1. **SQL Injection** — Never interpolate raw strings into SQL. Use `sqlEscape()` for values, validate table/column names against allowlists, use parameterized queries (prepared statements with `?` placeholders) for row data.
+2. **SSRF / URL Injection** — Validate and `encodeURIComponent()` all URL path segments and query parameters. Hardcode API base URLs. Never construct URLs from untrusted input.
+3. **Path Traversal** — Validate path components against safe patterns. Use `resolve()` + `startsWith()` to ensure paths stay within expected directories.
+4. **Command Injection** — Never pass user input to shell commands. Validate CLI arguments against allowlists.
+5. **AI-Specific: Prompt Injection** — Validate all external data (API responses, user input) that may flow through to LLM agent context. Strict patterns on string fields (symbols, names) prevent injected instructions.
+6. **AI-Specific: Data Poisoning** — Validate numeric ranges and types on all data from external APIs before inserting into the data store. Filter and warn on anomalous values.
+7. **AI-Specific: Agent Privilege Escalation** — Query interfaces exposed to agents must be read-only by default. Block DuckDB filesystem operations (`COPY`, `ATTACH`, `LOAD`, `INSTALL`) in agent-facing query tools.
+8. **XSS** — If any data is rendered in HTML/web contexts, sanitize output. (Not currently applicable but enforce if UI is added.)
+
+This audit is **mandatory** — not optional. Treat it as a failing test if any of the above are violated.
+
 ## When Writing Skills
 
 Each SKILL.md must:
