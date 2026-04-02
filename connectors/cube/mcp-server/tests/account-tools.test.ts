@@ -38,7 +38,7 @@ describe('registerAccountTools', () => {
     expect(server.tool).toHaveBeenCalledTimes(5);
     const names = server.tool.mock.calls.map((c: any[]) => c[0]);
     expect(names).toContain('get_positions');
-    expect(names).toContain('get_balances');
+    expect(names).toContain('get_account');
     expect(names).toContain('get_order_history');
     expect(names).toContain('get_fills');
     expect(names).toContain('get_subaccounts');
@@ -75,7 +75,7 @@ describe('registerAccountTools', () => {
     });
   });
 
-  describe('get_balances', () => {
+  describe('get_account', () => {
     it('computes USD values and sorts by value descending', async () => {
       const mockRegistry = {
         getById: (id: number) =>
@@ -95,7 +95,7 @@ describe('registerAccountTools', () => {
       ]);
       iridium.getAssetRegistry.mockResolvedValue(mockRegistry);
 
-      const handler = server.getHandler('get_balances')!;
+      const handler = server.getHandler('get_account')!;
       const result = await handler({});
       const data = JSON.parse(result.content[0].text);
 

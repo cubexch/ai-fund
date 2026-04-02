@@ -162,7 +162,7 @@ commands:
 | Kraken | `kraken-cli` | Rust binary, built-in paper trading |
 | Binance | `ccxt-mcp` | Via CCXT universal adapter |
 | Coinbase | `@coinbase/agentkit` | Wallet + trading |
-| Robinhood | `ccxt-mcp` or Alpaca MCP | Stocks + crypto |
+| Robinhood | Built-in (`connectors/robinhood/`) | Commission-free stocks, ETFs, crypto |
 | 100+ more | `ccxt-mcp` | Any CCXT-supported exchange |
 
 ## Desk State (`.desk/`)

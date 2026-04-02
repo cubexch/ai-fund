@@ -37,21 +37,21 @@ describe('registerMarketDataTools', () => {
   it('registers all 7 market data tools', () => {
     expect(server.tool).toHaveBeenCalledTimes(7);
     const names = server.tool.mock.calls.map((c: any[]) => c[0]);
-    expect(names).toContain('get_markets');
+    expect(names).toContain('get_assets');
     expect(names).toContain('get_tickers');
     expect(names).toContain('get_order_book');
-    expect(names).toContain('get_recent_trades');
-    expect(names).toContain('get_price_history');
-    expect(names).toContain('get_estimated_fees');
+    expect(names).toContain('get_trades');
+    expect(names).toContain('get_bars');
+    expect(names).toContain('get_fees');
     expect(names).toContain('get_technical_analysis');
   });
 
-  describe('get_markets', () => {
+  describe('get_assets', () => {
     it('returns markets from iridium', async () => {
       const markets = [{ marketId: 1, symbol: 'BTCUSDC' }];
       iridium.getMarkets.mockResolvedValue(markets);
 
-      const handler = server.getHandler('get_markets')!;
+      const handler = server.getHandler('get_assets')!;
       const result = await handler({});
       const data = JSON.parse(result.content[0].text);
 
@@ -61,7 +61,7 @@ describe('registerMarketDataTools', () => {
     it('returns error on failure', async () => {
       iridium.getMarkets.mockRejectedValue(new Error('Timeout'));
 
-      const handler = server.getHandler('get_markets')!;
+      const handler = server.getHandler('get_assets')!;
       const result = await handler({});
 
       expect(result.isError).toBe(true);
@@ -85,10 +85,11 @@ describe('registerMarketDataTools', () => {
   describe('get_order_book', () => {
     it('falls back to REST when no mendelev', async () => {
       const book = { bids: [[60000, 1]], asks: [[60001, 0.5]] };
+      iridium.getMarkets.mockResolvedValue([{ marketId: 1, symbol: 'BTCUSDC', priceTickSize: '0.01', quantityTickSize: '0.001' }]);
       iridium.getOrderBook.mockResolvedValue(book);
 
       const handler = server.getHandler('get_order_book')!;
-      const result = await handler({ marketSymbol: 'BTCUSDC' });
+      const result = await handler({ symbol: 'BTCUSDC' });
       const data = JSON.parse(result.content[0].text);
 
       expect(data).toEqual(book);
@@ -96,26 +97,27 @@ describe('registerMarketDataTools', () => {
     });
   });
 
-  describe('get_recent_trades', () => {
+  describe('get_trades', () => {
     it('returns trades from REST fallback', async () => {
       const trades = [{ price: 60000, qty: 0.1, side: 'buy', ts: Date.now() }];
+      iridium.getMarkets.mockResolvedValue([{ marketId: 1, symbol: 'BTCUSDC', priceTickSize: '0.01', quantityTickSize: '0.001' }]);
       iridium.getRecentTrades.mockResolvedValue(trades);
 
-      const handler = server.getHandler('get_recent_trades')!;
-      const result = await handler({ marketSymbol: 'BTCUSDC' });
+      const handler = server.getHandler('get_trades')!;
+      const result = await handler({ symbol: 'BTCUSDC' });
       const data = JSON.parse(result.content[0].text);
 
       expect(data).toEqual(trades);
     });
   });
 
-  describe('get_price_history', () => {
+  describe('get_bars', () => {
     it('returns candles with freshness warning when stale', async () => {
       const staleTime = Date.now() - 3 * 86_400_000; // 3 days old
       const candles = [{ startTime: staleTime, open: '100', high: '105', low: '95', close: '102', volume: '1000' }];
       iridium.getPriceHistory.mockResolvedValue(candles);
 
-      const handler = server.getHandler('get_price_history')!;
+      const handler = server.getHandler('get_bars')!;
       const result = await handler({ marketId: 1, interval: '1h', limit: 100 });
       const data = JSON.parse(result.content[0].text);
 
@@ -127,7 +129,7 @@ describe('registerMarketDataTools', () => {
       const candles = [{ startTime: Date.now() - 60_000, open: '100', high: '105', low: '95', close: '102', volume: '1000' }];
       iridium.getPriceHistory.mockResolvedValue(candles);
 
-      const handler = server.getHandler('get_price_history')!;
+      const handler = server.getHandler('get_bars')!;
       const result = await handler({ marketId: 1, interval: '1h', limit: 100 });
       const data = JSON.parse(result.content[0].text);
 

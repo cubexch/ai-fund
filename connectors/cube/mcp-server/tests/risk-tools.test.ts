@@ -35,10 +35,10 @@ describe('registerRiskTools', () => {
     registerRiskTools(server as any, iridium as any);
   });
 
-  it('registers get_portfolio_summary and calculate_position_size tools', () => {
+  it('registers get_portfolio and calculate_position_size tools', () => {
     expect(server.tool).toHaveBeenCalledTimes(2);
     const names = server.tool.mock.calls.map((c: any[]) => c[0]);
-    expect(names).toContain('get_portfolio_summary');
+    expect(names).toContain('get_portfolio');
     expect(names).toContain('calculate_position_size');
   });
 
@@ -101,7 +101,7 @@ describe('registerRiskTools', () => {
     });
   });
 
-  describe('get_portfolio_summary', () => {
+  describe('get_portfolio', () => {
     it('returns portfolio summary with positions', async () => {
       const mockRegistry = {
         getById: (id: number) =>
@@ -121,7 +121,7 @@ describe('registerRiskTools', () => {
       ]);
       iridium.getAssetRegistry.mockResolvedValue(mockRegistry);
 
-      const handler = server.getHandler('get_portfolio_summary')!;
+      const handler = server.getHandler('get_portfolio')!;
       const result = await handler({});
       const data = JSON.parse(result.content[0].text);
 
@@ -132,7 +132,7 @@ describe('registerRiskTools', () => {
     it('returns error on failure', async () => {
       iridium.getPositions.mockRejectedValue(new Error('Network error'));
 
-      const handler = server.getHandler('get_portfolio_summary')!;
+      const handler = server.getHandler('get_portfolio')!;
       const result = await handler({});
 
       expect(result.isError).toBe(true);
