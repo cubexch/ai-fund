@@ -80,6 +80,10 @@ On `/hire`, the agent reads its briefing book and acknowledges prior context. On
 - `/review` — Run desk-wide performance evaluation
 - `/backtest` — Test a strategy on historical data
 
+## Dependency Policy
+
+**All new dependencies and dependency updates require explicit developer approval before being added.** This applies to both `dependencies` and `devDependencies` in any `package.json` across the monorepo. Do not run `npm install <package>` or add entries to `package.json` without the developer confirming the specific package name and version. This policy exists to minimize supply chain attack surface.
+
 ## When Writing Skills
 
 Each SKILL.md must:
