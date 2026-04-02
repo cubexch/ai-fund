@@ -116,7 +116,9 @@ Telegram Bot (@YourDeskBot)
 
 **Setup:** Create bot via @BotFather → install official Telegram plugin → configure token → pair → done.
 
-**Limitation:** Permission prompts appear in the terminal, not Telegram. If Claude needs approval for a trade (e.g., `place_order`), the session pauses until you approve locally. For unattended trading, you'd need to pre-approve exchange MCP tools or use `--dangerously-skip-permissions`.
+**Trade approval:** Channel servers that declare the `permission relay` capability can forward permission prompts to Telegram. This means when Claude wants to call `place_order`, you get a prompt *in Telegram* to approve or deny — no terminal needed. Anyone on the bot's allowlist can approve/deny, so only allowlist trusted users. For fully unattended operation, `--dangerously-skip-permissions` is also available but not recommended for trading.
+
+**Limitation:** Messages sent while the bot is offline are lost (no queuing). Requires a persistent terminal/background process to stay always-on. Research preview — syntax may change.
 
 ### 3b. Custom Bot with Claude Agent SDK
 
@@ -163,7 +165,7 @@ Less custom code than 3b, but inherits OpenClaw's skill porting and security iss
 | **Setup effort** | Minutes | Hours-days | ~30 min | Days-weeks |
 | **Code changes to AI Fund** | None | Major rewrite | None | Moderate |
 | **MCP connectors work** | Yes | No (rewrite) | Yes | No (direct API) |
-| **Trade approval from phone** | Partial | Yes | No (terminal) | Yes (best) |
+| **Trade approval from phone** | Partial | Yes | Yes (permission relay) | Yes (best UX) |
 | **Multi-user** | No | Yes | No | Yes |
 | **Always-on (no desktop)** | No* | Yes | No | Yes |
 | **Self-hosted** | No | Yes | No | Yes |
@@ -176,7 +178,7 @@ Less custom code than 3b, but inherits OpenClaw's skill porting and security iss
 
 ## Recommendation
 
-**For immediate use (today):** **Claude Dispatch** or **Claude Code Channels (Telegram)**. Zero code changes. AI Fund works as-is. Trade from your phone. Accept the limitation that some approvals require terminal access, or configure tool auto-approval for exchange MCP tools you trust.
+**For immediate use (today):** **Claude Code Channels (Telegram)**. Zero code changes. AI Fund works as-is. Trade from your phone. The permission relay feature forwards trade approval prompts directly to Telegram — you tap approve/deny right in the chat. No terminal access needed for approvals.
 
 **For a proper trading desk with mobile approval:** **Custom Telegram Bot (3b)**. Build a thin Node.js service that:
 - Runs as a systemd service on a VPS
