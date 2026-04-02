@@ -90,53 +90,16 @@ These agents are modeled after real traders and investors. Their philosophies ar
 
 ## The 22 Role-Based Agents
 
-These agents are defined by function, not celebrity. They handle specific trading strategies, execution, research, risk, and infrastructure tasks.
+These agents are defined by function, not celebrity. They are organized into six categories:
 
-### Active Traders
-| Agent | Role | Multi-Exchange Use |
-|---|---|---|
-| [Scalper](../skills/scalper/) | Sub-second, order book trading | Routes to lowest-latency venue |
-| [Momentum Trader](../skills/momentum-trader/) | Breakouts, trend riding | Cross-venue scans |
-| [Mean Reversion Trader](../skills/mean-reversion-trader/) | Fades extremes | Cross-venue deviation |
-| [Swing Trader](../skills/swing-trader/) | Multi-day S/R holds | Best fill routing |
-| [Arbitrageur](../skills/arbitrageur/) | Buy low on one exchange, sell high on another | Core cross-exchange |
-| [Grid Trader](../skills/grid-trader/) | Systematic level-based entries | Grid per venue |
-
-### Execution and Market Making
-| Agent | Role | Multi-Exchange Use |
-|---|---|---|
-| [Execution Trader](../skills/execution-trader/) | TWAP, VWAP, Iceberg | Smart order routing |
-| [Market Maker](../skills/market-maker/) | Two-sided quotes, spread capture | Multi-venue quoting |
-| [DCA Strategist](../skills/dca-strategist/) | Scheduled recurring buys | Routes to cheapest venue |
-
-### Research and Analysis
-| Agent | Role |
+| Category | Agents |
 |---|---|
-| [Quant Analyst](../skills/quant-analyst/) | RSI, MACD, backtests, statistical signals |
-| [Order Flow Analyst](../skills/orderflow-analyst/) | Tape reading, whale detection |
-| [Volatility Analyst](../skills/volatility-analyst/) | Vol regime detection, IV/RV analysis |
-| [Sentiment Analyst](../skills/sentiment-analyst/) | Funding rates, open interest, fear/greed |
-| [On-Chain Analyst](../skills/onchain-analyst/) | Wallet tracking, exchange flows |
-
-### Risk and Portfolio
-| Agent | Role |
-|---|---|
-| [Risk Manager](../skills/risk-manager/) | VaR, Kelly criterion, drawdown caps |
-| [Portfolio Manager](../skills/portfolio-manager/) | Allocation, rebalancing, risk parity |
-| [Performance Analyst](../skills/performance-analyst/) | Post-trade analysis, attribution |
-
-### Specialists
-| Agent | Role |
-|---|---|
-| [Funding Rate Farmer](../skills/funding-rate-farmer/) | Delta-neutral yield from funding rates |
-| [Liquidation Hunter](../skills/liquidation-hunter/) | Margin monitoring, liquidation cascade detection |
-| [Pairs Trader](../skills/pairs-trader/) | Long/short correlated asset pairs |
-| [Breakout Specialist](../skills/breakout-specialist/) | Range breaks with volume confirmation |
-
-### Infrastructure
-| Agent | Role |
-|---|---|
-| [Backtester](../skills/backtester/) | Historical simulation, walk-forward, Monte Carlo |
+| **Active Traders** | [Scalper](../skills/scalper/), [Momentum](../skills/momentum-trader/), [Mean Reversion](../skills/mean-reversion-trader/), [Swing](../skills/swing-trader/), [Arbitrageur](../skills/arbitrageur/), [Grid](../skills/grid-trader/) |
+| **Execution** | [Execution Trader](../skills/execution-trader/) (TWAP/VWAP/Iceberg), [Market Maker](../skills/market-maker/), [DCA Strategist](../skills/dca-strategist/) |
+| **Research** | [Quant Analyst](../skills/quant-analyst/), [Order Flow](../skills/orderflow-analyst/), [Volatility](../skills/volatility-analyst/), [Sentiment](../skills/sentiment-analyst/), [On-Chain](../skills/onchain-analyst/) |
+| **Risk/Portfolio** | [Risk Manager](../skills/risk-manager/), [Portfolio Manager](../skills/portfolio-manager/), [Performance Analyst](../skills/performance-analyst/) |
+| **Specialists** | [Funding Farmer](../skills/funding-rate-farmer/), [Liquidation Hunter](../skills/liquidation-hunter/), [Pairs Trader](../skills/pairs-trader/), [Breakout](../skills/breakout-specialist/) |
+| **Infrastructure** | [Backtester](../skills/backtester/) (walk-forward, Monte Carlo, sensitivity analysis) |
 
 ## Desk Configurations
 

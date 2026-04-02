@@ -121,48 +121,24 @@ The Backtester produces a structured results report with a final verdict:
 - **OOS degradation > 50%** — strategy was fit to noise, not signal
 - **Parameter sensitivity spikes** — small changes cause large performance swings
 
-## From Backtest to Paper Trading
+## From Backtest to Paper to Live
 
-A backtest that passes validation is ready for paper trading. The workflow:
+1. **Backtest** with `/backtest` -- validate on historical data
+2. **Paper trade** on a live exchange in testnet mode (see [Paper Trading and Safety](paper-trading-safety.md))
+3. **Compare** paper results to backtest predictions
+4. **Go live** only after paper confirms the backtest within 30% of predicted Sharpe
 
-1. **Backtest** the strategy with `/backtest` (historical simulation)
-2. **Paper trade** the strategy on a live exchange in paper/testnet mode
-3. **Compare** paper trading results to backtest predictions
-4. **Go live** only after paper results confirm the backtest within 30% of predicted Sharpe
+## Advanced Validation Methods
 
-Paper trading is enabled by default on all exchanges. See [Paper Trading and Safety](paper-trading-safety.md) for details on staying safe.
-
-## Advanced: Walk-Forward Optimization
-
-Walk-forward is the gold standard for strategy validation. Instead of a single train/test split, it uses rolling windows:
+**Walk-forward optimization** uses rolling windows instead of a single train/test split. The Backtester optimizes on each in-sample segment, tests on the adjacent out-of-sample segment, and aggregates results.
 
 ```
 > @backtester run walk-forward on the RSI mean-reversion strategy, 60-candle in-sample, 20-candle out-of-sample
 ```
 
-The Backtester divides the historical data into overlapping windows, optimizes parameters on each in-sample segment, tests on the adjacent out-of-sample segment, and aggregates results across all windows.
+**Monte Carlo simulation** reshuffles trade order 1000 times to test whether the equity curve depends on a lucky sequence. Key outputs: median equity, 5th percentile worst case, and probability of ruin.
 
-## Advanced: Monte Carlo Simulation
-
-Monte Carlo reshuffles the order of your trades to test whether the equity curve depends on a lucky sequence:
-
-```
-> @backtester run Monte Carlo on my last backtest, 1000 iterations
-```
-
-Key outputs: median final equity, 5th percentile worst case, 95th percentile max drawdown, and probability of ruin.
-
-## Cost Modeling
-
-The Backtester models transaction costs conservatively. A strategy that ignores fees and slippage is a fantasy, not a strategy.
-
-| Cost Component | How It Is Modeled |
-|---|---|
-| **Trading fees** | Actual maker/taker rates from connected exchange |
-| **Slippage** | Half the spread + volume impact + volatility impact |
-| **Round-trip cost** | Entry fee + exit fee + entry slippage + exit slippage |
-
-When multiple exchanges are connected, the Backtester compares net performance across venues so you can see where execution is cheapest.
+**Cost modeling** includes actual maker/taker fees from connected exchanges, slippage (half spread + volume impact + volatility), and round-trip costs. When multiple exchanges are connected, the Backtester compares net performance across venues.
 
 ## See Also
 
