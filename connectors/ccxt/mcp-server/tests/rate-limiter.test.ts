@@ -97,3 +97,52 @@ describe('RateLimiter', () => {
     expect(resolved).toContain(2);
   });
 });
+
+describe('stress tests', () => {
+  it('concurrent burst: 20 simultaneous acquires on burst=5 all resolve', async () => {
+    const limiter = new RateLimiter(1000, 5);
+    const timeout = 5000;
+
+    const promises = Array.from({ length: 20 }, () =>
+      Promise.race([
+        limiter.acquire().then(() => 'ok' as const),
+        new Promise<'timeout'>((_, reject) =>
+          setTimeout(() => reject(new Error('acquire hung beyond timeout')), timeout),
+        ),
+      ]),
+    );
+
+    const results = await Promise.all(promises);
+    expect(results).toHaveLength(20);
+    expect(results.every(r => r === 'ok')).toBe(true);
+  }, 10000);
+
+  it('sustained throughput: 10 sequential acquires at 1000/s complete quickly', async () => {
+    const limiter = new RateLimiter(1000, 10);
+    const start = Date.now();
+
+    for (let i = 0; i < 10; i++) {
+      await limiter.acquire();
+    }
+
+    const elapsed = Date.now() - start;
+    // 10 requests at 1000/s with burst=10 should be near-instant
+    expect(elapsed).toBeLessThan(100);
+  });
+
+  it('single acquire never hangs indefinitely', async () => {
+    const limiter = new RateLimiter(1, 1);
+    // Exhaust the single token
+    await limiter.acquire();
+
+    // Next acquire should still resolve within 5 seconds (rate=1/s => ~1s wait)
+    const result = await Promise.race([
+      limiter.acquire().then(() => 'ok' as const),
+      new Promise<'timeout'>(resolve =>
+        setTimeout(() => resolve('timeout'), 5000),
+      ),
+    ]);
+
+    expect(result).toBe('ok');
+  }, 10000);
+});

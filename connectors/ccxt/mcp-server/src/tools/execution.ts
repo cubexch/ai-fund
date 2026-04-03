@@ -709,4 +709,117 @@ export function registerExecutionTools(server: McpServer, client: ExchangeClient
       };
     }),
   );
+
+  // ── aggregate_order_books ─────────────────────────────────
+
+  server.tool(
+    'aggregate_order_books',
+    'Aggregate order books from multiple exchanges for a symbol. Merges bids and asks, shows per-level exchange contributions, computes aggregate spread, and identifies best execution venue for buy/sell.',
+    {
+      symbol: z.string().describe('Trading pair (e.g., BTC/USDT)'),
+      exchanges: z.string().describe('Comma-separated exchange IDs (e.g., "coinbase,binance,kraken")'),
+      depth: z.number().default(10).describe('Number of levels per side per exchange (default 10)'),
+    } as any,
+    handler(async (params: any) => {
+      const symbol: string = params.symbol;
+      const exchangeIds = params.exchanges.split(',').map((e: string) => e.trim());
+      const depth: number = params.depth ?? 10;
+
+      // Collect order books from each exchange
+      const allBids: { price: number; amount: number; exchange: string }[] = [];
+      const allAsks: { price: number; amount: number; exchange: string }[] = [];
+      const exchangeErrors: { exchange: string; error: string }[] = [];
+
+      for (const exId of exchangeIds) {
+        try {
+          const ExClass = (ccxt as any)[exId];
+          if (!ExClass) {
+            exchangeErrors.push({ exchange: exId, error: 'Unknown exchange' });
+            continue;
+          }
+          const ex = new ExClass() as any;
+          const book = await ex.fetchOrderBook(symbol, depth);
+
+          for (const [price, amount] of book.bids ?? []) {
+            allBids.push({ price, amount, exchange: exId });
+          }
+          for (const [price, amount] of book.asks ?? []) {
+            allAsks.push({ price, amount, exchange: exId });
+          }
+        } catch (err: any) {
+          exchangeErrors.push({ exchange: exId, error: err.message });
+        }
+      }
+
+      // Sort bids descending by price, asks ascending by price
+      allBids.sort((a, b) => b.price - a.price);
+      allAsks.sort((a, b) => a.price - b.price);
+
+      // Aggregate: merge levels at same price, track contributing exchanges
+      const aggregateBook = (
+        entries: { price: number; amount: number; exchange: string }[],
+        limit: number,
+      ) => {
+        const merged: { price: number; totalAmount: number; exchanges: Record<string, number> }[] = [];
+        for (const entry of entries) {
+          const existing = merged.find(m => m.price === entry.price);
+          if (existing) {
+            existing.totalAmount += entry.amount;
+            existing.exchanges[entry.exchange] = (existing.exchanges[entry.exchange] ?? 0) + entry.amount;
+          } else {
+            merged.push({
+              price: entry.price,
+              totalAmount: entry.amount,
+              exchanges: { [entry.exchange]: entry.amount },
+            });
+          }
+          if (merged.length >= limit && !merged.find(m => m.price === entry.price)) break;
+        }
+        return merged.slice(0, limit).map(m => ({
+          price: m.price,
+          totalAmount: Math.round(m.totalAmount * 100000000) / 100000000,
+          exchanges: m.exchanges,
+        }));
+      };
+
+      const aggregatedBids = aggregateBook(allBids, depth);
+      const aggregatedAsks = aggregateBook(allAsks, depth);
+
+      // Compute aggregate spread
+      const bestBid = aggregatedBids.length > 0 ? aggregatedBids[0].price : null;
+      const bestAsk = aggregatedAsks.length > 0 ? aggregatedAsks[0].price : null;
+      const aggregateSpread = bestBid != null && bestAsk != null
+        ? Math.round((bestAsk - bestBid) * 100) / 100
+        : null;
+      const aggregateMid = bestBid != null && bestAsk != null
+        ? Math.round(((bestBid + bestAsk) / 2) * 100) / 100
+        : null;
+
+      // Best execution venues
+      const bestBuyVenue = aggregatedAsks.length > 0
+        ? Object.keys(aggregatedAsks[0].exchanges)[0]
+        : null;
+      const bestSellVenue = aggregatedBids.length > 0
+        ? Object.keys(aggregatedBids[0].exchanges)[0]
+        : null;
+
+      // Total depth
+      const totalBidDepth = Math.round(allBids.reduce((sum, b) => sum + b.amount, 0) * 100000000) / 100000000;
+      const totalAskDepth = Math.round(allAsks.reduce((sum, a) => sum + a.amount, 0) * 100000000) / 100000000;
+
+      return {
+        symbol,
+        exchanges: exchangeIds,
+        errors: exchangeErrors.length > 0 ? exchangeErrors : undefined,
+        aggregatedBids,
+        aggregatedAsks,
+        aggregateSpread,
+        aggregateMid,
+        bestBuyVenue,
+        bestSellVenue,
+        totalBidDepth,
+        totalAskDepth,
+      };
+    }),
+  );
 }

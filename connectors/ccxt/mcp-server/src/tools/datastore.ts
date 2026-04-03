@@ -682,6 +682,72 @@ export function registerDatastoreTools(server: McpServer, client: ExchangeClient
     }),
   );
 
+  // ── Tick-Level Trade Ingestion ─────────────────────────────
+
+  server.tool(
+    'ingest_recent_trades',
+    `Fetch recent public trades from ${client.name} and store as 1-second OHLCV candles in the local DuckDB cache. Each second of trade activity becomes one candle (open=first price, close=last price, volume=sum). Useful for tick-level analysis and microstructure research.`,
+    {
+      symbol: z.string().describe('Trading pair (e.g., BTC/USDT)'),
+      limit: z.number().default(500).describe('Max trades to fetch from the exchange'),
+    } as any,
+    handler(async (params: any) => {
+      if (!store) throw new Error('DuckDB datastore not configured. Restart with data caching enabled.');
+
+      const trades = await client.getTrades(params.symbol, undefined, params.limit);
+      if (trades.length === 0) {
+        return { exchange: client.exchangeId, symbol: params.symbol, tradesFetched: 0, secondsStored: 0 };
+      }
+
+      // Group trades by second (floor timestamp to nearest 1000ms)
+      const buckets = new Map<number, typeof trades>();
+      for (const t of trades) {
+        if (t.timestamp == null) continue;
+        const sec = Math.floor(t.timestamp / 1000) * 1000;
+        let bucket = buckets.get(sec);
+        if (!bucket) {
+          bucket = [];
+          buckets.set(sec, bucket);
+        }
+        bucket.push(t);
+      }
+
+      // Convert each second-bucket into an OHLCV row
+      const rows: OHLCVRow[] = [];
+      for (const [sec, bucket] of buckets) {
+        const prices = bucket.map(t => t.price);
+        const volumes = bucket.map(t => t.amount);
+        rows.push({
+          symbol: params.symbol,
+          exchange: client.exchangeId,
+          asset_type: 'crypto',
+          interval: '1s',
+          ts: new Date(sec),
+          open: prices[0],
+          high: Math.max(...prices),
+          low: Math.min(...prices),
+          close: prices[prices.length - 1],
+          volume: volumes.reduce((s, v) => s + v, 0),
+        });
+      }
+
+      const inserted = await store.insertOHLCV(rows);
+
+      // Compute time range
+      const timestamps = [...buckets.keys()].sort((a, b) => a - b);
+      return {
+        exchange: client.exchangeId,
+        symbol: params.symbol,
+        tradesFetched: trades.length,
+        secondsStored: inserted,
+        timeRange: {
+          from: new Date(timestamps[0]).toISOString(),
+          to: new Date(timestamps[timestamps.length - 1]).toISOString(),
+        },
+      };
+    }),
+  );
+
   // ── P&L Attribution ───────────────────────────────────────
 
   server.tool(

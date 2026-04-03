@@ -1316,4 +1316,111 @@ export function registerStrategyTools(server: McpServer, client: ExchangeClient)
       };
     }),
   );
+
+  // ── optimize_grid_params ──────────────────────────────────
+
+  server.tool(
+    'optimize_grid_params',
+    `Optimize grid trading parameters for a symbol on ${client.name}. Uses Bollinger Bands for price range and ATR for grid spacing. Returns grid levels, spacing, expected daily trades, and volatility regime.`,
+    {
+      symbol: z.string().describe('Trading pair (e.g., BTC/USDT)'),
+      timeframe: z.string().default('4h').describe('Candle timeframe (default 4h)'),
+      period: z.number().default(100).describe('Number of candles to analyze (default 100)'),
+      num_grids: z.number().default(10).describe('Number of grid levels (default 10)'),
+    } as any,
+    handler(async (params: any) => {
+      const symbol: string = params.symbol;
+      const timeframe: string = params.timeframe ?? '4h';
+      const period: number = params.period ?? 100;
+      const numGrids: number = params.num_grids ?? 10;
+
+      const bars = await client.getBars(symbol, timeframe, undefined, period);
+      if (bars.length < 26) {
+        throw new Error(`Need at least 26 candles for grid optimization, got ${bars.length}`);
+      }
+
+      const candles: OHLCV[] = bars.map(b => ({
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: b.volume,
+        timestamp: b.timestamp,
+      }));
+      const closes = candles.map(c => c.close);
+      const highs = candles.map(c => c.high);
+      const lows = candles.map(c => c.low);
+
+      // Price range from raw high/low
+      const priceHigh = Math.max(...highs);
+      const priceLow = Math.min(...lows);
+      const currentPrice = closes[closes.length - 1];
+
+      // Bollinger Bands for expected trading range
+      const bb = bollingerBands(closes, 20, 2);
+      const bbUpper = bb.upper.length > 0 ? bb.upper[bb.upper.length - 1] : priceHigh;
+      const bbLower = bb.lower.length > 0 ? bb.lower[bb.lower.length - 1] : priceLow;
+
+      // ATR for grid spacing
+      const atr14 = atr(candles, 14);
+      const currentAtr = atr14.length > 0 ? atr14[atr14.length - 1] : (priceHigh - priceLow) / period;
+
+      // Volatility regime classification
+      const avgAtr = atr14.length > 0
+        ? atr14.reduce((a, b) => a + b, 0) / atr14.length
+        : currentAtr;
+      const atrRatio = avgAtr > 0 ? currentAtr / avgAtr : 1;
+      let volRegime: string;
+      if (atrRatio > 1.5) volRegime = 'high';
+      else if (atrRatio < 0.7) volRegime = 'low';
+      else volRegime = 'normal';
+
+      // Grid range: use Bollinger Bands
+      const gridTop = Math.round(bbUpper * 100) / 100;
+      const gridBottom = Math.round(bbLower * 100) / 100;
+      const gridRange = gridTop - gridBottom;
+
+      // ATR-based spacing: in low-vol tighter grids, in high-vol wider grids
+      const spacing = Math.round((gridRange / numGrids) * 100) / 100;
+
+      // Position sizing: equal capital per grid level
+      // Assume $10,000 notional per grid for sizing reference
+      const notionalPerGrid = 10000 / numGrids;
+
+      // Build grid levels
+      const gridLevels: { price: number; side: string; amount: number }[] = [];
+      for (let i = 0; i < numGrids; i++) {
+        const price = Math.round((gridBottom + spacing * i + spacing / 2) * 100) / 100;
+        const side = price < currentPrice ? 'buy' : 'sell';
+        const amount = Math.round((notionalPerGrid / price) * 100000000) / 100000000;
+        gridLevels.push({ price, side, amount });
+      }
+
+      // Expected trades per day estimate: higher vol = more grid hits
+      // Approximate from ATR as fraction of grid spacing
+      const expectedDailyTrades = spacing > 0
+        ? Math.round((currentAtr / spacing) * 100) / 100
+        : 0;
+
+      return {
+        symbol,
+        priceRange: {
+          high: priceHigh,
+          low: priceLow,
+          current: currentPrice,
+          bbUpper: gridTop,
+          bbLower: gridBottom,
+        },
+        gridLevels,
+        spacing,
+        atrBased: {
+          currentAtr: Math.round(currentAtr * 100) / 100,
+          avgAtr: Math.round(avgAtr * 100) / 100,
+          atrRatio: Math.round(atrRatio * 100) / 100,
+        },
+        expectedDailyTrades,
+        volRegime,
+      };
+    }),
+  );
 }
