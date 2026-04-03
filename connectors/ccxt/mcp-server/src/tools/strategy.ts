@@ -314,4 +314,125 @@ export function registerStrategyTools(server: McpServer, client: ExchangeClient)
       };
     }),
   );
+
+  server.tool(
+    'get_optimal_entry',
+    `Analyze order book depth, spread, and recent trade flow on ${client.name} to recommend optimal entry strategy for a trade. Returns recommended order type, price, estimated slippage, and trade flow signal.`,
+    {
+      symbol: z.string().describe('Trading pair (e.g., BTC/USDT)'),
+      side: z.enum(['buy', 'sell']).describe('Trade side'),
+      amount: z.number().describe('Desired position size in base currency'),
+      urgency: z.enum(['low', 'medium', 'high']).default('medium').describe('How urgently the order needs to fill'),
+    } as any,
+    handler(async (params: any) => {
+      const [orderBook, quote, recentTrades] = await Promise.all([
+        client.getOrderBook(params.symbol, 20),
+        client.getQuote(params.symbol),
+        client.getTrades(params.symbol, undefined, 100),
+      ]);
+
+      const mid = orderBook.mid;
+      if (mid == null || mid === 0) {
+        throw new Error(`Cannot determine mid price for ${params.symbol} — order book may be empty`);
+      }
+
+      const currentSpread = orderBook.spread ?? 0;
+      const spreadBps = orderBook.spreadBps ?? 0;
+      const bestBid = orderBook.bestBid ?? mid;
+      const bestAsk = orderBook.bestAsk ?? mid;
+
+      // Estimate slippage by walking the order book
+      const book = params.side === 'buy' ? orderBook.asks : orderBook.bids;
+      let filled = 0;
+      let totalCost = 0;
+      for (const [price, size] of book) {
+        const fill = Math.min(size, params.amount - filled);
+        totalCost += fill * price;
+        filled += fill;
+        if (filled >= params.amount) break;
+      }
+
+      const avgFillPrice = filled > 0 ? totalCost / filled : mid;
+      const slippagePct = Math.abs(avgFillPrice - mid) / mid;
+      const slippagePerUnit = Math.abs(avgFillPrice - mid);
+
+      // Depth analysis: total liquidity within 0.1% of mid on each side
+      const depthThreshold = mid * 0.001;
+      let bidDepth01Pct = 0;
+      for (const [price, size] of orderBook.bids) {
+        if (price >= mid - depthThreshold) {
+          bidDepth01Pct += size;
+        } else {
+          break;
+        }
+      }
+      let askDepth01Pct = 0;
+      for (const [price, size] of orderBook.asks) {
+        if (price <= mid + depthThreshold) {
+          askDepth01Pct += size;
+        } else {
+          break;
+        }
+      }
+
+      // Trade flow analysis: buy/sell imbalance from recent trades
+      let buyVolume = 0;
+      let sellVolume = 0;
+      for (const trade of recentTrades) {
+        if (trade.side === 'buy') {
+          buyVolume += trade.amount;
+        } else {
+          sellVolume += trade.amount;
+        }
+      }
+      const totalVolume = buyVolume + sellVolume;
+      const buyRatio = totalVolume > 0 ? buyVolume / totalVolume : 0.5;
+      const tradeFlowSignal: 'bullish' | 'bearish' | 'neutral' =
+        buyRatio > 0.6 ? 'bullish' : buyRatio < 0.4 ? 'bearish' : 'neutral';
+
+      // Urgency-based recommendation
+      const tickSize = currentSpread > 0 ? currentSpread * 0.1 : mid * 0.0001;
+      let recommendedOrderType: 'limit' | 'market';
+      let recommendedPrice: number | null;
+      let rationale: string;
+
+      if (params.urgency === 'low') {
+        recommendedOrderType = 'limit';
+        recommendedPrice = params.side === 'buy'
+          ? Math.round((bestBid + tickSize) * 100) / 100
+          : Math.round((bestAsk - tickSize) * 100) / 100;
+        rationale = `Low urgency: limit order near ${params.side === 'buy' ? 'bid' : 'ask'} to minimize cost; spread is ${spreadBps.toFixed(1)} bps`;
+      } else if (params.urgency === 'medium') {
+        recommendedOrderType = 'limit';
+        recommendedPrice = Math.round(mid * 100) / 100;
+        rationale = `Medium urgency: limit at mid price (${recommendedPrice}) balances fill probability and cost`;
+      } else {
+        recommendedOrderType = 'market';
+        recommendedPrice = null;
+        rationale = `High urgency: market order for immediate fill; expected slippage ${(slippagePct * 100).toFixed(3)}%`;
+      }
+
+      return {
+        symbol: params.symbol,
+        side: params.side,
+        amount: params.amount,
+        currentMid: Math.round(mid * 100) / 100,
+        currentSpread: Math.round(currentSpread * 100) / 100,
+        spreadBps: Math.round(spreadBps * 100) / 100,
+        recommendedOrderType,
+        recommendedPrice,
+        estimatedSlippage: {
+          pct: Math.round(slippagePct * 1000000) / 1000000,
+          absolutePerUnit: Math.round(slippagePerUnit * 100) / 100,
+        },
+        depthAnalysis: {
+          bidDepth01Pct: Math.round(bidDepth01Pct * 100000000) / 100000000,
+          askDepth01Pct: Math.round(askDepth01Pct * 100000000) / 100000000,
+        },
+        tradeFlowSignal,
+        tradeFlowImbalance: Math.round(buyRatio * 10000) / 10000,
+        rationale,
+      };
+    }),
+  );
 }

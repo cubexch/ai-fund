@@ -220,3 +220,75 @@ describe('get_order_flow_imbalance tool', () => {
     expect(call!.args[2]).toBe(50);
   });
 });
+
+// ── detect_arbitrage_opportunity ──────────────────────────
+
+describe('detect_arbitrage_opportunity tool', () => {
+  it('is registered as a tool', () => {
+    const { server } = setup();
+    expect(server.tools.has('detect_arbitrage_opportunity')).toBe(true);
+  });
+
+  it('returns error quotes for unknown exchanges', async () => {
+    const { server } = setup();
+    const result = await server.callTool('detect_arbitrage_opportunity', {
+      symbol: 'BTC/USDT',
+      exchanges: 'fake_exchange_abc,fake_exchange_xyz',
+    });
+
+    expect(result.isError).toBeUndefined();
+    const data = JSON.parse(result.content[0].text);
+
+    expect(data.symbol).toBe('BTC/USDT');
+    expect(data.quotes).toHaveLength(2);
+    expect(data.quotes[0].exchange).toBe('fake_exchange_abc');
+    expect(data.quotes[0].error).toBe('Unknown exchange');
+    expect(data.quotes[1].exchange).toBe('fake_exchange_xyz');
+    expect(data.quotes[1].error).toBe('Unknown exchange');
+    expect(data.arbitrage).toBeNull();
+    expect(data.message).toContain('at least 2 exchanges');
+  });
+
+  it('returns expected response structure fields', async () => {
+    const { server } = setup();
+    const result = await server.callTool('detect_arbitrage_opportunity', {
+      symbol: 'BTC/USDT',
+      exchanges: 'not_real_1',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+
+    // Verify top-level structure
+    expect(data).toHaveProperty('symbol');
+    expect(data).toHaveProperty('quotes');
+    expect(data).toHaveProperty('arbitrage');
+    expect(Array.isArray(data.quotes)).toBe(true);
+  });
+
+  it('handles single exchange with error gracefully', async () => {
+    const { server } = setup();
+    const result = await server.callTool('detect_arbitrage_opportunity', {
+      symbol: 'BTC/USDT',
+      exchanges: 'unknown_only',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+
+    expect(data.quotes).toHaveLength(1);
+    expect(data.arbitrage).toBeNull();
+    expect(data.message).toBeDefined();
+  });
+
+  it('trims whitespace from exchange IDs', async () => {
+    const { server } = setup();
+    const result = await server.callTool('detect_arbitrage_opportunity', {
+      symbol: 'BTC/USDT',
+      exchanges: ' fake1 , fake2 ',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+
+    expect(data.quotes[0].exchange).toBe('fake1');
+    expect(data.quotes[1].exchange).toBe('fake2');
+  });
+});

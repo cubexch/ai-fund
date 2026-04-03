@@ -42,6 +42,48 @@ function setup(overrides: Record<string, unknown> = {}) {
       limits: { amount: { min: 0.0001, max: 100 }, price: { min: 0.01, max: 1000000 } },
       maker: 0.001, taker: 0.002,
     }),
+    getOrderBook: async () => ({
+      symbol: 'BTC/USDT',
+      bids: [
+        [65000, 1.5], [64990, 2.0], [64980, 3.0], [64970, 1.0], [64960, 2.5],
+      ] as [number, number][],
+      asks: [
+        [65010, 1.0], [65020, 2.0], [65030, 2.5], [65040, 1.5], [65050, 3.0],
+      ] as [number, number][],
+      bestBid: 65000,
+      bestAsk: 65010,
+      mid: 65005,
+      spread: 10,
+      spreadBps: 1.54,
+      timestamp: 1700000000000,
+    }),
+    getQuote: async () => ({
+      symbol: 'BTC/USDT',
+      bid: 65000,
+      bidSize: 1.5,
+      ask: 65010,
+      askSize: 1.0,
+      mid: 65005,
+      spread: 10,
+      spreadBps: 1.54,
+      last: 65005,
+      timestamp: 1700000000000,
+    }),
+    getTrades: async () => {
+      const trades = [];
+      for (let i = 0; i < 100; i++) {
+        trades.push({
+          id: String(i),
+          timestamp: 1700000000000 + i * 1000,
+          symbol: 'BTC/USDT',
+          side: i % 3 === 0 ? 'sell' : 'buy',  // ~67% buy, ~33% sell
+          price: 65005 + (Math.random() - 0.5) * 10,
+          amount: 0.1 + Math.random() * 0.5,
+          cost: undefined,
+        });
+      }
+      return trades;
+    },
     ensureMarkets: async () => {},
     roundAmount: (sym: string, amount: number) => Math.round(amount * 100000000) / 100000000,
     ...overrides,
@@ -350,5 +392,123 @@ describe('assess_portfolio_risk tool', () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('sum to');
+  });
+});
+
+// ── get_optimal_entry ───────────────────────────────────
+
+describe('get_optimal_entry tool', () => {
+  it('returns valid recommendation for buy with medium urgency', async () => {
+    const { server } = setup();
+    const result = await server.callTool('get_optimal_entry', {
+      symbol: 'BTC/USDT',
+      side: 'buy',
+      amount: 0.5,
+      urgency: 'medium',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.symbol).toBe('BTC/USDT');
+    expect(data.side).toBe('buy');
+    expect(data.amount).toBe(0.5);
+    expect(data.currentMid).toBeTypeOf('number');
+    expect(data.currentMid).toBeGreaterThan(0);
+    expect(data.currentSpread).toBeTypeOf('number');
+    expect(data.spreadBps).toBeTypeOf('number');
+    expect(data.recommendedOrderType).toBe('limit');
+    expect(data.recommendedPrice).toBeTypeOf('number');
+    expect(data.recommendedPrice).toBe(data.currentMid);
+    expect(data.estimatedSlippage).toBeDefined();
+    expect(data.estimatedSlippage.pct).toBeTypeOf('number');
+    expect(data.estimatedSlippage.pct).toBeGreaterThanOrEqual(0);
+    expect(data.estimatedSlippage.absolutePerUnit).toBeTypeOf('number');
+    expect(data.depthAnalysis).toBeDefined();
+    expect(data.depthAnalysis.bidDepth01Pct).toBeTypeOf('number');
+    expect(data.depthAnalysis.askDepth01Pct).toBeTypeOf('number');
+    expect(data.tradeFlowSignal).toMatch(/^(bullish|bearish|neutral)$/);
+    expect(data.tradeFlowImbalance).toBeTypeOf('number');
+    expect(data.rationale).toBeTypeOf('string');
+    expect(data.rationale.length).toBeGreaterThan(0);
+  });
+
+  it('returns market order recommendation for high urgency', async () => {
+    const { server } = setup();
+    const result = await server.callTool('get_optimal_entry', {
+      symbol: 'BTC/USDT',
+      side: 'buy',
+      amount: 0.5,
+      urgency: 'high',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.recommendedOrderType).toBe('market');
+    expect(data.recommendedPrice).toBeNull();
+    expect(data.rationale).toContain('High urgency');
+    expect(data.rationale).toContain('market order');
+  });
+
+  it('returns limit order for low urgency', async () => {
+    const { server } = setup();
+    const result = await server.callTool('get_optimal_entry', {
+      symbol: 'BTC/USDT',
+      side: 'buy',
+      amount: 0.5,
+      urgency: 'low',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.recommendedOrderType).toBe('limit');
+    expect(data.recommendedPrice).toBeTypeOf('number');
+    // For buy low urgency, price should be near bid (below mid)
+    expect(data.recommendedPrice).toBeLessThan(data.currentMid);
+    expect(data.rationale).toContain('Low urgency');
+  });
+
+  it('computes slippage correctly from order book', async () => {
+    // Custom order book: asks at 100, 101, 102 with size 1 each
+    // Buying 2.5 should fill 1@100 + 1@101 + 0.5@102 = avg 100.6
+    // Mid = 99.5, slippage = (100.6 - 99.5) / 99.5
+    const { server } = setup({
+      getOrderBook: async () => ({
+        symbol: 'TEST/USDT',
+        bids: [[99, 2.0], [98, 3.0]] as [number, number][],
+        asks: [[100, 1.0], [101, 1.0], [102, 1.0]] as [number, number][],
+        bestBid: 99,
+        bestAsk: 100,
+        mid: 99.5,
+        spread: 1,
+        spreadBps: 100.5,
+        timestamp: 1700000000000,
+      }),
+      getQuote: async () => ({
+        symbol: 'TEST/USDT',
+        bid: 99, bidSize: 2.0,
+        ask: 100, askSize: 1.0,
+        mid: 99.5, spread: 1, spreadBps: 100.5,
+        last: 99.5, timestamp: 1700000000000,
+      }),
+      getTrades: async () => [
+        { id: '1', timestamp: 1700000000000, symbol: 'TEST/USDT', side: 'buy', price: 99.5, amount: 1, cost: undefined },
+        { id: '2', timestamp: 1700000001000, symbol: 'TEST/USDT', side: 'sell', price: 99.5, amount: 1, cost: undefined },
+      ],
+    });
+
+    const result = await server.callTool('get_optimal_entry', {
+      symbol: 'TEST/USDT',
+      side: 'buy',
+      amount: 2.5,
+      urgency: 'high',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    // avg fill = (1*100 + 1*101 + 0.5*102) / 2.5 = 252/2.5 = 100.8
+    const expectedAvg = (1 * 100 + 1 * 101 + 0.5 * 102) / 2.5;
+    const expectedSlippagePct = Math.abs(expectedAvg - 99.5) / 99.5;
+    expect(data.estimatedSlippage.pct).toBeCloseTo(expectedSlippagePct, 4);
+    expect(data.estimatedSlippage.absolutePerUnit).toBeCloseTo(expectedAvg - 99.5, 1);
+
+    // Trade flow: 1 buy, 1 sell = neutral (50/50)
+    expect(data.tradeFlowSignal).toBe('neutral');
+    expect(data.tradeFlowImbalance).toBe(0.5);
   });
 });

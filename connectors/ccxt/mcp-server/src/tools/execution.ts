@@ -1,5 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import ccxt from 'ccxt';
 import type { ExchangeClient } from '../client/exchange.js';
 import { handler, authHandler } from './handler.js';
 
@@ -191,6 +192,88 @@ export function registerExecutionTools(server: McpServer, client: ExchangeClient
           })),
         },
         signal,
+      };
+    }),
+  );
+
+  // ── detect_arbitrage_opportunity ──────────────────────────
+
+  server.tool(
+    'detect_arbitrage_opportunity',
+    'Detect cross-exchange arbitrage opportunities by comparing bid/ask prices for a symbol across multiple exchanges. Returns per-venue quotes, best bid/ask venues, spread, estimated profit after fees, and whether the opportunity is actionable.',
+    {
+      symbol: z.string().describe('Trading pair (e.g., BTC/USDT)'),
+      exchanges: z.string().describe('Comma-separated exchange IDs (e.g., "coinbase,binance,kraken")'),
+    } as any,
+    handler(async (params: any) => {
+      const symbol: string = params.symbol;
+      const exchangeIds = params.exchanges.split(',').map((e: string) => e.trim());
+      const quotes: any[] = [];
+
+      for (const exId of exchangeIds) {
+        try {
+          const ExClass = (ccxt as any)[exId];
+          if (!ExClass) {
+            quotes.push({ exchange: exId, error: 'Unknown exchange' });
+            continue;
+          }
+          const ex = new ExClass() as any;
+          const ticker = await ex.fetchTicker(symbol);
+          quotes.push({
+            exchange: exId,
+            bid: ticker.bid,
+            ask: ticker.ask,
+            last: ticker.last,
+            volume: ticker.baseVolume,
+            timestamp: ticker.timestamp,
+          });
+        } catch (err: any) {
+          quotes.push({ exchange: exId, error: err.message });
+        }
+      }
+
+      // Find best bid (sell venue) and best ask (buy venue)
+      const valid = quotes.filter(q => q.bid != null && q.ask != null);
+
+      if (valid.length < 2) {
+        return {
+          symbol,
+          quotes,
+          arbitrage: null,
+          message: 'Need at least 2 exchanges with valid quotes to detect arbitrage.',
+        };
+      }
+
+      const bestBidQuote = valid.reduce((best, q) => q.bid > best.bid ? q : best, valid[0]);
+      const bestAskQuote = valid.reduce((best, q) => q.ask < best.ask ? q : best, valid[0]);
+
+      const grossSpread = bestBidQuote.bid - bestAskQuote.ask;
+      const grossSpreadPct = (grossSpread / bestAskQuote.ask) * 100;
+
+      // Assume 0.1% fee each side (buy + sell)
+      const feeRate = 0.001;
+      const buyCost = bestAskQuote.ask * (1 + feeRate);
+      const sellProceeds = bestBidQuote.bid * (1 - feeRate);
+      const netProfit = sellProceeds - buyCost;
+      const netProfitPct = (netProfit / buyCost) * 100;
+
+      const actionable = netProfit > 0;
+
+      return {
+        symbol,
+        quotes,
+        arbitrage: {
+          bestBidVenue: bestBidQuote.exchange,
+          bestBidPrice: bestBidQuote.bid,
+          bestAskVenue: bestAskQuote.exchange,
+          bestAskPrice: bestAskQuote.ask,
+          grossSpread: Math.round(grossSpread * 100) / 100,
+          grossSpreadPct: Math.round(grossSpreadPct * 10000) / 10000,
+          feeRatePerSide: feeRate,
+          netProfitPerUnit: Math.round(netProfit * 100) / 100,
+          netProfitPct: Math.round(netProfitPct * 10000) / 10000,
+          actionable,
+        },
       };
     }),
   );

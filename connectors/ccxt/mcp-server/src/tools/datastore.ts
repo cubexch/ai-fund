@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { ExchangeClient } from '../client/exchange.js';
 import { handler } from './handler.js';
 import { MarketDataStore, type OHLCVRow } from '../../../../../lib/datastore.js';
+import type { TradeJournal } from '../client/trade-journal.js';
 import {
   sma, ema, rsi, bollingerBands, atr, obv, type OHLCV,
 } from '../../../../../lib/indicators.js';
@@ -323,6 +324,69 @@ export function registerDatastoreTools(server: McpServer, client: ExchangeClient
             : deviation < -2 ? 'Below VWAP (potential support)'
             : 'Near VWAP (neutral)')
           : undefined,
+      };
+    }),
+  );
+
+  // ── Trade Journal Tools ─────────────────────────────────────
+
+  server.tool(
+    'get_trade_journal',
+    `Query the trade journal for execution history. Filter by exchange, symbol, strategy, and time range. Returns individual trade records ordered by timestamp (newest first).`,
+    {
+      exchange: z.string().optional().describe('Filter by exchange ID'),
+      symbol: z.string().optional().describe('Filter by trading pair (e.g., BTC/USDT)'),
+      strategy: z.string().optional().describe('Filter by strategy/agent name'),
+      since: z.string().optional().describe('Start date (ISO 8601, e.g., "2024-01-01")'),
+      limit: z.number().default(100).describe('Max trades to return'),
+    } as any,
+    handler(async (params: any) => {
+      const journal = (client as any).journal as TradeJournal | undefined;
+      if (!journal) throw new Error('Trade journal not configured.');
+
+      const sinceTs = params.since ? new Date(params.since).getTime() : undefined;
+
+      const trades = await journal.query({
+        exchange: params.exchange,
+        symbol: params.symbol,
+        strategy: params.strategy,
+        since: sinceTs,
+        limit: params.limit,
+      });
+
+      return {
+        exchange: client.exchangeId,
+        count: trades.length,
+        trades,
+      };
+    }),
+  );
+
+  server.tool(
+    'get_pnl_report',
+    `P&L summary from the trade journal. Computes realized P&L, buy/sell volume, total fees, and traded symbols. Filter by exchange, symbol, strategy, and time range.`,
+    {
+      exchange: z.string().optional().describe('Filter by exchange ID'),
+      symbol: z.string().optional().describe('Filter by trading pair (e.g., BTC/USDT)'),
+      strategy: z.string().optional().describe('Filter by strategy/agent name'),
+      since: z.string().optional().describe('Start date (ISO 8601, e.g., "2024-01-01")'),
+    } as any,
+    handler(async (params: any) => {
+      const journal = (client as any).journal as TradeJournal | undefined;
+      if (!journal) throw new Error('Trade journal not configured.');
+
+      const sinceTs = params.since ? new Date(params.since).getTime() : undefined;
+
+      const report = await journal.pnl({
+        exchange: params.exchange,
+        symbol: params.symbol,
+        strategy: params.strategy,
+        since: sinceTs,
+      });
+
+      return {
+        exchange: client.exchangeId,
+        ...report,
       };
     }),
   );
