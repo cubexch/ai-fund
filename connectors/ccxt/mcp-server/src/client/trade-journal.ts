@@ -68,11 +68,20 @@ const CREATE_INDEX_STRATEGY_SQL = `
 
 // ── Helpers ──────────────────────────────────────────────────
 
+/** Coerce BigInt values to numbers in a row object. */
+function coerceBigInts(row: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row)) {
+    out[k] = typeof v === 'bigint' ? Number(v) : v;
+  }
+  return out;
+}
+
 function runQuery(db: Database, sql: string, params: unknown[] = []): Promise<Record<string, unknown>[]> {
   return new Promise((resolve, reject) => {
     db.all(sql, ...params, (err: Error | null, rows: Record<string, unknown>[]) => {
       if (err) reject(err);
-      else resolve(rows ?? []);
+      else resolve((rows ?? []).map(coerceBigInts));
     });
   });
 }

@@ -295,8 +295,8 @@ export function registerStrategyTools(server: McpServer, client: ExchangeClient)
         symbolList,
       );
       // Round matrix values
-      corrMatrix.matrix = corrMatrix.matrix.map(row =>
-        row.map(v => Math.round(v * 10000) / 10000),
+      corrMatrix.matrix = corrMatrix.matrix.map((row: number[]) =>
+        row.map((v: number) => Math.round(v * 10000) / 10000),
       );
 
       return {
@@ -715,7 +715,7 @@ export function registerStrategyTools(server: McpServer, client: ExchangeClient)
           continue;
         }
 
-        const closes = candles.map(c => c.close);
+        const closes = candles.map((c: any) => c.close);
         const lookbackCloses = closes.slice(-params.lookback);
         const currentPrice = closes[closes.length - 1];
 
@@ -810,7 +810,7 @@ export function registerStrategyTools(server: McpServer, client: ExchangeClient)
           open: b.open, high: b.high, low: b.low, close: b.close,
           volume: b.volume, timestamp: b.timestamp,
         }));
-        const closes = candles.map(c => c.close);
+        const closes = candles.map((c: any) => c.close);
         const currentPrice = closes[closes.length - 1];
 
         // RSI(14)
@@ -1369,7 +1369,7 @@ export function registerStrategyTools(server: McpServer, client: ExchangeClient)
 
       // Volatility regime classification
       const avgAtr = atr14.length > 0
-        ? atr14.reduce((a, b) => a + b, 0) / atr14.length
+        ? atr14.reduce((a: number, b: number) => a + b, 0) / atr14.length
         : currentAtr;
       const atrRatio = avgAtr > 0 ? currentAtr / avgAtr : 1;
       let volRegime: string;

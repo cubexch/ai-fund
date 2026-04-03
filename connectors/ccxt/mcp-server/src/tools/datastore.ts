@@ -131,7 +131,7 @@ export function registerDatastoreTools(server: McpServer, client: ExchangeClient
           throw new Error(`Insufficient cached data for ${symbol} (${candles.length} candles). Run ingest_history first.`);
         }
 
-        const closes = candles.map(c => c.close);
+        const closes = candles.map((c: any) => c.close);
         const rets = returns(closes);
         seriesMap[symbol] = closes;
 
@@ -200,8 +200,8 @@ export function registerDatastoreTools(server: McpServer, client: ExchangeClient
       }
 
       // Find price range
-      const highs = candles.map(c => c.high);
-      const lows = candles.map(c => c.low);
+      const highs = candles.map((c: any) => c.high);
+      const lows = candles.map((c: any) => c.low);
       const priceMin = Math.min(...lows);
       const priceMax = Math.max(...highs);
       const binSize = (priceMax - priceMin) / params.bins;

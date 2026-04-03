@@ -59,8 +59,8 @@ export function registerRegimeTools(server: McpServer, client: ExchangeClient) {
 
           const analysis = detector.analyze(bars);
           const recentTransitions = (analysis.transitions ?? [])
-            .filter(t => t.barsAgo <= params.lookbackBars)
-            .map(t => ({ from: t.from, to: t.to, barsAgo: t.barsAgo }));
+            .filter((t: any) => t.barsAgo <= params.lookbackBars)
+            .map((t: any) => ({ from: t.from, to: t.to, barsAgo: t.barsAgo }));
 
           if (recentTransitions.length > 0) {
             results.push({
@@ -128,7 +128,7 @@ export function registerRegimeTools(server: McpServer, client: ExchangeClient) {
         barsAnalyzed: bars.length,
         totalRegimePeriods: history.length,
         summary,
-        history: history.map(h => ({
+        history: history.map((h: any) => ({
           regime: h.regime,
           startTimestamp: h.startTimestamp,
           endTimestamp: h.endTimestamp,

@@ -121,7 +121,7 @@ export async function ingestYahoo(
       }
 
       // Fetch from Yahoo Finance
-      const data = await yahooFinance.chart(symbol, {
+      const data = await (yahooFinance as any).chart(symbol, {
         period1,
         period2,
         interval: interval as '1d' | '1wk' | '1mo',
@@ -140,8 +140,8 @@ export async function ingestYahoo(
       // Convert to OHLCVRow format
       const assetType = detectAssetType(symbol);
       const rows: OHLCVRow[] = data.quotes
-        .filter(q => q.open != null && q.close != null && q.high != null && q.low != null)
-        .map(q => ({
+        .filter((q: any) => q.open != null && q.close != null && q.high != null && q.low != null)
+        .map((q: any) => ({
           symbol: symbol.toUpperCase(),
           exchange: 'yahoo',
           asset_type: assetType,

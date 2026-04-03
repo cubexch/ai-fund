@@ -208,7 +208,7 @@ export function registerBacktestTools(
       const bt = new Backtester(bars, config);
       const results = bt.runAll();
 
-      const ranked = results.map((r, idx) => ({
+      const ranked = results.map((r: any, idx: number) => ({
         rank: idx + 1,
         ...summarize(r),
       }));

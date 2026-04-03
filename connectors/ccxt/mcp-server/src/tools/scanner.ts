@@ -186,11 +186,11 @@ export function registerScannerTools(
         supports: withDistance(levels.supports),
         resistances: withDistance(levels.resistances),
         nearestSupport: levels.supports.length > 0
-          ? levels.supports.reduce((closest, s) =>
+          ? levels.supports.reduce((closest: number, s: number) =>
               Math.abs(s - currentPrice) < Math.abs(closest - currentPrice) ? s : closest)
           : null,
         nearestResistance: levels.resistances.length > 0
-          ? levels.resistances.reduce((closest, r) =>
+          ? levels.resistances.reduce((closest: number, r: number) =>
               Math.abs(r - currentPrice) < Math.abs(closest - currentPrice) ? r : closest)
           : null,
       };
@@ -222,7 +222,7 @@ export function registerScannerTools(
         currentPrice: bars[bars.length - 1].close,
         candlesAnalyzed: bars.length,
         patternsDetected: patterns.length,
-        patterns: patterns.map(p => ({
+        patterns: patterns.map((p: any) => ({
           source: p.source,
           type: p.type,
           strength: p.strength,
@@ -261,17 +261,17 @@ export function registerScannerTools(
           const currentPrice = bars[bars.length - 1].close;
 
           const topSignal = signals.length > 0
-            ? signals.reduce((best, s) =>
+            ? signals.reduce((best: any, s: any) =>
                 s.confidence * strengthWeight(s.strength) >
                 best.confidence * strengthWeight(best.strength) ? s : best)
             : null;
 
           const nearestSupport = levels.supports.length > 0
-            ? levels.supports.reduce((c, s) =>
+            ? levels.supports.reduce((c: number, s: number) =>
                 Math.abs(s - currentPrice) < Math.abs(c - currentPrice) ? s : c)
             : null;
           const nearestResistance = levels.resistances.length > 0
-            ? levels.resistances.reduce((c, r) =>
+            ? levels.resistances.reduce((c: number, r: number) =>
                 Math.abs(r - currentPrice) < Math.abs(c - currentPrice) ? r : c)
             : null;
 
@@ -336,7 +336,7 @@ export function registerScannerTools(
           }
 
           const signals = generator.generateSignals(bars, symbol, params.timeframe);
-          const divSignals = signals.filter(s =>
+          const divSignals = signals.filter((s: any) =>
             s.source.includes('Divergence') || s.source.includes('divergence'),
           );
 
@@ -344,7 +344,7 @@ export function registerScannerTools(
             divergences.push({
               symbol,
               currentPrice: bars[bars.length - 1].close,
-              divergences: divSignals.map(s => ({
+              divergences: divSignals.map((s: any) => ({
                 source: s.source,
                 type: s.type,
                 strength: s.strength,
@@ -405,7 +405,7 @@ export function registerScannerTools(
             bias,
             score,
             signalCount: signals.length,
-            signals: signals.map(s => ({
+            signals: signals.map((s: any) => ({
               source: s.source,
               type: s.type,
               strength: s.strength,
@@ -474,12 +474,12 @@ export function registerScannerTools(
           const volRatio = avgVol > 0 ? currentVol / avgVol : 1;
 
           // Find nearest resistance within proximity
-          const nearResistance = levels.resistances.find(r =>
+          const nearResistance = levels.resistances.find((r: number) =>
             Math.abs(r - currentPrice) / currentPrice < proximity,
           );
 
           // Find nearest support within proximity
-          const nearSupport = levels.supports.find(s =>
+          const nearSupport = levels.supports.find((s: number) =>
             Math.abs(s - currentPrice) / currentPrice < proximity,
           );
 

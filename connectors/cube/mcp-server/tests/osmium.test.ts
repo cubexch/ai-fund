@@ -21,12 +21,14 @@ import type {
 
 describe('Protobuf Encoding — Credentials', () => {
   it('encodes and decodes credentials correctly', () => {
-    const cred: Credentials = {
+    const cred = {
       accessKeyId: 'test-api-key-uuid',
       signature: 'dGVzdC1zaWduYXR1cmU=',
       timestamp: 1700000000n,
       flags: 0n,
-    };
+      verificationKey: '',
+      userKey: '',
+    } as Credentials;
 
     const encoded = CredentialsMethods.encode(cred).finish();
     expect(encoded).toBeInstanceOf(Uint8Array);

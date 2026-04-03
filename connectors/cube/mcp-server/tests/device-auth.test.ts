@@ -898,8 +898,9 @@ describe('deviceAuthFlow', () => {
     const codeCallBody = JSON.parse(fetchFn.mock.calls[0][1]?.body as string);
     expect(codeCallBody.verificationKey).toBeTruthy();
     // Decode the base64 verification key and check it contains our public key bytes
+    // Protobuf layout: outer(0x0a, len) -> V0(0x0a, len) -> PublicKey(0x12, 0x20, <32 bytes>)
     const vkBytes = Buffer.from(codeCallBody.verificationKey, 'base64');
-    const pubKeyInVk = vkBytes.subarray(2, 34); // protobuf field 1: tag(1 byte) + length(1 byte) + 32 bytes
+    const pubKeyInVk = vkBytes.subarray(6, 38);
     expect(Buffer.from(existingKeyPair.publicKey).equals(pubKeyInVk)).toBe(true);
   });
 });
