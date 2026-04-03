@@ -221,6 +221,50 @@ describe('get_order_flow_imbalance tool', () => {
   });
 });
 
+// ── get_latency_stats ────────────────────────────────────
+
+describe('get_latency_stats tool', () => {
+  it('returns exchange id and stats array', async () => {
+    const { server, client } = setup();
+
+    // Record some latency samples on the client's tracker
+    client.latency.record('fetchTicker', 12);
+    client.latency.record('fetchTicker', 18);
+    client.latency.record('createOrder', 45);
+    client.latency.recordError('createOrder');
+
+    const result = await server.callTool('get_latency_stats', {});
+
+    expect(result.isError).toBeUndefined();
+    const data = JSON.parse(result.content[0].text);
+
+    expect(data.exchange).toBe('coinbase');
+    expect(Array.isArray(data.stats)).toBe(true);
+    expect(data.stats.length).toBe(2);
+
+    // Stats sorted by avgMs descending: createOrder (45) > fetchTicker (15)
+    const first = data.stats[0];
+    expect(first.method).toBe('createOrder');
+    expect(first.count).toBe(1);
+    expect(first.avgMs).toBe(45);
+    expect(first.errorCount).toBe(1);
+
+    const second = data.stats[1];
+    expect(second.method).toBe('fetchTicker');
+    expect(second.count).toBe(2);
+    expect(second.avgMs).toBe(15);
+  });
+
+  it('returns empty stats when no requests have been made', async () => {
+    const { server } = setup();
+    const result = await server.callTool('get_latency_stats', {});
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.exchange).toBe('coinbase');
+    expect(data.stats).toEqual([]);
+  });
+});
+
 // ── detect_arbitrage_opportunity ──────────────────────────
 
 describe('detect_arbitrage_opportunity tool', () => {
@@ -290,5 +334,264 @@ describe('detect_arbitrage_opportunity tool', () => {
 
     expect(data.quotes[0].exchange).toBe('fake1');
     expect(data.quotes[1].exchange).toBe('fake2');
+  });
+});
+
+// ── get_market_microstructure ────────────────────────────
+
+function setupMicrostructure(overrides: Record<string, unknown> = {}) {
+  return setup({
+    getOrderBook: async (symbol: string, _depth?: number) => ({
+      symbol,
+      bids: [
+        [64990, 2.0],
+        [64980, 1.5],
+        [64970, 3.0],
+        [64900, 5.0],
+        [64800, 10.0],
+      ] as [number, number][],
+      asks: [
+        [65010, 1.0],
+        [65020, 2.5],
+        [65030, 1.5],
+        [65100, 4.0],
+        [65200, 8.0],
+      ] as [number, number][],
+      bestBid: 64990,
+      bestAsk: 65010,
+      mid: 65000,
+      spread: 20,
+      spreadBps: 3.08,
+      timestamp: 1700000000000,
+    }),
+    ...overrides,
+  });
+}
+
+describe('get_market_microstructure tool', () => {
+  it('computes imbalance, depth bands, price impact, shape, and weighted mid', async () => {
+    const { server } = setupMicrostructure();
+    const result = await server.callTool('get_market_microstructure', { symbol: 'BTC/USDT', depth: 20 });
+
+    expect(result.isError).toBeUndefined();
+    const data = JSON.parse(result.content[0].text);
+
+    expect(data.symbol).toBe('BTC/USDT');
+    expect(data.mid).toBe(65000);
+    expect(data.bestBid).toBe(64990);
+    expect(data.bestAsk).toBe(65010);
+    expect(data.spread).toBe(20);
+    expect(data.spreadBps).toBe(3.08);
+
+    // bidVolume = 2+1.5+3+5+10 = 21.5, askVolume = 1+2.5+1.5+4+8 = 17
+    expect(data.bidVolume).toBeCloseTo(21.5, 4);
+    expect(data.askVolume).toBeCloseTo(17, 4);
+
+    // imbalance = (21.5 - 17) / (21.5 + 17) = 4.5 / 38.5 ≈ 0.1169
+    expect(data.imbalance).toBeCloseTo(0.1169, 3);
+
+    // Depth bands
+    expect(data.depthBands).toBeDefined();
+    expect(data.depthBands['0.1%']).toBeDefined();
+    expect(data.depthBands['0.5%']).toBeDefined();
+    expect(data.depthBands['1.0%']).toBeDefined();
+
+    // 0.1% band = 65 price units from mid.
+    // Bids within 64935..65000: 64990 (2.0), 64980 (1.5), 64970 (3.0) = 6.5
+    // Asks within 65000..65065: 65010 (1.0), 65020 (2.5), 65030 (1.5) = 5.0
+    expect(data.depthBands['0.1%'].bidDepth).toBeCloseTo(6.5, 4);
+    expect(data.depthBands['0.1%'].askDepth).toBeCloseTo(5.0, 4);
+
+    // Price impact
+    expect(data.priceImpact).toBeDefined();
+    expect(data.priceImpact.marketBuy).toBeDefined();
+    expect(data.priceImpact.marketSell).toBeDefined();
+    expect(data.priceImpact.marketBuy.avgPrice).toBeDefined();
+    expect(data.priceImpact.marketBuy.impactPct).toBeDefined();
+
+    // Shape
+    expect(data.shape).toBeDefined();
+    expect(data.shape.bids.length).toBe(5);
+    expect(data.shape.asks.length).toBe(5);
+    // First level ratio is always 1.0
+    expect(data.shape.bids[0].ratioVsTop).toBe(1);
+    expect(data.shape.asks[0].ratioVsTop).toBe(1);
+    // Second bid level: 1.5 / 2.0 = 0.75
+    expect(data.shape.bids[1].ratioVsTop).toBe(0.75);
+    // Second ask level: 2.5 / 1.0 = 2.5
+    expect(data.shape.asks[1].ratioVsTop).toBe(2.5);
+
+    // Weighted mid: (bestBid * askTopSize + bestAsk * bidTopSize) / (bidTopSize + askTopSize)
+    // = (64990 * 1.0 + 65010 * 2.0) / (2.0 + 1.0) = (64990 + 130020) / 3 = 195010 / 3 ≈ 65003.33
+    expect(data.weightedMid).toBeCloseTo(65003.33, 0);
+  });
+
+  it('throws on empty order book', async () => {
+    const { server } = setupMicrostructure({
+      getOrderBook: async (symbol: string) => ({
+        symbol,
+        bids: [],
+        asks: [],
+        bestBid: undefined,
+        bestAsk: undefined,
+        mid: undefined,
+        spread: undefined,
+        spreadBps: undefined,
+        timestamp: 1700000000000,
+      }),
+    });
+    const result = await server.callTool('get_market_microstructure', { symbol: 'BTC/USDT' });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Cannot determine mid price');
+  });
+
+  it('shows positive imbalance when bids dominate', async () => {
+    const { server } = setupMicrostructure();
+    const result = await server.callTool('get_market_microstructure', { symbol: 'BTC/USDT' });
+    const data = JSON.parse(result.content[0].text);
+    // bidVolume (21.5) > askVolume (17), so imbalance > 0
+    expect(data.imbalance).toBeGreaterThan(0);
+  });
+
+  it('passes depth parameter to getOrderBook', async () => {
+    const { server, client } = setupMicrostructure();
+    await server.callTool('get_market_microstructure', { symbol: 'ETH/USDT', depth: 50 });
+    const call = client.calls.find(c => c.method === 'getOrderBook');
+    expect(call).toBeDefined();
+    expect(call!.args[0]).toBe('ETH/USDT');
+    expect(call!.args[1]).toBe(50);
+  });
+});
+
+// ── get_momentum_scanner ─────────────────────────────────
+
+function makeBars(count: number, startPrice: number, trend: number, baseVolume: number, volumeMultiplier: number) {
+  const bars = [];
+  for (let i = 0; i < count; i++) {
+    const close = startPrice + trend * i;
+    // Last 5 bars get multiplied volume
+    const vol = i >= count - 5 ? baseVolume * volumeMultiplier : baseVolume;
+    bars.push({
+      timestamp: 1700000000000 + i * 3600000,
+      open: close - trend * 0.5,
+      high: close + 10,
+      low: close - 10,
+      close,
+      volume: vol,
+    });
+  }
+  return bars;
+}
+
+function setupMomentum(overrides: Record<string, unknown> = {}) {
+  return setup({
+    getBars: async (symbol: string, _timeframe: string, _since: unknown, _limit: number) => {
+      const barSets: Record<string, any[]> = {
+        'BTC/USDT': makeBars(50, 60000, 100, 500, 3),   // strong uptrend, volume surge
+        'ETH/USDT': makeBars(50, 3000, -20, 1000, 0.5),  // downtrend, volume decline
+        'SOL/USDT': makeBars(50, 100, 0.5, 200, 1.2),    // mild uptrend, slight volume bump
+      };
+      return barSets[symbol] ?? makeBars(50, 100, 0, 100, 1);
+    },
+    ...overrides,
+  });
+}
+
+describe('get_momentum_scanner tool', () => {
+  it('returns symbols sorted by momentum score descending', async () => {
+    const { server } = setupMomentum();
+    const result = await server.callTool('get_momentum_scanner', {
+      symbols: 'BTC/USDT,ETH/USDT,SOL/USDT',
+      timeframe: '1h',
+    });
+
+    expect(result.isError).toBeUndefined();
+    const data = JSON.parse(result.content[0].text);
+
+    expect(data.exchange).toBe('Coinbase');
+    expect(data.timeframe).toBe('1h');
+    expect(data.symbols).toHaveLength(3);
+
+    // BTC has strongest uptrend + volume surge -> highest momentum
+    expect(data.symbols[0].symbol).toBe('BTC/USDT');
+    expect(data.symbols[0].momentumScore).toBeGreaterThan(0);
+
+    // ETH has downtrend -> negative momentum, should be last
+    const ethResult = data.symbols.find((s: any) => s.symbol === 'ETH/USDT');
+    expect(ethResult).toBeDefined();
+    expect(ethResult.momentumScore).toBeLessThan(0);
+
+    // Verify sorted descending
+    for (let i = 1; i < data.symbols.length; i++) {
+      expect(data.symbols[i - 1].momentumScore).toBeGreaterThanOrEqual(data.symbols[i].momentumScore);
+    }
+  });
+
+  it('includes price change fields and volume surge', async () => {
+    const { server } = setupMomentum();
+    const result = await server.callTool('get_momentum_scanner', {
+      symbols: 'BTC/USDT',
+      timeframe: '1h',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    const btc = data.symbols[0];
+
+    expect(btc.price).toBeDefined();
+    expect(btc.change1Bar).toBeDefined();
+    expect(btc.change5Bar).toBeDefined();
+    expect(btc.change10Bar).toBeDefined();
+    expect(btc.change20Bar).toBeDefined();
+    expect(btc.volumeSurge).toBeDefined();
+    expect(btc.momentumScore).toBeDefined();
+
+    // BTC trend = +100/bar, volume surge = 3x
+    expect(btc.change1Bar).toBeGreaterThan(0);
+    expect(btc.change20Bar).toBeGreaterThan(0);
+    expect(btc.volumeSurge).toBe(3);
+  });
+
+  it('handles errors per symbol gracefully', async () => {
+    const { server } = setupMomentum({
+      getBars: async (symbol: string) => {
+        if (symbol === 'FAIL/USDT') throw new Error('exchange error');
+        return makeBars(50, 100, 1, 100, 1);
+      },
+    });
+
+    const result = await server.callTool('get_momentum_scanner', {
+      symbols: 'BTC/USDT,FAIL/USDT',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.symbols).toHaveLength(2);
+
+    const good = data.symbols.find((s: any) => s.symbol === 'BTC/USDT');
+    const bad = data.symbols.find((s: any) => s.symbol === 'FAIL/USDT');
+    expect(good.momentumScore).toBeDefined();
+    expect(bad.error).toContain('exchange error');
+  });
+
+  it('reports insufficient data instead of crashing', async () => {
+    const { server } = setupMomentum({
+      getBars: async () => makeBars(10, 100, 1, 100, 1), // only 10 bars
+    });
+
+    const result = await server.callTool('get_momentum_scanner', {
+      symbols: 'BTC/USDT',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.symbols[0].error).toContain('Insufficient data');
+  });
+
+  it('defaults timeframe to 1h', async () => {
+    const { server } = setupMomentum();
+    const result = await server.callTool('get_momentum_scanner', {
+      symbols: 'BTC/USDT',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.timeframe).toBe('1h');
   });
 });

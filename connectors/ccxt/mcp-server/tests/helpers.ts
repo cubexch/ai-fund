@@ -4,6 +4,7 @@
 
 import type { ExchangeClient } from '../src/client/exchange.js';
 import type { CredentialStore, CcxtCredentials } from '../src/client/credential-store.js';
+import { LatencyTracker } from '../src/client/latency-tracker.js';
 
 // ── In-memory credential store for testing ────────────────
 
@@ -29,6 +30,7 @@ export interface MockCall {
  */
 export function createMockClient(overrides: Partial<ExchangeClient> = {}): ExchangeClient & { calls: MockCall[] } {
   const calls: MockCall[] = [];
+  const defaultLatency = new LatencyTracker();
 
   const proxy = new Proxy({} as ExchangeClient & { calls: MockCall[] }, {
     get(target, prop: string) {
@@ -37,6 +39,7 @@ export function createMockClient(overrides: Partial<ExchangeClient> = {}): Excha
       if (prop === 'name') return overrides.name ?? 'Coinbase';
       if (prop === 'hasCredentials') return overrides.hasCredentials ?? true;
       if (prop === 'isSandbox') return overrides.isSandbox ?? false;
+      if (prop === 'latency') return overrides.latency ?? defaultLatency;
 
       if (prop in overrides) {
         const val = (overrides as any)[prop];

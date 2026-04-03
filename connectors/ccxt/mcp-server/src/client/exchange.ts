@@ -10,6 +10,7 @@
 import ccxt, { type Exchange, type Ticker, type Order } from 'ccxt';
 import { MarketDataStore, type OHLCVRow } from '../../../../../lib/datastore.js';
 import { RateLimiter } from './rate-limiter.js';
+import { LatencyTracker } from './latency-tracker.js';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -194,6 +195,8 @@ export class ExchangeClient {
   readonly exchangeId: string;
   /** DuckDB store for read-through caching. Null when not configured. */
   store: MarketDataStore | null;
+  /** Per-method API latency tracker for performance monitoring. */
+  readonly latency = new LatencyTracker();
 
   constructor(opts: ExchangeClientOpts) {
     this.exchangeId = opts.exchangeId;
@@ -269,6 +272,18 @@ export class ExchangeClient {
     if (this.limiter) await this.limiter.acquire();
   }
 
+  private async timed<T>(method: string, fn: () => Promise<T>): Promise<T> {
+    const start = performance.now();
+    try {
+      const result = await fn();
+      this.latency.record(method, performance.now() - start);
+      return result;
+    } catch (err) {
+      this.latency.recordError(method);
+      throw err;
+    }
+  }
+
   // ── Public: Market Data ──────────────────────────────────
 
   async loadMarkets(): Promise<MarketResult[]> {
@@ -280,13 +295,13 @@ export class ExchangeClient {
 
   async getTicker(symbol: string): Promise<TickerResult> {
     await this.throttle();
-    const t = await this.exchange.fetchTicker(symbol);
+    const t = await this.timed('fetchTicker', () => this.exchange.fetchTicker(symbol));
     return this.formatTicker(t);
   }
 
   async getTickers(symbols?: string[]): Promise<TickerResult[]> {
     await this.throttle();
-    const tickers = await this.exchange.fetchTickers(symbols);
+    const tickers = await this.timed('fetchTickers', () => this.exchange.fetchTickers(symbols));
     return Object.values(tickers).map(t => this.formatTicker(t));
   }
 
@@ -306,7 +321,7 @@ export class ExchangeClient {
       const lastCachedTs = cached.length > 0 ? cached[cached.length - 1].timestamp : undefined;
       const fetchSince = lastCachedTs ? lastCachedTs + 1 : since;
 
-      const ohlcv = await this.exchange.fetchOHLCV(symbol, timeframe, fetchSince, limit);
+      const ohlcv = await this.timed('fetchOHLCV', () => this.exchange.fetchOHLCV(symbol, timeframe, fetchSince, limit));
       const fresh: BarResult[] = ohlcv.map(candle => ({
         timestamp: candle[0] as number,
         open: candle[1] as number,
@@ -350,7 +365,7 @@ export class ExchangeClient {
     }
 
     // No store — direct fetch
-    const ohlcv = await this.exchange.fetchOHLCV(symbol, timeframe, since, limit);
+    const ohlcv = await this.timed('fetchOHLCV', () => this.exchange.fetchOHLCV(symbol, timeframe, since, limit));
     return ohlcv.map(candle => ({
       timestamp: candle[0] as number,
       open: candle[1] as number,
@@ -363,7 +378,7 @@ export class ExchangeClient {
 
   async getOrderBook(symbol: string, limit?: number): Promise<OrderBookResult> {
     await this.throttle();
-    const ob = await this.exchange.fetchOrderBook(symbol, limit);
+    const ob = await this.timed('fetchOrderBook', () => this.exchange.fetchOrderBook(symbol, limit));
     const bids = ob.bids as [number, number][];
     const asks = ob.asks as [number, number][];
     const bestBid = bids.length > 0 ? bids[0][0] : undefined;
@@ -388,7 +403,7 @@ export class ExchangeClient {
 
   async getTrades(symbol: string, since?: number, limit?: number): Promise<TradeResult[]> {
     await this.throttle();
-    const trades = await this.exchange.fetchTrades(symbol, since, limit);
+    const trades = await this.timed('fetchTrades', () => this.exchange.fetchTrades(symbol, since, limit));
     return trades.map(formatTrade);
   }
 
@@ -472,12 +487,12 @@ export class ExchangeClient {
     await this.ensureMarkets();
     const roundedAmount = this.roundAmount(symbol, amount);
     const roundedPrice = price !== undefined ? this.roundPrice(symbol, price) : undefined;
-    const order = await this.exchange.createOrder(symbol, type, side, roundedAmount, roundedPrice);
+    const order = await this.timed('createOrder', () => this.exchange.createOrder(symbol, type, side, roundedAmount, roundedPrice));
     return this.formatOrder(order);
   }
 
   async cancelOrder(orderId: string, symbol?: string): Promise<void> {
-    await this.exchange.cancelOrder(orderId, symbol);
+    await this.timed('cancelOrder', () => this.exchange.cancelOrder(orderId, symbol));
   }
 
   async modifyOrder(
@@ -541,7 +556,7 @@ export class ExchangeClient {
 
   async getQuote(symbol: string): Promise<QuoteResult> {
     await this.throttle();
-    const t = await this.exchange.fetchTicker(symbol);
+    const t = await this.timed('fetchTicker', () => this.exchange.fetchTicker(symbol));
     const bid = t.bid;
     const ask = t.ask;
     const mid = bid != null && ask != null ? (bid + ask) / 2 : undefined;

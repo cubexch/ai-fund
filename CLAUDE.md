@@ -19,9 +19,9 @@ ai-fund/
 ├── connectors/ccxt/     # Built-in CCXT MCP server (Coinbase, Binance, 100+ exchanges)
 │   └── mcp-server/
 │       ├── src/cli/         # status
-│       ├── src/client/      # universal CCXT exchange wrapper
-│       ├── src/tools/       # market-data, orders, account
-│       └── tests/           # vitest test suites
+│       ├── src/client/      # exchange wrapper, rate limiter, latency tracker, trade journal
+│       ├── src/tools/       # market-data, orders, account, strategy, execution, datastore
+│       └── tests/           # vitest test suites (190+ tests)
 ├── lib/                 # Shared TS: indicators, math, format
 ├── bin/desk-state       # CLI for .desk/ state management
 ├── scripts/install.js   # npx ai-fund install|list
@@ -62,7 +62,9 @@ PRs that fail CI will not be merged. Fix locally before pushing.
 After every code change, run the following before considering the work done:
 
 1. **Typecheck**: `npm run typecheck` — must pass with zero errors
-2. **Unit tests**: `cd connectors/cube/mcp-server && npm test` — run the full vitest suite; fix any failures before committing
+2. **Unit tests**: Run relevant test suites; fix any failures before committing
+   - Cube: `cd connectors/cube/mcp-server && npm test`
+   - CCXT: `cd connectors/ccxt/mcp-server && npx vitest run`
 3. **Update docs**: If your change affects architecture, commands, agent categories, shared libraries, or exchange support, update `CLAUDE.md` and `README.md` to reflect the new state
 
 ### Task Completion Checklists
@@ -88,10 +90,14 @@ After every code change, run the following before considering the work done:
 - **`lib/indicators.ts`** — `sma`, `ema`, `rsi`, `macd`, `bollingerBands`, `atr`, `obv`, `stochastic`, `adx` + `OHLCV` interface
 - **`lib/math.ts`** — `kelly`, `fixedFractionalSize`, `valueAtRisk`, `maxDrawdown`, `sharpeRatio`, `sortinoRatio`, `calmarRatio`, `correlation`, `correlationMatrix`, `mean`, `standardDeviation`, `zScore`, `returns`, `winRate`, `profitFactor`
 - **`lib/format.ts`** — `usd`, `pct`, `qty`, `price`, `compact`, `timestamp`, `duration`, `signedValue`, `grade`, `assetIcon`, `labelAsset` + `ASSET_ICONS` map
+- **`lib/datastore.ts`** — `MarketDataStore` (DuckDB columnar store for OHLCV data with SQL queries, Parquet I/O, incremental updates)
+- **`lib/ingest/exchange.ts`** — `ingestFromExchange` (generic exchange data ingester into DuckDB)
 
 ## Testing
 
-Tests live in `connectors/cube/mcp-server/tests/` using vitest. Run with `cd connectors/cube/mcp-server && npm test`.
+Tests live in `connectors/*/mcp-server/tests/` using vitest.
+- **Cube**: `cd connectors/cube/mcp-server && npm test`
+- **CCXT**: `cd connectors/ccxt/mcp-server && npx vitest run` (190+ tests)
 
 ### Writing Tests
 
@@ -136,6 +142,11 @@ All connectors follow a standard tool naming convention (Alpaca-style, snake_cas
 **Core tools every connector provides:** `place_order`, `cancel_order`, `get_positions`, `get_account`, `get_tickers`, `get_bars`, `get_orders`, `get_fills`, `close_position`
 
 **Advanced tools (Cube reference implementation):** `get_quote`, `execute_trade`, `compare_venues`, `search_assets`, `get_trending`, `get_portfolio`, `get_fees`, `get_technical_analysis`, `calculate_position_size`
+
+**CCXT advanced tools (market-maker/arbitrage grade):**
+- *Strategy*: `get_technical_analysis`, `calculate_position_size`, `get_fees`, `get_exchange_info`, `get_market_info`, `assess_portfolio_risk`, `get_optimal_entry`
+- *Execution*: `get_execution_quality`, `get_spread_monitor`, `get_order_flow_imbalance`, `detect_arbitrage_opportunity`, `get_latency_stats`, `get_market_microstructure`, `get_momentum_scanner`
+- *Datastore (DuckDB)*: `ingest_history`, `query_market_data`, `get_cached_symbols`, `analyze_cross_symbol`, `get_volume_profile`, `get_vwap`, `get_trade_journal`, `get_pnl_report`
 
 ### Tool Namespacing
 
