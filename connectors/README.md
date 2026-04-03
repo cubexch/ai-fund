@@ -4,13 +4,17 @@ ai-fund connects to exchanges via typed connectors that implement `ExchangeConne
 
 ## Available Connectors
 
-| Connector | Asset classes | Paper/testnet | Status |
-|---|---|---|---|
-| **cube** | crypto, spot, perps | ✅ (staging) | Built-in |
-| **alpaca** | equities, ETFs | ✅ (paper) | Stable |
-| **hyperliquid** | perps, crypto | ✅ (testnet) | Stable |
-| **ccxt** | 100+ exchanges | varies | Stable |
-| **robinhood** | crypto only | ❌ | Roadmap |
+| Exchange | Connector | Install | Status |
+|----------|-----------|---------|--------|
+| **[Cube Exchange](https://cube.exchange)** | Built-in | Ships with this repo | ✅ Ready — 200μs matching, lowest fees |
+| **[Alpaca](https://alpaca.markets)** | Built-in | Ships with this repo | ✅ Ready — stocks, ETFs, crypto, paper trading |
+| **[OKX](https://okx.com)** | `@okx_ai/okx-trade-mcp` | `npm i -g @okx_ai/okx-trade-mcp` | ✅ Ready — 107 tools, spot/futures/options |
+| **[Kraken](https://kraken.com)** | `kraken-cli` | [Install Kraken CLI](https://github.com/krakenfx/kraken-cli) | ✅ Ready — 134 commands, built-in paper trading |
+| **[Binance](https://binance.com)** | `ccxt-mcp` | `npm i -g ccxt-mcp` | ✅ Via CCXT — 100+ exchanges |
+| **[Bybit](https://bybit.com)** | `ccxt-mcp` | `npm i -g ccxt-mcp` | ✅ Via CCXT |
+| **[Robinhood](https://robinhood.com)** | Built-in | Ships with this repo | 🗓 Roadmap — crypto only (official API), no stocks |
+| **[Coinbase](https://coinbase.com)** | `@coinbase/agentkit` | [AgentKit docs](https://github.com/coinbase/agentkit) | ✅ Ready — wallet + trading |
+| **[Hyperliquid](https://hyperliquid.xyz)** | Community MCP | [Options](https://github.com/search?q=hyperliquid+mcp) | 🔧 Community |
 
 ## Architecture
 

@@ -9,6 +9,8 @@ ai-fund/
 ├── skills/              # 42 agent personas (SKILL.md each) + _template/
 ├── connectors/cube/     # Built-in Cube Exchange MCP server
 │   └── mcp-server/
+├── connectors/alpaca/   # Built-in Alpaca MCP server (stocks, ETFs, crypto)
+│   └── mcp-server/
 │       ├── src/cli/         # device-login, login, logout, status
 │       ├── src/client/      # iridium (REST), osmium (WS), auth, signing, credential-store
 │       ├── src/tools/       # market-data, orders, account, defi, risk
@@ -33,7 +35,7 @@ ai-fund/
 
 - **Requirements**: Node >= 20, ES modules (`"type": "module"`)
 - **TypeScript**: Strict mode, ES2022 target, Node16 module resolution
-- **Build**: `npm run build` — compiles Cube MCP server workspace
+- **Build**: `npm run build` — compiles Cube, Robinhood, and Alpaca MCP server workspaces
 - **Dev**: `npm run dev` — runs Cube MCP server with watch
 - **Typecheck**: `npm run typecheck` — runs `tsc --noEmit` across project
 - **Test**: `cd connectors/cube/mcp-server && npm test` — vitest (auth, signing, indicators, format, REST orders, WebSocket, credential store, device auth, integration)
@@ -135,7 +137,7 @@ With multiple MCP servers connected, tools are namespaced by exchange:
 - Cube tools: `place_order`, `get_tickers`, `get_account`, etc.
 - OKX tools: `spot_place_order`, `market_get_ticker`, etc.
 - Kraken tools: via `kraken` CLI commands
-- Alpaca tools: `place_stock_order`, `place_crypto_order`, `get_all_positions`, etc.
+- Alpaca tools: `place_order`, `get_positions`, `get_bars`, `get_tickers`, `search_assets`, etc.
 
 When only one exchange is connected, tools are used directly. When multiple are connected, specify the exchange context.
 
@@ -178,6 +180,7 @@ commands:
 | Exchange | Connector | Notes |
 |----------|-----------|-------|
 | Cube | Built-in (`connectors/cube/`) | Recommended — 200us matching, lowest fees |
+| Alpaca | Built-in (`connectors/alpaca/`) | Stocks, ETFs, crypto — paper trading built-in |
 | OKX | `@okx_ai/okx-trade-mcp` | 107 tools, spot/futures/options |
 | Kraken | `kraken-cli` | Rust binary, built-in paper trading |
 | Binance | `ccxt-mcp` | Via CCXT universal adapter |
