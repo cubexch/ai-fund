@@ -850,3 +850,414 @@ export function covarianceMatrix(
 
   return { matrix, symbols, method: `shrinkage(${target}, intensity=${shrinkageIntensity.toFixed(4)})` };
 }
+
+// ── Equity Factor Model Types ───────────────────────────
+
+export interface EquityFactorEntry {
+  marketBeta: number;
+  smbBeta?: number;
+  hmlBeta?: number;
+  momentumBeta?: number;
+  qualityBeta?: number;
+  investmentBeta?: number;
+  alpha: number;
+  rSquared: number;
+  idiosyncraticVol: number;
+  significantFactors: string[];
+}
+
+export interface MomentumScore {
+  cumulativeReturn: number;
+  rank: number;
+  quintile: 1 | 2 | 3 | 4 | 5;
+  zScore: number;
+}
+
+export interface CrossSectionalMomentumResult {
+  scores: Record<string, MomentumScore>;
+  longPortfolio: string[];
+  shortPortfolio: string[];
+  spread: number;
+}
+
+export interface FactorReturnsSeries {
+  market: number[];
+  smb: number[];
+  hml: number[];
+  rmw: number[];
+  cma: number[];
+}
+
+export interface StyleAnalysisResult {
+  exposures: Record<string, number>;
+  rSquared: number;
+  trackingError: number;
+  informationRatio: number;
+  dominantStyle: string;
+}
+
+// ── Equity Factor Functions ─────────────────────────────
+
+/**
+ * Fama-French style multi-factor model for equities.
+ * Regresses each asset's returns against provided factor returns.
+ * Market factor is required; smb, hml, momentum, quality, investment are optional.
+ */
+export function equityFactorModel(
+  returns: Record<string, number[]>,
+  factors: {
+    market: number[];
+    smb?: number[];
+    hml?: number[];
+    momentum?: number[];
+    quality?: number[];
+    investment?: number[];
+  }
+): Record<string, EquityFactorEntry> {
+  const result: Record<string, EquityFactorEntry> = {};
+
+  // Build factor matrix and names from provided factors
+  const factorNames: string[] = ['market'];
+  const factorSeries: number[][] = [factors.market];
+
+  if (factors.smb) { factorNames.push('smb'); factorSeries.push(factors.smb); }
+  if (factors.hml) { factorNames.push('hml'); factorSeries.push(factors.hml); }
+  if (factors.momentum) { factorNames.push('momentum'); factorSeries.push(factors.momentum); }
+  if (factors.quality) { factorNames.push('quality'); factorSeries.push(factors.quality); }
+  if (factors.investment) { factorNames.push('investment'); factorSeries.push(factors.investment); }
+
+  const betaKeyMap: Record<string, keyof EquityFactorEntry> = {
+    market: 'marketBeta',
+    smb: 'smbBeta',
+    hml: 'hmlBeta',
+    momentum: 'momentumBeta',
+    quality: 'qualityBeta',
+    investment: 'investmentBeta',
+  };
+
+  for (const [symbol, assetRet] of Object.entries(returns)) {
+    const n = Math.min(assetRet.length, ...factorSeries.map(f => f.length));
+    if (n < 3) {
+      result[symbol] = {
+        marketBeta: 0,
+        alpha: 0,
+        rSquared: 0,
+        idiosyncraticVol: 0,
+        significantFactors: [],
+      };
+      continue;
+    }
+
+    const y = assetRet.slice(0, n);
+    const X: number[][] = Array.from({ length: n }, (_, i) =>
+      factorSeries.map(f => f[i])
+    );
+
+    const reg = olsRegression(y, X);
+
+    const entry: EquityFactorEntry = {
+      marketBeta: reg.betas[0],
+      alpha: reg.alpha,
+      rSquared: Math.max(0, Math.min(1, reg.rSquared)),
+      idiosyncraticVol: standardDeviation(reg.residuals),
+      significantFactors: [],
+    };
+
+    // Assign optional betas and determine significance
+    for (let i = 0; i < factorNames.length; i++) {
+      const key = betaKeyMap[factorNames[i]];
+      if (key && key !== 'marketBeta') {
+        (entry as unknown as Record<string, unknown>)[key] = reg.betas[i];
+      }
+      if (Math.abs(reg.tStats[i]) > 2) {
+        entry.significantFactors.push(factorNames[i]);
+      }
+    }
+
+    result[symbol] = entry;
+  }
+
+  return result;
+}
+
+/**
+ * Cross-sectional momentum scores.
+ * Computes cumulative return over lookback period (skipping recent days to avoid reversal).
+ * Ranks assets into quintiles; long top quintile, short bottom quintile.
+ */
+export function crossSectionalMomentum(
+  returns: Record<string, number[]>,
+  params?: { lookback?: number; holdingPeriod?: number; skipRecent?: number }
+): CrossSectionalMomentumResult {
+  const lookback = params?.lookback ?? 252;
+  const skipRecent = params?.skipRecent ?? 21;
+
+  const symbols = Object.keys(returns);
+  if (symbols.length === 0) {
+    return { scores: {}, longPortfolio: [], shortPortfolio: [], spread: 0 };
+  }
+
+  // Compute cumulative return for each asset over the lookback window (excluding skipRecent)
+  const cumReturns: Record<string, number> = {};
+  for (const sym of symbols) {
+    const r = returns[sym];
+    const end = r.length - skipRecent;
+    const start = Math.max(0, end - lookback);
+    if (end <= start || end <= 0) {
+      cumReturns[sym] = 0;
+    } else {
+      let cumRet = 1;
+      for (let i = start; i < end; i++) {
+        cumRet *= (1 + r[i]);
+      }
+      cumReturns[sym] = cumRet - 1;
+    }
+  }
+
+  // Rank by cumulative return (descending)
+  const sorted = [...symbols].sort((a, b) => cumReturns[b] - cumReturns[a]);
+
+  // Compute z-scores
+  const cumValues = symbols.map(s => cumReturns[s]);
+  const cumMean = mean(cumValues);
+  const cumStd = standardDeviation(cumValues);
+
+  const scores: Record<string, MomentumScore> = {};
+  const n = sorted.length;
+
+  for (let i = 0; i < n; i++) {
+    const sym = sorted[i];
+    const rank = i + 1;
+    const quintile = Math.min(5, Math.floor((i / n) * 5) + 1) as 1 | 2 | 3 | 4 | 5;
+    const zScore = cumStd === 0 ? 0 : (cumReturns[sym] - cumMean) / cumStd;
+
+    scores[sym] = {
+      cumulativeReturn: cumReturns[sym],
+      rank,
+      quintile,
+      zScore,
+    };
+  }
+
+  // Long top quintile (quintile 1), short bottom quintile (quintile 5)
+  const longPortfolio = sorted.filter(s => scores[s].quintile === 1);
+  const shortPortfolio = sorted.filter(s => scores[s].quintile === 5);
+
+  // Spread: average long return - average short return
+  const longAvg = longPortfolio.length > 0
+    ? mean(longPortfolio.map(s => cumReturns[s]))
+    : 0;
+  const shortAvg = shortPortfolio.length > 0
+    ? mean(shortPortfolio.map(s => cumReturns[s]))
+    : 0;
+  const spread = longAvg - shortAvg;
+
+  return { scores, longPortfolio, shortPortfolio, spread };
+}
+
+/**
+ * Build Fama-French factor return series from cross-sectional sorts.
+ * Sorts assets by characteristics, forms long-short portfolios.
+ */
+export function computeFactorReturns(
+  returns: Record<string, number[]>,
+  characteristics: Record<string, {
+    marketCap?: number;
+    bookToMarket?: number;
+    profitability?: number;
+    investment?: number;
+  }>,
+  marketReturn: number[]
+): FactorReturnsSeries {
+  const symbols = Object.keys(returns).filter(s => characteristics[s]);
+  const n = Math.min(marketReturn.length, ...symbols.map(s => returns[s].length));
+
+  if (symbols.length < 2 || n < 1) {
+    const empty = Array(n > 0 ? n : 0).fill(0);
+    return { market: marketReturn.slice(0, n), smb: [...empty], hml: [...empty], rmw: [...empty], cma: [...empty] };
+  }
+
+  // Helper: sort symbols by a characteristic, split into top/bottom halves,
+  // compute equal-weight long-short return series
+  function longShortFactor(
+    sortKey: (sym: string) => number | undefined,
+    longHighValues: boolean
+  ): number[] {
+    const withVal = symbols.filter(s => sortKey(s) !== undefined);
+    if (withVal.length < 2) return Array(n).fill(0);
+
+    const sorted = [...withVal].sort((a, b) => (sortKey(a)! - sortKey(b)!));
+    const mid = Math.floor(sorted.length / 2);
+    const bottom = sorted.slice(0, mid);
+    const top = sorted.slice(mid);
+
+    const longGroup = longHighValues ? top : bottom;
+    const shortGroup = longHighValues ? bottom : top;
+
+    const factorRets: number[] = [];
+    for (let t = 0; t < n; t++) {
+      const longRet = longGroup.length > 0
+        ? mean(longGroup.map(s => returns[s][t] ?? 0))
+        : 0;
+      const shortRet = shortGroup.length > 0
+        ? mean(shortGroup.map(s => returns[s][t] ?? 0))
+        : 0;
+      factorRets.push(longRet - shortRet);
+    }
+    return factorRets;
+  }
+
+  // SMB: small minus big (long small cap, short big cap)
+  const smb = longShortFactor(s => characteristics[s].marketCap, false);
+
+  // HML: high minus low book-to-market (long high B/M, short low B/M)
+  const hml = longShortFactor(s => characteristics[s].bookToMarket, true);
+
+  // RMW: robust minus weak profitability (long high profitability, short low)
+  const rmw = longShortFactor(s => characteristics[s].profitability, true);
+
+  // CMA: conservative minus aggressive investment (long low investment, short high investment)
+  const cma = longShortFactor(s => characteristics[s].investment, false);
+
+  return {
+    market: marketReturn.slice(0, n),
+    smb,
+    hml,
+    rmw,
+    cma,
+  };
+}
+
+/**
+ * Sharpe style analysis.
+ * Regresses fund returns against benchmark/style indices.
+ * If constrainWeights is true (default), constrains weights to be non-negative and sum to 1.
+ */
+export function styleAnalysis(
+  fundReturns: number[],
+  benchmarkReturns: Record<string, number[]>,
+  params?: { constrainWeights?: boolean }
+): StyleAnalysisResult {
+  const constrainWeights = params?.constrainWeights ?? true;
+  const benchNames = Object.keys(benchmarkReturns);
+
+  if (benchNames.length === 0 || fundReturns.length === 0) {
+    return {
+      exposures: {},
+      rSquared: 0,
+      trackingError: 0,
+      informationRatio: 0,
+      dominantStyle: '',
+    };
+  }
+
+  const benchSeries = benchNames.map(b => benchmarkReturns[b]);
+  const n = Math.min(fundReturns.length, ...benchSeries.map(s => s.length));
+  if (n < 2) {
+    return {
+      exposures: Object.fromEntries(benchNames.map(b => [b, 0])),
+      rSquared: 0,
+      trackingError: 0,
+      informationRatio: 0,
+      dominantStyle: benchNames[0] ?? '',
+    };
+  }
+
+  const y = fundReturns.slice(0, n);
+  const X: number[][] = Array.from({ length: n }, (_, i) =>
+    benchSeries.map(s => s[i])
+  );
+
+  let exposures: Record<string, number>;
+
+  if (!constrainWeights) {
+    // Unconstrained OLS
+    const reg = olsRegression(y, X);
+    exposures = Object.fromEntries(benchNames.map((b, i) => [b, reg.betas[i]]));
+  } else {
+    // Constrained: weights >= 0, sum to 1
+    // Use iterative projection onto simplex after OLS
+    const k = benchNames.length;
+    let weights = Array(k).fill(1 / k);
+
+    // Iterative projected gradient descent
+    const maxIter = 500;
+    const lr = 0.01;
+
+    for (let iter = 0; iter < maxIter; iter++) {
+      // Compute gradient of sum-of-squared residuals
+      const gradient = Array(k).fill(0);
+      for (let t = 0; t < n; t++) {
+        let pred = 0;
+        for (let j = 0; j < k; j++) {
+          pred += weights[j] * X[t][j];
+        }
+        const residual = y[t] - pred;
+        for (let j = 0; j < k; j++) {
+          gradient[j] -= 2 * residual * X[t][j];
+        }
+      }
+
+      // Gradient step
+      for (let j = 0; j < k; j++) {
+        weights[j] -= lr * gradient[j] / n;
+      }
+
+      // Project onto simplex: clamp negatives to 0, then normalize to sum to 1
+      for (let j = 0; j < k; j++) {
+        weights[j] = Math.max(0, weights[j]);
+      }
+      const wSum = weights.reduce((s, w) => s + w, 0);
+      if (wSum > 0) {
+        for (let j = 0; j < k; j++) {
+          weights[j] /= wSum;
+        }
+      } else {
+        weights = Array(k).fill(1 / k);
+      }
+    }
+
+    exposures = Object.fromEntries(benchNames.map((b, i) => [b, weights[i]]));
+  }
+
+  // Compute fitted values and residuals
+  const weights = benchNames.map(b => exposures[b]);
+  const residuals: number[] = [];
+  let ssTot = 0;
+  let ssRes = 0;
+  const yMean = mean(y);
+
+  for (let t = 0; t < n; t++) {
+    let pred = 0;
+    for (let j = 0; j < benchNames.length; j++) {
+      pred += weights[j] * X[t][j];
+    }
+    const res = y[t] - pred;
+    residuals.push(res);
+    ssRes += res * res;
+    ssTot += (y[t] - yMean) ** 2;
+  }
+
+  const rSquared = ssTot === 0 ? 0 : Math.max(0, Math.min(1, 1 - ssRes / ssTot));
+  const trackingError = standardDeviation(residuals);
+  const meanResidual = mean(residuals);
+  const informationRatio = trackingError === 0 ? 0 : meanResidual / trackingError;
+
+  // Dominant style: highest exposure
+  let dominantStyle = benchNames[0] ?? '';
+  let maxExposure = -Infinity;
+  for (const b of benchNames) {
+    if (exposures[b] > maxExposure) {
+      maxExposure = exposures[b];
+      dominantStyle = b;
+    }
+  }
+
+  return {
+    exposures,
+    rSquared,
+    trackingError,
+    informationRatio,
+    dominantStyle,
+  };
+}
