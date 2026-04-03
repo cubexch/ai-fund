@@ -1,6 +1,14 @@
 import { buildAuthHeaders, getEnvironment, resetAuth, fetchAccessToken, type AccessToken } from './auth.js';
 import { ASSET_ICONS } from '../../../../../lib/format.js';
 
+// ── Interval helpers ─────────────────────────────────────
+
+const INTERVAL_SECONDS: Record<string, number> = {
+  '1s': 1, '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800,
+  '1h': 3600, '2h': 7200, '4h': 14400, '6h': 21600, '8h': 28800, '12h': 43200,
+  '1d': 86400, '3d': 259200, '1w': 604800, '1M': 2592000,
+};
+
 // ── Asset Registry ────────────────────────────────────────
 
 export interface AssetInfo {
@@ -94,6 +102,8 @@ export class IridiumClient {
   private _subaccountPromise: Promise<number> | null = null;
   private _assetRegistry: AssetRegistry | null = null;
   private _assetRegistryPromise: Promise<AssetRegistry> | null = null;
+  private _sources: Map<number, Source> | null = null;
+  private _sourcesPromise: Promise<Map<number, Source>> | null = null;
 
   constructor() {
     const env = getEnvironment(process.env.CUBE_ENV);
@@ -101,6 +111,11 @@ export class IridiumClient {
     this.mdBaseUrl = env.mdRestUrl;
     this.osBaseUrl = env.osRestUrl;
     resetAuth();
+  }
+
+  /** Whether this client is connected to staging (testnet) environment. */
+  isStaging(): boolean {
+    return this.baseUrl.includes('staging');
   }
 
   /**
@@ -198,8 +213,23 @@ export class IridiumClient {
   // ── PUBLIC: Markets (/ir/v0, no auth) ──────────────────
 
   async getMarkets(): Promise<Market[]> {
-    const data = await this.request<{ markets: Market[] }>('/markets');
+    const data = await this.request<{ markets: Market[]; sources: Source[] }>('/markets');
+    // Cache sources from the same response
+    if (data.sources && !this._sources) {
+      this._sources = new Map(data.sources.map(s => [s.sourceId, s]));
+    }
     return data.markets;
+  }
+
+  /** Get all chain/network sources. Cached from the /markets response. */
+  async getSources(): Promise<Map<number, Source>> {
+    if (this._sources) return this._sources;
+    if (!this._sourcesPromise) {
+      this._sourcesPromise = this.getMarkets().then(() => {
+        return this._sources!;
+      });
+    }
+    return this._sourcesPromise;
   }
 
   // ── PUBLIC: Tickers (/md, no auth) ─────────────────────
@@ -246,8 +276,13 @@ export class IridiumClient {
   // ── PUBLIC: Price History (/ir/v0, no auth) ────────────
 
   async getPriceHistory(marketId: number, interval: string = '1h', limit: number = 100): Promise<Kline[]> {
+    // endTime defaults to current time on the backend (seconds).
+    // Round up to interval boundary to match frontend chart behavior.
+    const intervalSec = INTERVAL_SECONDS[interval] ?? 3600;
+    const endTime = Math.ceil(Date.now() / 1000 / intervalSec) * intervalSec;
+
     const raw = await this.request<number[][]>(
-      `/history/klines?marketId=${marketId}&interval=${interval}&limit=${limit}`
+      `/history/klines?marketId=${marketId}&interval=${interval}&limit=${limit}&endTime=${endTime}&fallback=external`
     );
     return raw.map(k => ({
       open: String(k[1]),
@@ -264,6 +299,24 @@ export class IridiumClient {
 
   async getSubaccounts(): Promise<SubaccountIds> {
     return this.request<SubaccountIds>('/users/subaccounts', {}, { authenticated: 'iridium' });
+  }
+
+  async getSubaccountDetail(subaccountId: number): Promise<SubaccountDetail> {
+    const data = await this.request<{ result: SubaccountDetail }>(
+      `/users/subaccount/${subaccountId}`, {}, { authenticated: 'iridium' }
+    );
+    return data.result;
+  }
+
+  async getDepositHistory(subaccountId: number, params: { limit?: number; cursor?: string } = {}): Promise<DepositRecord[]> {
+    const qs = new URLSearchParams();
+    if (params.limit) qs.set('limit', String(params.limit));
+    if (params.cursor) qs.set('cursor', params.cursor);
+    const query = qs.toString() ? `?${qs}` : '';
+    const data = await this.request<{ result: DepositRecord[] }>(
+      `/users/subaccount/${subaccountId}/deposits${query}`, {}, { authenticated: 'iridium' }
+    );
+    return data.result;
   }
 
   async getPositions(subaccountId: number): Promise<Record<string, PositionGroup>> {
@@ -510,6 +563,12 @@ export class IridiumClient {
 
 // ── Types ──────────────────────────────────────────────────
 
+export interface Source {
+  sourceId: number;
+  name: string;
+  transactionExplorer?: string;
+}
+
 export interface Market {
   marketId: number;
   symbol: string;
@@ -588,6 +647,25 @@ export interface Kline {
 
 export interface SubaccountIds {
   ids: number[];
+}
+
+export interface SubaccountDetail {
+  id: number;
+  name: string;
+  addresses: Record<string, string>; // sourceId → deposit address
+  accountType: string;
+  hasOrderHistory: boolean;
+}
+
+export interface DepositRecord {
+  assetId: number;
+  amount: string;
+  marketValueUsd?: string;
+  txnHash?: string;
+  txnState: string;
+  address?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface PositionEntry {

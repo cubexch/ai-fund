@@ -204,4 +204,98 @@ export function registerAccountTools(server: McpServer, iridium: IridiumClient) 
       };
     }
   });
+
+  // ── Source/chain name resolution (from API) ─────────────
+
+  async function getChainName(sourceId: number): Promise<string> {
+    const sources = await iridium.getSources();
+    const source = sources.get(sourceId);
+    if (source) return source.name;
+    return `Chain ${sourceId}`;
+  }
+
+  // ── Deposit Address ─────────────────────────────────────
+
+  server.tool(
+    'get_deposit_address',
+    'Get deposit address for a specific chain. Returns the address and a funding link the user can open to deposit.',
+    {
+      chain: z.string().describe('Chain to deposit on (e.g. "solana", "ethereum", "bitcoin")'),
+      token: z.string().optional().describe('Token to deposit (e.g. "USDC", "USDT"). Required for multi-token chains like Ethereum or Solana. Native assets (BTC, ETH, SOL) are assumed if omitted.'),
+      amount: z.string().optional().describe('Requested deposit amount (e.g. "100", "0.5"). Shown on the deposit page as a suggested amount.'),
+      label: z.string().optional().describe('Agent name requesting the deposit (e.g. "jesse-livermore", "risk-manager"). Shown on the deposit page.'),
+      subaccountId: z.number().optional().describe('Subaccount ID (defaults to primary)'),
+    },
+    async params => {
+      try {
+        const subId = params.subaccountId ?? await defaultSubaccountId();
+        const detail = await iridium.getSubaccountDetail(subId);
+        const addresses = detail.addresses;
+
+        if (!addresses || Object.keys(addresses).length === 0) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: 'No deposit addresses found. Addresses are generated when your account is created. If this persists, contact support.',
+            }],
+            isError: true,
+          };
+        }
+
+        // Build address list with chain names
+        const addressList = await Promise.all(
+          Object.entries(addresses).map(async ([sourceId, address]) => ({
+            chain: await getChainName(parseInt(sourceId)),
+            address: address as string,
+          }))
+        );
+
+        // Find matching chain
+        const chainFilter = params.chain.toLowerCase();
+        const match = addressList.find(a => a.chain.toLowerCase().includes(chainFilter));
+
+        if (!match) {
+          const available = addressList.map(a => a.chain).join(', ');
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `No address found for "${params.chain}". Available chains: ${available}`,
+            }],
+            isError: true,
+          };
+        }
+
+        const baseUrl = iridium.isStaging()
+          ? 'https://staging.cube.exchange/agent/deposit'
+          : 'https://cube.exchange/agent/deposit';
+
+        const urlParams = new URLSearchParams({ address: match.address });
+        if (params.token) urlParams.set('token', params.token.toUpperCase());
+        if (params.amount) urlParams.set('amount', params.amount);
+        if (params.label) urlParams.set('label', params.label);
+
+        const depositUrl = `${baseUrl}?${urlParams.toString()}`;
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              chain: match.chain,
+              address: match.address,
+              ...(params.token ? { token: params.token.toUpperCase() } : {}),
+              ...(params.amount ? { amount: params.amount } : {}),
+              ...(params.label ? { label: params.label } : {}),
+              depositUrl,
+            }, null, 2),
+          }],
+        };
+      } catch (error: any) {
+        return {
+          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
+          isError: true,
+        };
+      }
+    }
+  );
+
 }

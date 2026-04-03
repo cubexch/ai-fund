@@ -34,14 +34,15 @@ describe('registerAccountTools', () => {
     registerAccountTools(server as any, iridium as any);
   });
 
-  it('registers all 5 account tools', () => {
-    expect(server.tool).toHaveBeenCalledTimes(5);
+  it('registers all 6 account tools', () => {
+    expect(server.tool).toHaveBeenCalledTimes(6);
     const names = server.tool.mock.calls.map((c: any[]) => c[0]);
     expect(names).toContain('get_positions');
     expect(names).toContain('get_account');
     expect(names).toContain('get_order_history');
     expect(names).toContain('get_fills');
     expect(names).toContain('get_subaccounts');
+    expect(names).toContain('get_deposit_address');
   });
 
   describe('get_positions', () => {
