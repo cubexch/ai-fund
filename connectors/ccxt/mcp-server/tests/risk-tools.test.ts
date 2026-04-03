@@ -75,11 +75,12 @@ describe('get_portfolio_exposure', () => {
     const result = await server.callTool('get_portfolio_exposure', {});
     const data = parseResult(result);
 
-    expect(data.totalValue).toBeGreaterThan(0);
-    expect(data.grossExposure).toBeGreaterThan(0);
-    expect(data.positions.length).toBeGreaterThan(0);
-    expect(data.numPositions).toBeGreaterThan(0);
-    expect(data.limits).toBeDefined();
+    // USDT=50000 + BTC(0.5*65000)=32500 + ETH(5*3400)=17000 + SOL(100*175)=17500 = 117000
+    expect(data.totalValue).toBe(117000);
+    expect(data.grossExposure).toBe(117000);
+    expect(data.positions).toHaveLength(4);
+    expect(data.numPositions).toBe(4);
+    expect(data.limits.maxPositionPct).toBe(20);
   });
 
   it('returns null for longShortRatio when no shorts', async () => {
@@ -161,9 +162,11 @@ describe('calculate_var', () => {
     });
     const data = parseResult(result);
 
-    expect(typeof data.var).toBe('number');
-    expect(typeof data.varPct).toBe('number');
-    expect(data.portfolioValue).toBeGreaterThan(0);
+    expect(data.var).toBeGreaterThan(0);
+    expect(data.var).toBeLessThan(117000); // VaR can't exceed portfolio
+    expect(data.varPct).toBeGreaterThan(0);
+    expect(data.varPct).toBeLessThan(100);
+    expect(data.portfolioValue).toBe(117000);
     expect(data.confidence).toBe(0.95);
     expect(data.horizon).toBe(1);
   });
@@ -190,11 +193,12 @@ describe('get_drawdown_monitor', () => {
     const result = await server.callTool('get_drawdown_monitor', {});
     const data = parseResult(result);
 
-    expect(data.currentEquity).toBeGreaterThan(0);
-    expect(typeof data.drawdownPct).toBe('number');
-    expect(typeof data.recoveryNeeded).toBe('number');
+    expect(data.currentEquity).toBe(117000);
+    expect(data.drawdownPct).toBeGreaterThanOrEqual(0);
+    expect(data.drawdownPct).toBeLessThan(100);
+    expect(data.recoveryNeeded).toBeGreaterThanOrEqual(0);
     expect(['OK', 'WARNING', 'CRITICAL']).toContain(data.status);
-    expect(typeof data.circuitBreaker).toBe('boolean');
+    expect(data.circuitBreaker).toBe(false); // no drawdown in fresh portfolio
   });
 });
 
@@ -206,9 +210,11 @@ describe('check_correlation_risk', () => {
     const result = await server.callTool('check_correlation_risk', {});
     const data = parseResult(result);
 
-    expect(typeof data.avgCorrelation).toBe('number');
-    expect(typeof data.riskScore).toBe('number');
-    expect(data.numHoldings).toBeGreaterThanOrEqual(2);
+    expect(data.avgCorrelation).toBeGreaterThanOrEqual(-1);
+    expect(data.avgCorrelation).toBeLessThanOrEqual(1);
+    expect(data.riskScore).toBeGreaterThanOrEqual(0);
+    expect(data.riskScore).toBeLessThanOrEqual(100);
+    expect(data.numHoldings).toBe(3); // BTC, ETH, SOL (USDT excluded as stablecoin)
     expect(['HIGH_RISK', 'MODERATE', 'DIVERSIFIED']).toContain(data.status);
   });
 
@@ -241,9 +247,12 @@ describe('simulate_stress_test', () => {
     const data = parseResult(result);
 
     expect(data.scenario).toBe('btc_crash_2022');
-    expect(data.currentPortfolioValue).toBeGreaterThan(0);
-    expect(data.stressedPortfolioValue).toBeLessThan(data.currentPortfolioValue);
+    expect(data.currentPortfolioValue).toBe(117000);
+    expect(data.stressedPortfolioValue).toBeLessThan(117000);
     expect(data.totalLoss).toBeGreaterThan(0);
+    expect(data.totalLoss).toBeLessThan(117000);
+    expect(data.lossPct).toBeGreaterThan(0);
+    expect(data.lossPct).toBeLessThan(100);
     expect(typeof data.survivable).toBe('boolean');
   });
 
@@ -335,14 +344,16 @@ describe('get_risk_dashboard', () => {
     const result = await server.callTool('get_risk_dashboard', {});
     const data = parseResult(result);
 
-    expect(data.portfolioValue).toBeGreaterThan(0);
-    expect(data.numPositions).toBeGreaterThan(0);
-    expect(data.limits).toBeDefined();
-    expect(data.metrics.concentration).toBeDefined();
-    expect(data.metrics.diversification).toBeDefined();
+    expect(data.portfolioValue).toBe(117000);
+    expect(data.numPositions).toBe(4); // USDT, BTC, ETH, SOL
+    expect(data.limits.maxPositionPct).toBe(20);
+    // USDT is largest at 50000/117000 = ~42.7%
+    expect(data.metrics.concentration.value).toBeCloseTo(42.7, 0);
     expect(['red', 'yellow', 'green']).toContain(data.metrics.concentration.status);
-    expect(['red', 'yellow', 'green']).toContain(data.metrics.diversification.status);
-    expect(data.holdings.length).toBeGreaterThan(0);
+    // 4 holdings → yellow (3-4 = yellow, ≥5 = green)
+    expect(data.metrics.diversification.value).toBe(4);
+    expect(data.metrics.diversification.status).toBe('yellow');
+    expect(data.holdings).toHaveLength(4);
   });
 });
 
@@ -354,10 +365,11 @@ describe('get_margin_health', () => {
     const result = await server.callTool('get_margin_health', {});
     const data = parseResult(result);
 
-    expect(data.totalEquity).toBeGreaterThanOrEqual(0);
-    expect(typeof data.freeMargin).toBe('number');
-    expect(typeof data.marginRatio).toBe('number');
-    expect(typeof data.healthScore).toBe('number');
-    expect(['HEALTHY', 'CAUTION', 'DANGER']).toContain(data.status);
+    // Margin health only counts USDT/USD balances
+    expect(data.totalEquity).toBe(50000);
+    expect(data.freeMargin).toBe(50000); // no used margin
+    expect(data.marginRatio).toBe(0); // no used margin
+    expect(data.healthScore).toBe(100); // 100 - 0% margin ratio
+    expect(data.status).toBe('HEALTHY');
   });
 });

@@ -89,7 +89,7 @@ export function withCassette(name: string, baseDir: string): ReplayController {
 
       if (isRecording) {
         // Record mode: pass through to real fetch, capture responses
-        globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        globalThis.fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
           const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
           const method = init?.method ?? 'GET';
           const body = init?.body ? String(init.body) : undefined;
@@ -127,7 +127,7 @@ export function withCassette(name: string, baseDir: string): ReplayController {
         const cassette: Cassette = JSON.parse(readFileSync(cassetteFile, 'utf-8'));
         entries = cassette.entries;
 
-        globalThis.fetch = async (input: RequestInfo | URL, _init?: RequestInit): Promise<Response> => {
+        globalThis.fetch = async (input: string | URL | Request, _init?: RequestInit): Promise<Response> => {
           const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
 
           if (replayIndex >= entries.length) {

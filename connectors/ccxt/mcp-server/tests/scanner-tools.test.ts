@@ -43,14 +43,13 @@ describe('scan_signals tool', () => {
     expect(data.symbol).toBe('BTC/USDT');
     expect(data.timeframe).toBe('1d');
     expect(data.candlesAnalyzed).toBe(250);
-    expect(typeof data.currentPrice).toBe('number');
-    expect(data.currentPrice).toBeGreaterThan(0);
-    expect(typeof data.overallBias).toBe('string');
+    // currentPrice = last bar's close (deterministic PRNG), not ticker
+    expect(data.currentPrice).toBeGreaterThan(60000);
+    expect(data.currentPrice).toBeLessThan(70000);
     expect(['bullish', 'bearish', 'neutral']).toContain(data.overallBias);
-    expect(typeof data.score).toBe('number');
     expect(data.score).toBeGreaterThanOrEqual(-100);
     expect(data.score).toBeLessThanOrEqual(100);
-    expect(typeof data.signalCount).toBe('number');
+    expect(data.signalCount).toBe(data.signals.length);
     expect(Array.isArray(data.signals)).toBe(true);
   });
 
@@ -94,11 +93,9 @@ describe('scan_signals tool', () => {
 
     const data = JSON.parse(result.content[0].text);
     for (const signal of data.signals) {
-      expect(signal).toHaveProperty('source');
-      expect(signal).toHaveProperty('type');
-      expect(signal).toHaveProperty('strength');
-      expect(signal).toHaveProperty('confidence');
-      expect(typeof signal.confidence).toBe('number');
+      expect(signal.source).toBeTypeOf('string');
+      expect(['buy', 'sell', 'hold']).toContain(signal.type);
+      expect(['strong', 'moderate', 'weak']).toContain(signal.strength);
       expect(signal.confidence).toBeGreaterThanOrEqual(0);
       expect(signal.confidence).toBeLessThanOrEqual(1);
     }
@@ -121,8 +118,8 @@ describe('scan_market tool', () => {
 
     expect(data.timeframe).toBe('1d');
     expect(data.scanned).toBe(3);
-    expect(typeof data.matched).toBe('number');
     expect(data.matched).toBeLessThanOrEqual(3);
+    expect(data.matched).toBe(data.results.length);
     expect(Array.isArray(data.results)).toBe(true);
   });
 
@@ -187,9 +184,9 @@ describe('scan_market tool', () => {
     });
 
     const data = JSON.parse(result.content[0].text);
-    expect(data.errors).toBeDefined();
     expect(data.errors).toHaveLength(1);
     expect(data.errors[0].symbol).toBe('SOL/USDT');
+    expect(data.errors[0].error).toMatch(/insufficient|candle/i);
   });
 });
 
@@ -210,8 +207,8 @@ describe('find_support_resistance tool', () => {
     expect(data.symbol).toBe('BTC/USDT');
     expect(data.timeframe).toBe('1d');
     expect(data.candlesAnalyzed).toBe(250);
-    expect(typeof data.currentPrice).toBe('number');
-    expect(data.currentPrice).toBeGreaterThan(0);
+    expect(data.currentPrice).toBeGreaterThan(60000);
+    expect(data.currentPrice).toBeLessThan(70000);
     expect(Array.isArray(data.supports)).toBe(true);
     expect(Array.isArray(data.resistances)).toBe(true);
   });
@@ -284,9 +281,10 @@ describe('detect_patterns tool', () => {
 
     expect(data.symbol).toBe('BTC/USDT');
     expect(data.timeframe).toBe('1d');
-    expect(typeof data.currentPrice).toBe('number');
-    expect(typeof data.candlesAnalyzed).toBe('number');
-    expect(typeof data.patternsDetected).toBe('number');
+    expect(data.currentPrice).toBeGreaterThan(60000);
+    expect(data.currentPrice).toBeLessThan(70000);
+    expect(data.candlesAnalyzed).toBeGreaterThanOrEqual(5);
+    expect(data.patternsDetected).toBeGreaterThanOrEqual(0);
     expect(Array.isArray(data.patterns)).toBe(true);
     expect(data.patternsDetected).toBe(data.patterns.length);
   });
@@ -378,8 +376,7 @@ describe('get_signal_dashboard tool', () => {
       expect(entry).toHaveProperty('nearestResistance');
       expect(entry).toHaveProperty('supportDistance');
       expect(entry).toHaveProperty('resistanceDistance');
-      expect(typeof entry.currentPrice).toBe('number');
-      expect(entry.currentPrice).toBeGreaterThan(0);
+      expect(entry.currentPrice).toBeGreaterThan(0); // varies per symbol
     }
   });
 
@@ -396,7 +393,7 @@ describe('get_signal_dashboard tool', () => {
     });
 
     const data = JSON.parse(result.content[0].text);
-    expect(data.errors).toBeDefined();
+    expect(data.errors.length).toBeGreaterThanOrEqual(1);
     expect(data.errors.some((e: any) => e.symbol === 'ETH/USDT')).toBe(true);
   });
 });
@@ -480,7 +477,8 @@ describe('get_multi_timeframe_signals tool', () => {
     expect(data.symbol).toBe('BTC/USDT');
     expect(typeof data.alignment).toBe('string');
     expect(['strong_bullish', 'strong_bearish', 'mixed', 'neutral']).toContain(data.alignment);
-    expect(typeof data.averageScore).toBe('number');
+    expect(data.averageScore).toBeGreaterThanOrEqual(-100);
+    expect(data.averageScore).toBeLessThanOrEqual(100);
     expect(Array.isArray(data.timeframes)).toBe(true);
   });
 
@@ -519,7 +517,7 @@ describe('get_multi_timeframe_signals tool', () => {
     });
 
     const data = JSON.parse(result.content[0].text);
-    expect(data.errors).toBeDefined();
+    expect(data.errors).toHaveLength(1);
     expect(data.errors[0].timeframe).toBe('1h');
     // 1d should still be analyzed
     expect(data.timeframes).toHaveLength(1);
@@ -558,7 +556,8 @@ describe('scan_breakouts tool', () => {
 
     expect(data.timeframe).toBe('1d');
     expect(data.scanned).toBe(3);
-    expect(typeof data.breakoutCandidates).toBe('number');
+    expect(data.breakoutCandidates).toBeGreaterThanOrEqual(0);
+    expect(data.breakoutCandidates).toBeLessThanOrEqual(3);
     expect(data.proximityThreshold).toBe('5%');
     expect(Array.isArray(data.results)).toBe(true);
     expect(data.results).toHaveLength(data.breakoutCandidates);
@@ -627,7 +626,7 @@ describe('scan_breakouts tool', () => {
     });
 
     const data = JSON.parse(result.content[0].text);
-    expect(data.errors).toBeDefined();
+    expect(data.errors).toHaveLength(1);
     expect(data.errors[0].symbol).toBe('SOL/USDT');
   });
 
