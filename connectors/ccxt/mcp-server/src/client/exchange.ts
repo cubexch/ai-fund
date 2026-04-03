@@ -346,7 +346,9 @@ export class ExchangeClient {
           ts: new Date(b.timestamp),
           open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume,
         }));
-        this.store.insertOHLCV(rows).catch(() => {}); // best-effort persist
+        this.store.insertOHLCV(rows).catch(err => {
+          process.stderr.write(`[ccxt] DuckDB write error: ${err?.message ?? err}\n`);
+        }); // best-effort persist
       }
 
       // Merge cached + fresh, dedup by timestamp
@@ -430,6 +432,7 @@ export class ExchangeClient {
   // ── Private: Account ─────────────────────────────────────
 
   async getBalance(): Promise<BalanceResult[]> {
+    await this.throttle();
     const balance = await this.exchange.fetchBalance();
     const results: BalanceResult[] = [];
     const totals = (balance as any).total ?? {};
@@ -450,6 +453,7 @@ export class ExchangeClient {
   }
 
   async getPositions(symbols?: string[]): Promise<PositionResult[]> {
+    await this.throttle();
     if (typeof this.exchange.fetchPositions === 'function') {
       const positions = await this.exchange.fetchPositions(symbols);
       return positions.map((p: any) => ({
@@ -516,6 +520,7 @@ export class ExchangeClient {
   }
 
   async cancelOrder(orderId: string, symbol?: string): Promise<void> {
+    await this.throttle();
     await this.timed('cancelOrder', () => this.exchange.cancelOrder(orderId, symbol));
   }
 
@@ -535,8 +540,10 @@ export class ExchangeClient {
     if (typeof this.exchange.editOrder === 'function') {
       raw = await this.exchange.editOrder(orderId, symbol, type, side, roundedAmount, roundedPrice);
     } else {
-      // Fallback: cancel + replace
+      // Fallback: cancel + replace (each call needs its own rate-limit token)
+      await this.throttle();
       await this.exchange.cancelOrder(orderId, symbol);
+      await this.throttle();
       raw = await this.exchange.createOrder(symbol, type, side, roundedAmount!, roundedPrice);
     }
     const result = this.formatOrder(raw);
@@ -562,6 +569,7 @@ export class ExchangeClient {
   }
 
   async cancelAllOrders(symbol?: string): Promise<void> {
+    await this.throttle();
     if (typeof this.exchange.cancelAllOrders === 'function') {
       await this.exchange.cancelAllOrders(symbol);
     } else {
@@ -577,21 +585,25 @@ export class ExchangeClient {
   }
 
   async getOpenOrders(symbol?: string): Promise<OrderResult[]> {
+    await this.throttle();
     const orders = await this.exchange.fetchOpenOrders(symbol);
     return orders.map(o => this.formatOrder(o));
   }
 
   async getClosedOrders(symbol?: string, since?: number, limit?: number): Promise<OrderResult[]> {
+    await this.throttle();
     const orders = await this.exchange.fetchClosedOrders(symbol, since, limit);
     return orders.map(o => this.formatOrder(o));
   }
 
   async getOrder(orderId: string, symbol?: string): Promise<OrderResult> {
+    await this.throttle();
     const order = await this.exchange.fetchOrder(orderId, symbol);
     return this.formatOrder(order);
   }
 
   async getMyTrades(symbol?: string, since?: number, limit?: number): Promise<TradeResult[]> {
+    await this.throttle();
     const trades = await this.exchange.fetchMyTrades(symbol, since, limit);
     return trades.map(formatTrade);
   }

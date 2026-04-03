@@ -329,7 +329,8 @@ export class Backtester {
         const rawPrice = bar.close;
         const slippage = rawPrice * slippagePct;
         const execPrice = rawPrice - slippage;     // slippage works against us
-        const grossProceeds = position * execPrice;
+        const sellAmount = position; // capture before zeroing
+        const grossProceeds = sellAmount * execPrice;
         const commission = grossProceeds * commissionPct;
         const netProceeds = grossProceeds - commission;
         const pnl = netProceeds - entryCost;
@@ -341,10 +342,10 @@ export class Backtester {
           timestamp: bar.timestamp,
           side: 'sell',
           price: execPrice,
-          amount: trades.length > 0 ? trades[trades.length - 1].amount : 0,
+          amount: sellAmount,
           cost: grossProceeds,
           commission,
-          slippage: slippage * (trades.length > 0 ? trades[trades.length - 1].amount : 0),
+          slippage: slippage * sellAmount,
           pnl,
           equity: cash,
         });

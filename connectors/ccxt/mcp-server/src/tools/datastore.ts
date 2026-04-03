@@ -657,11 +657,22 @@ export function registerDatastoreTools(server: McpServer, client: ExchangeClient
     handler(async (params: any) => {
       if (!store) throw new Error('DuckDB datastore not configured. Restart with data caching enabled.');
 
+      // Validate inputs to prevent SQL injection (exportParquet uses raw SQL in COPY)
+      const symbolPattern = /^[A-Za-z0-9]+\/[A-Za-z0-9]+$/;
+      const timeframePattern = /^[0-9]+[smhdwMy]$/;
+      if (!symbolPattern.test(params.symbol)) {
+        throw new Error(`Invalid symbol format: ${params.symbol}. Expected format: BASE/QUOTE (e.g., BTC/USDT)`);
+      }
+      if (!timeframePattern.test(params.timeframe)) {
+        throw new Error(`Invalid timeframe format: ${params.timeframe}. Expected format like 1m, 5m, 1h, 1d`);
+      }
+
       const safeSymbol = params.symbol.replace(/\//g, '-');
       const outputPath: string = params.output_path
         ?? `.desk/exports/${safeSymbol}_${params.timeframe}.parquet`;
 
-      const query = `SELECT * FROM ohlcv WHERE symbol = '${params.symbol.replace(/'/g, "''")}' AND interval = '${params.timeframe.replace(/'/g, "''")}' AND exchange = '${client.exchangeId.replace(/'/g, "''")}'`;
+      // exchangeId is server-controlled (not user input), symbol/timeframe validated above
+      const query = `SELECT * FROM ohlcv WHERE symbol = '${params.symbol}' AND interval = '${params.timeframe}' AND exchange = '${client.exchangeId}'`;
 
       await store.exportParquet(query, outputPath);
 

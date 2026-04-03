@@ -228,8 +228,12 @@ export class TradeJournal {
                FROM trades ${where}
                ORDER BY ts DESC`;
 
-    if (opts.limit) {
-      sql += ` LIMIT ${opts.limit}`;
+    if (opts.limit != null) {
+      const n = Number(opts.limit);
+      if (!Number.isInteger(n) || n <= 0) {
+        throw new Error('limit must be a positive integer');
+      }
+      sql += ` LIMIT ${n}`;
     }
 
     const rows = await runQuery(db, sql, params);
