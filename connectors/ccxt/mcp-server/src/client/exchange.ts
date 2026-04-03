@@ -23,6 +23,8 @@ export interface ExchangeClientOpts {
   exchangeInstance?: Exchange;
   /** Optional DuckDB store for read-through caching of OHLCV data. */
   store?: MarketDataStore;
+  /** Optional trade journal for auto-recording executions. */
+  journal?: any;
   /** Max requests per second for rate limiting. */
   rateLimit?: number;
 }
@@ -195,6 +197,8 @@ export class ExchangeClient {
   readonly exchangeId: string;
   /** DuckDB store for read-through caching. Null when not configured. */
   store: MarketDataStore | null;
+  /** Trade journal for auto-recording executions. */
+  journal: any;  // TradeJournal | null
   /** Per-method API latency tracker for performance monitoring. */
   readonly latency = new LatencyTracker();
 
@@ -202,6 +206,7 @@ export class ExchangeClient {
     this.exchangeId = opts.exchangeId;
     this._sandbox = opts.sandbox ?? false;
     this.store = opts.store ?? null;
+    this.journal = opts.journal ?? null;
     this.limiter = opts.rateLimit ? new RateLimiter(opts.rateLimit) : null;
 
     if (opts.exchangeInstance) {
@@ -488,7 +493,26 @@ export class ExchangeClient {
     const roundedAmount = this.roundAmount(symbol, amount);
     const roundedPrice = price !== undefined ? this.roundPrice(symbol, price) : undefined;
     const order = await this.timed('createOrder', () => this.exchange.createOrder(symbol, type, side, roundedAmount, roundedPrice));
-    return this.formatOrder(order);
+    const result = this.formatOrder(order);
+    // Auto-record to trade journal (fire-and-forget)
+    if (this.journal) {
+      this.journal.record({
+        id: result.id,
+        exchange: this.exchangeId,
+        symbol: result.symbol,
+        side: result.side,
+        type: result.type,
+        amount: result.amount ?? 0,
+        price: result.price ?? null,
+        cost: (result.amount ?? 0) * (result.price ?? 0) || null,
+        fee: null,
+        feeCurrency: null,
+        timestamp: result.timestamp ?? Date.now(),
+        orderId: result.id,
+        strategy: null,
+      }).catch(() => {}); // best-effort, don't block order flow
+    }
+    return result;
   }
 
   async cancelOrder(orderId: string, symbol?: string): Promise<void> {
@@ -507,14 +531,34 @@ export class ExchangeClient {
     await this.throttle();
     const roundedAmount = amount !== undefined ? this.roundAmount(symbol, amount) : undefined;
     const roundedPrice = price !== undefined ? this.roundPrice(symbol, price) : undefined;
+    let raw: any;
     if (typeof this.exchange.editOrder === 'function') {
-      const order = await this.exchange.editOrder(orderId, symbol, type, side, roundedAmount, roundedPrice);
-      return this.formatOrder(order);
+      raw = await this.exchange.editOrder(orderId, symbol, type, side, roundedAmount, roundedPrice);
+    } else {
+      // Fallback: cancel + replace
+      await this.exchange.cancelOrder(orderId, symbol);
+      raw = await this.exchange.createOrder(symbol, type, side, roundedAmount!, roundedPrice);
     }
-    // Fallback: cancel + replace
-    await this.exchange.cancelOrder(orderId, symbol);
-    const order = await this.exchange.createOrder(symbol, type, side, roundedAmount!, roundedPrice);
-    return this.formatOrder(order);
+    const result = this.formatOrder(raw);
+    // Auto-record to trade journal (fire-and-forget)
+    if (this.journal) {
+      this.journal.record({
+        id: result.id,
+        exchange: this.exchangeId,
+        symbol: result.symbol,
+        side: result.side,
+        type: result.type,
+        amount: result.amount ?? 0,
+        price: result.price ?? null,
+        cost: (result.amount ?? 0) * (result.price ?? 0) || null,
+        fee: null,
+        feeCurrency: null,
+        timestamp: result.timestamp ?? Date.now(),
+        orderId: result.id,
+        strategy: null,
+      }).catch(() => {}); // best-effort, don't block order flow
+    }
+    return result;
   }
 
   async cancelAllOrders(symbol?: string): Promise<void> {

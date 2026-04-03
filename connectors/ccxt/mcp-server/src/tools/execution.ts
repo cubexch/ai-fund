@@ -616,4 +616,97 @@ export function registerExecutionTools(server: McpServer, client: ExchangeClient
       };
     }),
   );
+
+  // ── get_exchange_health ──────────────────────────────────
+
+  server.tool(
+    'get_exchange_health',
+    `Comprehensive health check for ${client.name}. Returns connectivity status, auth state, rate limiter capacity, datastore status, journal status, latency stats, and any detected issues.`,
+    {} as any,
+    handler(async () => {
+      const issues: string[] = [];
+      let status: 'healthy' | 'degraded' = 'healthy';
+
+      // Latency stats
+      let latencyStats: unknown[] = [];
+      try {
+        latencyStats = client.latency.allStats();
+      } catch {
+        issues.push('Failed to retrieve latency stats');
+        status = 'degraded';
+      }
+
+      // Rate limiter status
+      let rateLimiter: { availableTokens: number | null; pendingRequests: number | null } = {
+        availableTokens: null,
+        pendingRequests: null,
+      };
+      try {
+        const limiter = (client as any).limiter;
+        if (limiter) {
+          rateLimiter = {
+            availableTokens: limiter.available ?? null,
+            pendingRequests: limiter.pending ?? null,
+          };
+        }
+      } catch {
+        // ignore
+      }
+
+      // Connectivity test: fetch a single ticker
+      let connectivity: { latencyMs: number | null; status: string } = { latencyMs: null, status: 'unknown' };
+      try {
+        const start = performance.now();
+        await client.getTicker('BTC/USDT');
+        const elapsed = Math.round(performance.now() - start);
+        connectivity = { latencyMs: elapsed, status: 'ok' };
+      } catch (err: any) {
+        connectivity = { latencyMs: null, status: 'error' };
+        issues.push(`Connectivity test failed: ${err.message}`);
+        status = 'degraded';
+      }
+
+      // Auth status
+      const auth = {
+        hasCredentials: client.hasCredentials,
+        sandbox: client.isSandbox,
+      };
+
+      // Markets loaded
+      const marketsLoaded = (client as any)._marketsLoaded ?? false;
+      if (!marketsLoaded) {
+        issues.push('Markets not yet loaded');
+      }
+
+      // Datastore status
+      let datastore: { configured: boolean; totalRows: number | null } = { configured: false, totalRows: null };
+      if (client.store) {
+        datastore.configured = true;
+        try {
+          datastore.totalRows = await client.store.count();
+        } catch {
+          issues.push('Datastore count query failed');
+          status = 'degraded';
+        }
+      }
+
+      // Journal status
+      const journal = {
+        configured: !!(client as any).journal,
+      };
+
+      return {
+        exchange: client.exchangeId,
+        status,
+        connectivity,
+        auth,
+        rateLimiter,
+        datastore,
+        journal,
+        latencyStats,
+        marketsLoaded,
+        issues,
+      };
+    }),
+  );
 }

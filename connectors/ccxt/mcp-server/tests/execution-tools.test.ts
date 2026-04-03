@@ -595,3 +595,71 @@ describe('get_momentum_scanner tool', () => {
     expect(data.timeframe).toBe('1h');
   });
 });
+
+// ── get_exchange_health ─────────────────────────────────
+
+describe('get_exchange_health tool', () => {
+  it('returns health status with expected structure', async () => {
+    const { server } = setup({
+      getTicker: async (symbol: string) => ({
+        symbol, last: 65000, bid: 64990, ask: 65010, high: 66000, low: 64000,
+        open: 64500, close: 65000, volume: 1000, quoteVolume: 65000000,
+        change: 500, percentage: 0.78, timestamp: Date.now(),
+      }),
+      store: null,
+      journal: null,
+    });
+
+    const result = await server.callTool('get_exchange_health', {});
+
+    expect(result.isError).toBeUndefined();
+    const data = JSON.parse(result.content[0].text);
+
+    expect(data.exchange).toBe('coinbase');
+    expect(data.status).toBe('healthy');
+    expect(data.connectivity).toBeDefined();
+    expect(data.connectivity.status).toBe('ok');
+    expect(typeof data.connectivity.latencyMs).toBe('number');
+    expect(data.auth).toBeDefined();
+    expect(data.auth.hasCredentials).toBe(true);
+    expect(data.auth.sandbox).toBe(false);
+    expect(data.rateLimiter).toBeDefined();
+    expect(data.datastore).toBeDefined();
+    expect(data.datastore.configured).toBe(false);
+    expect(data.journal).toBeDefined();
+    expect(data.journal.configured).toBe(false);
+    expect(Array.isArray(data.latencyStats)).toBe(true);
+    expect(Array.isArray(data.issues)).toBe(true);
+  });
+
+  it('reports degraded status when connectivity fails', async () => {
+    const { server } = setup({
+      getTicker: async () => { throw new Error('network timeout'); },
+      store: null,
+      journal: null,
+    });
+
+    const result = await server.callTool('get_exchange_health', {});
+    const data = JSON.parse(result.content[0].text);
+
+    expect(data.status).toBe('degraded');
+    expect(data.connectivity.status).toBe('error');
+    expect(data.issues.length).toBeGreaterThan(0);
+    expect(data.issues.some((i: string) => i.includes('Connectivity test failed'))).toBe(true);
+  });
+
+  it('reports journal configured when present', async () => {
+    const { server } = setup({
+      getTicker: async (symbol: string) => ({
+        symbol, last: 65000, bid: 64990, ask: 65010, timestamp: Date.now(),
+      }),
+      store: null,
+      journal: { record: async () => {} },
+    });
+
+    const result = await server.callTool('get_exchange_health', {});
+    const data = JSON.parse(result.content[0].text);
+
+    expect(data.journal.configured).toBe(true);
+  });
+});

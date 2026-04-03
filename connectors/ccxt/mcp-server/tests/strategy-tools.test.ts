@@ -512,3 +512,720 @@ describe('get_optimal_entry tool', () => {
     expect(data.tradeFlowImbalance).toBe(0.5);
   });
 });
+
+// ── get_funding_rates ──────────────────────────────────
+
+describe('get_funding_rates tool', () => {
+  it('returns funding rates for multiple symbols', async () => {
+    const { server } = setup({
+      exchange: {
+        fetchFundingRate: async (symbol: string) => ({
+          symbol,
+          fundingRate: 0.0001,
+          fundingTimestamp: 1700000000000,
+          markPrice: symbol.includes('BTC') ? 65100 : 3100,
+          indexPrice: symbol.includes('BTC') ? 65000 : 3050,
+          interestRate: 0.0001,
+        }),
+      },
+    });
+    const result = await server.callTool('get_funding_rates', {
+      symbols: 'BTC/USDT:USDT,ETH/USDT:USDT',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data).toHaveLength(2);
+    expect(data[0].symbol).toBe('BTC/USDT:USDT');
+    expect(data[0].fundingRate).toBe(0.0001);
+    expect(data[0].fundingRateAnnualized).toBeTypeOf('number');
+    expect(data[0].fundingRateAnnualized).toBeGreaterThan(0);
+    // 0.0001 * 365 * 3 * 10000 / 100 = 10.95
+    expect(data[0].fundingRateAnnualized).toBe(10.95);
+    expect(data[0].nextFundingTime).toBe(1700000000000);
+    expect(data[0].markPrice).toBe(65100);
+    expect(data[0].indexPrice).toBe(65000);
+    expect(data[0].interestRate).toBe(0.0001);
+    expect(data[1].symbol).toBe('ETH/USDT:USDT');
+  });
+
+  it('returns error for unsupported symbols', async () => {
+    const { server } = setup({
+      exchange: {
+        fetchFundingRate: async (symbol: string) => {
+          throw new Error(`No funding rate for ${symbol}`);
+        },
+      },
+    });
+    const result = await server.callTool('get_funding_rates', {
+      symbols: 'FAKECOIN/USDT:USDT',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data).toHaveLength(1);
+    expect(data[0].symbol).toBe('FAKECOIN/USDT:USDT');
+    expect(data[0].error).toContain('No funding rate');
+  });
+
+  it('returns error when exchange lacks fetchFundingRate', async () => {
+    const { server } = setup({
+      exchange: {},
+    });
+    const result = await server.callTool('get_funding_rates', {
+      symbols: 'BTC/USDT:USDT',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data).toHaveLength(1);
+    expect(data[0].error).toContain('does not support');
+  });
+});
+
+// ── detect_basis_trade ─────────────────────────────────
+
+describe('detect_basis_trade tool', () => {
+  it('detects positive carry opportunity', async () => {
+    const { server } = setup({
+      getTicker: async (symbol: string) => {
+        if (symbol === 'BTC/USDT') {
+          return { symbol, last: 65000, mid: 65000, bid: 64990, ask: 65010 };
+        }
+        // Perp at premium
+        return { symbol, last: 65100, mid: 65100, bid: 65090, ask: 65110 };
+      },
+      exchange: {
+        fetchFundingRate: async () => ({
+          fundingRate: 0.0001,
+          fundingTimestamp: 1700000000000,
+          markPrice: 65100,
+          indexPrice: 65000,
+          interestRate: 0.0001,
+        }),
+      },
+    });
+
+    const result = await server.callTool('detect_basis_trade', {
+      base: 'BTC',
+      quote: 'USDT',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.base).toBe('BTC');
+    expect(data.quote).toBe('USDT');
+    expect(data.spotSymbol).toBe('BTC/USDT');
+    expect(data.perpSymbol).toBe('BTC/USDT:USDT');
+    expect(data.spotPrice).toBe(65000);
+    expect(data.perpPrice).toBe(65100);
+    expect(data.basis).toBeGreaterThan(0);
+    // basis = (65100 - 65000) / 65000 * 100 ≈ 0.154%
+    expect(data.basis).toBeCloseTo(0.154, 2);
+    expect(data.basisAnnualized).toBeTypeOf('number');
+    expect(data.basisAnnualized).toBeGreaterThan(0);
+    expect(data.fundingRate).toBe(0.0001);
+    expect(data.fundingRateAnnualized).toBeTypeOf('number');
+    expect(data.fundingRateAnnualized).toBeGreaterThan(0);
+    expect(data.totalCarryAnnualized).toBeGreaterThan(0);
+    expect(data.estimatedFees).toBe(0.2);
+    expect(data.netCarryAnnualized).toBeTypeOf('number');
+    expect(data.signal).toContain('positive carry');
+    expect(data.actionable).toBe(true);
+  });
+
+  it('handles missing funding rate gracefully', async () => {
+    const { server } = setup({
+      getTicker: async (symbol: string) => {
+        if (symbol === 'ETH/USDT') {
+          return { symbol, last: 3000, mid: 3000, bid: 2999, ask: 3001 };
+        }
+        return { symbol, last: 3010, mid: 3010, bid: 3009, ask: 3011 };
+      },
+      exchange: {
+        fetchFundingRate: async () => {
+          throw new Error('Not supported');
+        },
+      },
+    });
+
+    const result = await server.callTool('detect_basis_trade', {
+      base: 'ETH',
+      quote: 'USDT',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.fundingRate).toBeNull();
+    expect(data.fundingRateAnnualized).toBeNull();
+    // Should still compute basis
+    expect(data.basis).toBeGreaterThan(0);
+    expect(data.totalCarryAnnualized).toBeTypeOf('number');
+  });
+
+  it('errors when spot ticker is unavailable', async () => {
+    const { server } = setup({
+      getTicker: async (symbol: string) => {
+        if (symbol === 'FAKE/USDT') {
+          throw new Error('Market not found');
+        }
+        return { symbol, last: 100, mid: 100, bid: 99, ask: 101 };
+      },
+      exchange: {},
+    });
+
+    const result = await server.callTool('detect_basis_trade', {
+      base: 'FAKE',
+      quote: 'USDT',
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('spot price');
+  });
+
+  it('errors when perp ticker is unavailable', async () => {
+    const { server } = setup({
+      getTicker: async (symbol: string) => {
+        if (symbol === 'SOL/USDT') {
+          return { symbol, last: 100, mid: 100, bid: 99, ask: 101 };
+        }
+        throw new Error('Perp market not found');
+      },
+      exchange: {},
+    });
+
+    const result = await server.callTool('detect_basis_trade', {
+      base: 'SOL',
+      quote: 'USDT',
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('perp price');
+  });
+
+  it('reports negligible carry when basis is near zero', async () => {
+    const { server } = setup({
+      getTicker: async (symbol: string) => {
+        // Spot and perp at nearly same price
+        return { symbol, last: 50000, mid: 50000, bid: 49999, ask: 50001 };
+      },
+      exchange: {
+        fetchFundingRate: async () => ({
+          fundingRate: 0.000001,
+          fundingTimestamp: 1700000000000,
+          markPrice: 50000,
+          indexPrice: 50000,
+          interestRate: 0.0001,
+        }),
+      },
+    });
+
+    const result = await server.callTool('detect_basis_trade', {
+      base: 'BTC',
+      quote: 'USDT',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.basis).toBeCloseTo(0, 1);
+    expect(data.signal).toContain('Negligible');
+    expect(data.actionable).toBe(false);
+  });
+});
+
+// ── rebalance_portfolio ──────────────────────────────────
+
+describe('rebalance_portfolio tool', () => {
+  it('generates correct trades for rebalancing', async () => {
+    const { server } = setup({
+      getTicker: async (symbol: string) => {
+        if (symbol === 'SOL/USDT') {
+          return { symbol, last: 150, mid: 150, bid: 149, ask: 151 };
+        }
+        return { symbol, last: 100, mid: 100, bid: 99, ask: 101 };
+      },
+    });
+
+    const holdings = JSON.stringify([
+      { symbol: 'BTC/USDT', amount: 0.5, price: 65000 },
+      { symbol: 'ETH/USDT', amount: 10, price: 3500 },
+    ]);
+    const targets = JSON.stringify({
+      'BTC/USDT': 0.6,
+      'ETH/USDT': 0.3,
+      'SOL/USDT': 0.1,
+    });
+
+    const result = await server.callTool('rebalance_portfolio', { holdings, targets });
+    const data = JSON.parse(result.content[0].text);
+
+    // Portfolio value = 0.5*65000 + 10*3500 = 32500 + 35000 = 67500
+    expect(data.portfolioValue).toBe(67500);
+
+    // Current weights
+    expect(data.currentWeights['BTC/USDT']).toBeCloseTo(32500 / 67500, 3);
+    expect(data.currentWeights['ETH/USDT']).toBeCloseTo(35000 / 67500, 3);
+
+    // Target weights preserved
+    expect(data.targetWeights['BTC/USDT']).toBe(0.6);
+    expect(data.targetWeights['ETH/USDT']).toBe(0.3);
+    expect(data.targetWeights['SOL/USDT']).toBe(0.1);
+
+    // Trades should exist for all three symbols
+    expect(data.trades.length).toBe(3);
+
+    // BTC: target = 40500, current = 32500 => buy 8000 worth
+    const btcTrade = data.trades.find((t: any) => t.symbol === 'BTC/USDT');
+    expect(btcTrade).toBeDefined();
+    expect(btcTrade.side).toBe('buy');
+    expect(btcTrade.notional).toBeCloseTo(8000, 0);
+
+    // ETH: target = 20250, current = 35000 => sell 14750 worth
+    const ethTrade = data.trades.find((t: any) => t.symbol === 'ETH/USDT');
+    expect(ethTrade).toBeDefined();
+    expect(ethTrade.side).toBe('sell');
+    expect(ethTrade.notional).toBeCloseTo(14750, 0);
+
+    // SOL: target = 6750, current = 0 => buy 6750 worth
+    const solTrade = data.trades.find((t: any) => t.symbol === 'SOL/USDT');
+    expect(solTrade).toBeDefined();
+    expect(solTrade.side).toBe('buy');
+    expect(solTrade.notional).toBeCloseTo(6750, 0);
+    expect(solTrade.reason).toContain('New position');
+
+    // Trades sorted by absolute notional descending
+    for (let i = 0; i < data.trades.length - 1; i++) {
+      expect(data.trades[i].notional).toBeGreaterThanOrEqual(data.trades[i + 1].notional);
+    }
+
+    // Total turnover and turnover pct
+    expect(data.totalTurnover).toBeCloseTo(8000 + 14750 + 6750, 0);
+    expect(data.turnoverPct).toBeGreaterThan(0);
+  });
+
+  it('uses provided total_value instead of computing from holdings', async () => {
+    const { server } = setup();
+
+    const holdings = JSON.stringify([
+      { symbol: 'BTC/USDT', amount: 1, price: 65000 },
+    ]);
+    const targets = JSON.stringify({ 'BTC/USDT': 1.0 });
+
+    const result = await server.callTool('rebalance_portfolio', {
+      holdings,
+      targets,
+      total_value: 100000,
+    });
+    const data = JSON.parse(result.content[0].text);
+
+    // Should use 100000, not 65000
+    expect(data.portfolioValue).toBe(100000);
+    // BTC target = 100000, current = 65000 => buy 35000 worth
+    const btcTrade = data.trades.find((t: any) => t.symbol === 'BTC/USDT');
+    expect(btcTrade).toBeDefined();
+    expect(btcTrade.side).toBe('buy');
+    expect(btcTrade.notional).toBeCloseTo(35000, 0);
+  });
+
+  it('calls ensureMarkets and roundAmount for precision', async () => {
+    const { server, client } = setup();
+
+    const holdings = JSON.stringify([
+      { symbol: 'BTC/USDT', amount: 1, price: 65000 },
+    ]);
+    const targets = JSON.stringify({ 'BTC/USDT': 0.5 });
+
+    await server.callTool('rebalance_portfolio', {
+      holdings,
+      targets,
+      total_value: 100000,
+    });
+
+    expect(client.calls).toContainEqual(
+      expect.objectContaining({ method: 'ensureMarkets' })
+    );
+    expect(client.calls).toContainEqual(
+      expect.objectContaining({ method: 'roundAmount' })
+    );
+  });
+
+  it('rejects zero portfolio value', async () => {
+    const { server } = setup();
+
+    const holdings = JSON.stringify([]);
+    const targets = JSON.stringify({ 'BTC/USDT': 1.0 });
+
+    const result = await server.callTool('rebalance_portfolio', {
+      holdings,
+      targets,
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('positive');
+  });
+
+  it('skips negligible trades (< $1)', async () => {
+    const { server } = setup();
+
+    const holdings = JSON.stringify([
+      { symbol: 'BTC/USDT', amount: 1, price: 65000 },
+    ]);
+    // Target weight matches current exactly
+    const targets = JSON.stringify({ 'BTC/USDT': 1.0 });
+
+    const result = await server.callTool('rebalance_portfolio', {
+      holdings,
+      targets,
+    });
+    const data = JSON.parse(result.content[0].text);
+    expect(data.trades.length).toBe(0);
+    expect(data.totalTurnover).toBe(0);
+  });
+});
+
+// ── scan_mean_reversion ──────────────────────────────────
+
+describe('scan_mean_reversion tool', () => {
+  function makeStoreCandles(finalPrice: number, lookback: number) {
+    // Generate candles with a stable mean then spike the last one
+    const candles = [];
+    const stablePrice = 100;
+    for (let i = 0; i < lookback; i++) {
+      candles.push({
+        timestamp: 1700000000000 + i * 86400000,
+        open: stablePrice,
+        high: stablePrice + 1,
+        low: stablePrice - 1,
+        close: stablePrice,
+        volume: 1000,
+      });
+    }
+    // Final candle at the extreme price
+    candles.push({
+      timestamp: 1700000000000 + lookback * 86400000,
+      open: stablePrice,
+      high: Math.max(stablePrice, finalPrice),
+      low: Math.min(stablePrice, finalPrice),
+      close: finalPrice,
+      volume: 1500,
+    });
+    return candles;
+  }
+
+  it('detects overbought signal when z-score exceeds threshold', async () => {
+    const mockStore = {
+      query: async (opts: any) => {
+        // Return candles where the last close is far above the mean
+        // All closes at 100 except last at 200 => high positive z-score
+        return makeStoreCandles(200, opts.limit - 1);
+      },
+    };
+
+    const { server } = setup({
+      store: mockStore,
+    });
+
+    const result = await server.callTool('scan_mean_reversion', {
+      symbols: 'BTC/USDT',
+      timeframe: '1d',
+      lookback: 50,
+      zscore_threshold: 2.0,
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.scanned).toBe(1);
+    expect(data.results).toHaveLength(1);
+    expect(data.results[0].signal).toBe('overbought');
+    expect(data.results[0].zscore).toBeGreaterThan(2.0);
+    expect(data.results[0].currentPrice).toBe(200);
+    expect(data.results[0].mean).toBeTypeOf('number');
+    expect(data.results[0].std).toBeTypeOf('number');
+    expect(data.results[0].std).toBeGreaterThan(0);
+    expect(data.results[0].deviationPct).toBeGreaterThan(0);
+    expect(data.opportunities).toBe(1);
+  });
+
+  it('detects oversold signal for negative z-score', async () => {
+    const mockStore = {
+      query: async (opts: any) => {
+        // Last close far below the mean (all 100 except last at 10)
+        return makeStoreCandles(10, opts.limit - 1);
+      },
+    };
+
+    const { server } = setup({
+      store: mockStore,
+    });
+
+    const result = await server.callTool('scan_mean_reversion', {
+      symbols: 'ETH/USDT',
+      timeframe: '1d',
+      lookback: 50,
+      zscore_threshold: 2.0,
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.results[0].signal).toBe('oversold');
+    expect(data.results[0].zscore).toBeLessThan(-2.0);
+    expect(data.results[0].deviationPct).toBeLessThan(0);
+    expect(data.opportunities).toBe(1);
+  });
+
+  it('reports neutral when z-score is within threshold', async () => {
+    const mockStore = {
+      query: async (opts: any) => {
+        // Last close near the mean
+        return makeStoreCandles(100, opts.limit - 1);
+      },
+    };
+
+    const { server } = setup({
+      store: mockStore,
+    });
+
+    const result = await server.callTool('scan_mean_reversion', {
+      symbols: 'SOL/USDT',
+      timeframe: '1d',
+      lookback: 50,
+      zscore_threshold: 2.0,
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.results[0].signal).toBe('neutral');
+    expect(Math.abs(data.results[0].zscore)).toBeLessThan(2.0);
+    expect(data.opportunities).toBe(0);
+  });
+
+  it('sorts results by absolute z-score descending', async () => {
+    const mockStore = {
+      query: async (opts: any) => {
+        if (opts.symbol === 'BTC/USDT') return makeStoreCandles(120, opts.limit - 1); // moderate
+        if (opts.symbol === 'ETH/USDT') return makeStoreCandles(200, opts.limit - 1); // extreme
+        return makeStoreCandles(100, opts.limit - 1); // neutral
+      },
+    };
+
+    const { server } = setup({
+      store: mockStore,
+    });
+
+    const result = await server.callTool('scan_mean_reversion', {
+      symbols: 'BTC/USDT,ETH/USDT,SOL/USDT',
+      timeframe: '1d',
+      lookback: 50,
+      zscore_threshold: 2.0,
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.scanned).toBe(3);
+    expect(data.results).toHaveLength(3);
+    // ETH should be first (highest abs z-score), then BTC, then SOL
+    expect(Math.abs(data.results[0].zscore)).toBeGreaterThanOrEqual(Math.abs(data.results[1].zscore));
+    expect(Math.abs(data.results[1].zscore)).toBeGreaterThanOrEqual(Math.abs(data.results[2].zscore));
+  });
+
+  it('reports error for insufficient data', async () => {
+    const mockStore = {
+      query: async () => {
+        // Return only 5 candles when 50 are needed
+        return makeStoreCandles(100, 4);
+      },
+    };
+
+    const { server } = setup({
+      store: mockStore,
+    });
+
+    const result = await server.callTool('scan_mean_reversion', {
+      symbols: 'BTC/USDT',
+      timeframe: '1d',
+      lookback: 50,
+      zscore_threshold: 2.0,
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.results[0].error).toContain('Insufficient data');
+    expect(data.opportunities).toBe(0);
+  });
+
+  it('errors when store is not configured', async () => {
+    const { server } = setup({
+      store: null,
+    });
+
+    const result = await server.callTool('scan_mean_reversion', {
+      symbols: 'BTC/USDT',
+      timeframe: '1d',
+      lookback: 50,
+      zscore_threshold: 2.0,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('DuckDB store not configured');
+  });
+});
+
+// ── detect_confluence ────────────────────────────────────
+
+describe('detect_confluence tool', () => {
+  it('returns signals for each timeframe and a confluence score', async () => {
+    const { server } = setup();
+    const result = await server.callTool('detect_confluence', {
+      symbol: 'BTC/USDT',
+      timeframes: '5m,15m,1h,4h,1d',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.symbol).toBe('BTC/USDT');
+    expect(data.timeframes).toEqual(['5m', '15m', '1h', '4h', '1d']);
+
+    // Check that signals exist for each timeframe
+    for (const tf of ['5m', '15m', '1h', '4h', '1d']) {
+      expect(data.signals[tf]).toBeDefined();
+      expect(data.signals[tf].rsi).toBeTypeOf('number');
+      expect(data.signals[tf].rsi).toBeGreaterThanOrEqual(0);
+      expect(data.signals[tf].rsi).toBeLessThanOrEqual(100);
+      expect(data.signals[tf].rsiSignal).toMatch(/^(overbought|oversold|neutral)$/);
+      expect(data.signals[tf].macd).toMatch(/^(bullish|bearish)$/);
+      expect(data.signals[tf].trend).toMatch(/^(bullish|bearish)$/);
+      expect(data.signals[tf].bbPosition).toMatch(/^(inside|above_upper|below_lower)$/);
+      expect(data.signals[tf].priceVsEma).toMatch(/^(above|below)$/);
+    }
+
+    // Confluence score
+    expect(data.confluence).toBeDefined();
+    expect(data.confluence.bullish).toBeTypeOf('number');
+    expect(data.confluence.bearish).toBeTypeOf('number');
+    expect(data.confluence.bullish + data.confluence.bearish).toBeLessThanOrEqual(5);
+    expect(data.confluence.score).toBeGreaterThanOrEqual(0);
+    expect(data.confluence.score).toBeLessThanOrEqual(100);
+    expect(data.confluence.direction).toMatch(/^(bullish|bearish)$/);
+    expect(data.confluence.strength).toMatch(/^(strong|moderate|weak)$/);
+    expect(data.recommendation).toBeTypeOf('string');
+    expect(data.recommendation.length).toBeGreaterThan(0);
+  });
+
+  it('works with a single timeframe', async () => {
+    const { server } = setup();
+    const result = await server.callTool('detect_confluence', {
+      symbol: 'BTC/USDT',
+      timeframes: '1d',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.timeframes).toEqual(['1d']);
+    expect(data.signals['1d']).toBeDefined();
+    expect(data.confluence.score).toBe(100);
+  });
+
+  it('rejects insufficient data', async () => {
+    const { server } = setup({
+      getBars: async () => {
+        const bars = [];
+        for (let i = 0; i < 20; i++) {
+          bars.push({
+            timestamp: 1700000000000 + i * 86400000,
+            open: 100, high: 105, low: 95, close: 100, volume: 1000,
+          });
+        }
+        return bars;
+      },
+    });
+    const result = await server.callTool('detect_confluence', {
+      symbol: 'BTC/USDT',
+      timeframes: '1d',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Insufficient');
+  });
+});
+
+// ── detect_bb_squeeze ────────────────────────────────────
+
+describe('detect_bb_squeeze tool', () => {
+  it('returns results with bandwidth and squeeze detection', async () => {
+    const { server } = setup();
+    const result = await server.callTool('detect_bb_squeeze', {
+      symbols: 'BTC/USDT',
+      timeframe: '4h',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.timeframe).toBe('4h');
+    expect(data.results).toBeInstanceOf(Array);
+    expect(data.results).toHaveLength(1);
+    const r = data.results[0];
+    expect(r.symbol).toBe('BTC/USDT');
+    expect(r.bandwidth).toBeTypeOf('number');
+    expect(r.bandwidth).toBeGreaterThan(0);
+    expect(r.avgBandwidth).toBeTypeOf('number');
+    expect(r.avgBandwidth).toBeGreaterThan(0);
+    expect(r.squeezeRatio).toBeTypeOf('number');
+    expect(r.squeezeRatio).toBeGreaterThan(0);
+    expect(r.inSqueeze).toBeTypeOf('boolean');
+    expect(r.squeezeDuration).toBeTypeOf('number');
+    expect(r.squeezeDuration).toBeGreaterThanOrEqual(0);
+    expect(r.pricePosition).toMatch(/^(above_middle|below_middle)$/);
+    expect(r.signal).toBeTypeOf('string');
+  });
+
+  it('detects a squeeze when bandwidth is very low', async () => {
+    // Generate bars with very tight range (low volatility)
+    const { server } = setup({
+      getBars: async () => {
+        const bars = [];
+        const basePrice = 65000;
+        for (let i = 0; i < 120; i++) {
+          // First 80 bars: high volatility; last 40 bars: very tight
+          const vol = i < 80 ? 500 : 5;
+          const price = basePrice + (Math.random() - 0.5) * vol;
+          bars.push({
+            timestamp: 1700000000000 + i * 14400000,
+            open: price - vol * 0.1,
+            high: price + vol * 0.2,
+            low: price - vol * 0.3,
+            close: price,
+            volume: 1000,
+          });
+        }
+        return bars;
+      },
+    });
+
+    const result = await server.callTool('detect_bb_squeeze', {
+      symbols: 'BTC/USDT',
+      timeframe: '4h',
+      squeeze_threshold: 0.5,
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.results[0].inSqueeze).toBe(true);
+    expect(data.results[0].squeezeDuration).toBeGreaterThan(0);
+    expect(data.results[0].signal).toContain('squeeze');
+  });
+
+  it('scans multiple symbols and sorts by squeeze intensity', async () => {
+    const { server } = setup();
+    const result = await server.callTool('detect_bb_squeeze', {
+      symbols: 'BTC/USDT,ETH/USDT,SOL/USDT',
+      timeframe: '4h',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.results).toHaveLength(3);
+    // Results should be sorted by squeezeRatio ascending
+    for (let i = 1; i < data.results.length; i++) {
+      expect(data.results[i].squeezeRatio).toBeGreaterThanOrEqual(data.results[i - 1].squeezeRatio);
+    }
+  });
+
+  it('rejects insufficient data', async () => {
+    const { server } = setup({
+      getBars: async () => {
+        return [
+          { timestamp: 1, open: 100, high: 105, low: 95, close: 100, volume: 1000 },
+        ];
+      },
+    });
+    const result = await server.callTool('detect_bb_squeeze', {
+      symbols: 'BTC/USDT',
+      timeframe: '4h',
+    });
+    expect(result.isError).toBe(true);
+    // With only 1 bar, tool should error (insufficient data or cannot compute BB)
+    expect(result.content[0].text.length).toBeGreaterThan(0);
+  });
+});
