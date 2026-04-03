@@ -8,6 +8,7 @@
  */
 
 import ccxt, { type Exchange, type Ticker, type Order } from 'ccxt';
+import { MarketDataStore, type OHLCVRow } from '../../../../../lib/datastore.js';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -18,6 +19,8 @@ export interface ExchangeClientOpts {
   password?: string;
   sandbox?: boolean;
   exchangeInstance?: Exchange;
+  /** Optional DuckDB store for read-through caching of OHLCV data. */
+  store?: MarketDataStore;
 }
 
 export interface TickerResult {
@@ -49,6 +52,11 @@ export interface OrderBookResult {
   symbol: string;
   bids: [number, number][];
   asks: [number, number][];
+  bestBid: number | undefined;
+  bestAsk: number | undefined;
+  mid: number | undefined;
+  spread: number | undefined;
+  spreadBps: number | undefined;
   timestamp: number | undefined;
 }
 
@@ -107,6 +115,37 @@ export interface MarketResult {
   };
 }
 
+export interface QuoteResult {
+  symbol: string;
+  bid: number | undefined;
+  bidSize: number | undefined;
+  ask: number | undefined;
+  askSize: number | undefined;
+  mid: number | undefined;
+  spread: number | undefined;
+  spreadBps: number | undefined;
+  last: number | undefined;
+  timestamp: number | undefined;
+}
+
+export interface FeeResult {
+  symbol: string | undefined;
+  maker: number | undefined;
+  taker: number | undefined;
+  percentage: boolean;
+}
+
+export interface ExchangeInfoResult {
+  id: string;
+  name: string;
+  countries: string[];
+  rateLimit: number;
+  has: Record<string, boolean>;
+  timeframes: string[];
+  totalMarkets: number;
+  activeMarkets: number;
+}
+
 // ── Helpers ────────────────────────────────────────────────
 
 function str(v: string | undefined): string {
@@ -149,10 +188,13 @@ export class ExchangeClient {
   private exchange: Exchange;
   private _sandbox: boolean;
   readonly exchangeId: string;
+  /** DuckDB store for read-through caching. Null when not configured. */
+  store: MarketDataStore | null;
 
   constructor(opts: ExchangeClientOpts) {
     this.exchangeId = opts.exchangeId;
     this._sandbox = opts.sandbox ?? false;
+    this.store = opts.store ?? null;
 
     if (opts.exchangeInstance) {
       this.exchange = opts.exchangeInstance;
@@ -187,6 +229,37 @@ export class ExchangeClient {
     return this.exchange.name ?? this.exchangeId;
   }
 
+  private _marketsLoaded = false;
+
+  /** Ensure markets are loaded (cached by CCXT after first call). */
+  async ensureMarkets(): Promise<void> {
+    if (!this._marketsLoaded) {
+      await this.exchange.loadMarkets();
+      this._marketsLoaded = true;
+    }
+  }
+
+  /**
+   * Round amount to exchange precision. Must call ensureMarkets() first.
+   * Uses CCXT's built-in precision handling (TICK_SIZE, DECIMAL_PLACES, etc.).
+   */
+  roundAmount(symbol: string, amount: number): number {
+    try {
+      return Number(this.exchange.amountToPrecision(symbol, amount));
+    } catch {
+      return amount;
+    }
+  }
+
+  /** Round price to exchange precision. Must call ensureMarkets() first. */
+  roundPrice(symbol: string, price: number): number {
+    try {
+      return Number(this.exchange.priceToPrecision(symbol, price));
+    } catch {
+      return price;
+    }
+  }
+
   // ── Public: Market Data ──────────────────────────────────
 
   async loadMarkets(): Promise<MarketResult[]> {
@@ -207,6 +280,64 @@ export class ExchangeClient {
   }
 
   async getBars(symbol: string, timeframe: string, since?: number, limit?: number): Promise<BarResult[]> {
+    // Read-through cache: check DuckDB first, fetch delta from exchange, merge
+    if (this.store) {
+      const cached = await this.store.query({
+        symbol,
+        interval: timeframe,
+        exchange: this.exchangeId,
+        start: since ? new Date(since) : undefined,
+        limit,
+      });
+
+      // Determine if we need fresh data from the exchange
+      const lastCachedTs = cached.length > 0 ? cached[cached.length - 1].timestamp : undefined;
+      const fetchSince = lastCachedTs ? lastCachedTs + 1 : since;
+
+      const ohlcv = await this.exchange.fetchOHLCV(symbol, timeframe, fetchSince, limit);
+      const fresh: BarResult[] = ohlcv.map(candle => ({
+        timestamp: candle[0] as number,
+        open: candle[1] as number,
+        high: candle[2] as number,
+        low: candle[3] as number,
+        close: candle[4] as number,
+        volume: candle[5] as number,
+      }));
+
+      // Persist new bars to DuckDB (fire-and-forget, don't block response)
+      if (fresh.length > 0) {
+        const rows: OHLCVRow[] = fresh.map(b => ({
+          symbol,
+          exchange: this.exchangeId,
+          asset_type: 'crypto',
+          interval: timeframe,
+          ts: new Date(b.timestamp),
+          open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume,
+        }));
+        this.store.insertOHLCV(rows).catch(() => {}); // best-effort persist
+      }
+
+      // Merge cached + fresh, dedup by timestamp
+      if (cached.length > 0 && fresh.length > 0) {
+        const seen = new Set(cached.map(c => c.timestamp));
+        const merged = cached.map(c => ({
+          timestamp: c.timestamp, open: c.open, high: c.high,
+          low: c.low, close: c.close, volume: c.volume,
+        }));
+        for (const f of fresh) {
+          if (!seen.has(f.timestamp)) merged.push(f);
+        }
+        merged.sort((a, b) => a.timestamp - b.timestamp);
+        return limit ? merged.slice(-limit) : merged;
+      }
+
+      return fresh.length > 0 ? fresh : cached.map(c => ({
+        timestamp: c.timestamp, open: c.open, high: c.high,
+        low: c.low, close: c.close, volume: c.volume,
+      }));
+    }
+
+    // No store — direct fetch
     const ohlcv = await this.exchange.fetchOHLCV(symbol, timeframe, since, limit);
     return ohlcv.map(candle => ({
       timestamp: candle[0] as number,
@@ -220,10 +351,24 @@ export class ExchangeClient {
 
   async getOrderBook(symbol: string, limit?: number): Promise<OrderBookResult> {
     const ob = await this.exchange.fetchOrderBook(symbol, limit);
+    const bids = ob.bids as [number, number][];
+    const asks = ob.asks as [number, number][];
+    const bestBid = bids.length > 0 ? bids[0][0] : undefined;
+    const bestAsk = asks.length > 0 ? asks[0][0] : undefined;
+    const mid = bestBid != null && bestAsk != null ? (bestBid + bestAsk) / 2 : undefined;
+    const spread = bestBid != null && bestAsk != null ? bestAsk - bestBid : undefined;
+    const spreadBps = mid != null && spread != null && mid > 0
+      ? Math.round((spread / mid) * 10000 * 100) / 100
+      : undefined;
     return {
       symbol,
-      bids: ob.bids as [number, number][],
-      asks: ob.asks as [number, number][],
+      bids,
+      asks,
+      bestBid,
+      bestAsk,
+      mid,
+      spread,
+      spreadBps,
       timestamp: ob.timestamp,
     };
   }
@@ -309,7 +454,10 @@ export class ExchangeClient {
     if (amount <= 0) {
       throw new Error('Order amount must be positive');
     }
-    const order = await this.exchange.createOrder(symbol, type, side, amount, price);
+    await this.ensureMarkets();
+    const roundedAmount = this.roundAmount(symbol, amount);
+    const roundedPrice = price !== undefined ? this.roundPrice(symbol, price) : undefined;
+    const order = await this.exchange.createOrder(symbol, type, side, roundedAmount, roundedPrice);
     return this.formatOrder(order);
   }
 
@@ -325,13 +473,16 @@ export class ExchangeClient {
     amount?: number,
     price?: number,
   ): Promise<OrderResult> {
+    await this.ensureMarkets();
+    const roundedAmount = amount !== undefined ? this.roundAmount(symbol, amount) : undefined;
+    const roundedPrice = price !== undefined ? this.roundPrice(symbol, price) : undefined;
     if (typeof this.exchange.editOrder === 'function') {
-      const order = await this.exchange.editOrder(orderId, symbol, type, side, amount, price);
+      const order = await this.exchange.editOrder(orderId, symbol, type, side, roundedAmount, roundedPrice);
       return this.formatOrder(order);
     }
     // Fallback: cancel + replace
     await this.exchange.cancelOrder(orderId, symbol);
-    const order = await this.exchange.createOrder(symbol, type, side, amount!, price);
+    const order = await this.exchange.createOrder(symbol, type, side, roundedAmount!, roundedPrice);
     return this.formatOrder(order);
   }
 
@@ -368,6 +519,105 @@ export class ExchangeClient {
   async getMyTrades(symbol?: string, since?: number, limit?: number): Promise<TradeResult[]> {
     const trades = await this.exchange.fetchMyTrades(symbol, since, limit);
     return trades.map(formatTrade);
+  }
+
+  // ── Public: Quoting & Fees ────────────────────────────────
+
+  async getQuote(symbol: string): Promise<QuoteResult> {
+    const t = await this.exchange.fetchTicker(symbol);
+    const bid = t.bid;
+    const ask = t.ask;
+    const mid = bid != null && ask != null ? (bid + ask) / 2 : undefined;
+    const spread = bid != null && ask != null ? ask - bid : undefined;
+    const spreadBps = mid != null && spread != null && mid > 0
+      ? (spread / mid) * 10000
+      : undefined;
+    return {
+      symbol: str(t.symbol),
+      bid,
+      bidSize: (t as any).bidVolume,
+      ask,
+      askSize: (t as any).askVolume,
+      mid,
+      spread,
+      spreadBps: spreadBps != null ? Math.round(spreadBps * 100) / 100 : undefined,
+      last: t.last,
+      timestamp: t.timestamp,
+    };
+  }
+
+  async getTradingFees(symbol?: string): Promise<FeeResult[]> {
+    await this.ensureMarkets();
+    if (symbol) {
+      try {
+        const fee = (this.exchange as any).calculateFee?.(symbol, 'limit', 'buy', 1, 1, 'taker');
+        if (fee) {
+          return [{
+            symbol,
+            maker: (this.exchange.markets[symbol] as any)?.maker,
+            taker: (this.exchange.markets[symbol] as any)?.taker,
+            percentage: true,
+          }];
+        }
+      } catch { /* fallthrough */ }
+    }
+    // Try to get fees from market data (always available after loadMarkets)
+    const results: FeeResult[] = [];
+    const markets = this.exchange.markets;
+    const symbols = symbol ? [symbol] : Object.keys(markets).slice(0, 10);
+    for (const sym of symbols) {
+      const m = markets[sym] as any;
+      if (m) {
+        results.push({
+          symbol: sym,
+          maker: m.maker,
+          taker: m.taker,
+          percentage: true,
+        });
+      }
+    }
+    return results;
+  }
+
+  async getExchangeInfo(): Promise<ExchangeInfoResult> {
+    await this.ensureMarkets();
+    const markets = this.exchange.markets;
+    const allMarkets = Object.values(markets).filter(m => m != null);
+    const activeMarkets = allMarkets.filter(m => (m as any).active !== false);
+    const has: Record<string, boolean> = {};
+    const capabilities = this.exchange.has as Record<string, any>;
+    for (const key of [
+      'fetchTicker', 'fetchOrderBook', 'fetchOHLCV', 'fetchTrades',
+      'createOrder', 'editOrder', 'cancelOrder', 'cancelAllOrders',
+      'fetchBalance', 'fetchPositions', 'fetchMyTrades',
+      'createMarketOrder', 'createLimitOrder', 'createStopOrder',
+      'fetchTradingFees', 'fetchFundingRate',
+    ]) {
+      has[key] = !!capabilities[key];
+    }
+    return {
+      id: this.exchangeId,
+      name: this.name,
+      countries: (this.exchange as any).countries ?? [],
+      rateLimit: (this.exchange as any).rateLimit ?? 0,
+      has,
+      timeframes: Object.keys((this.exchange as any).timeframes ?? {}),
+      totalMarkets: allMarkets.length,
+      activeMarkets: activeMarkets.length,
+    };
+  }
+
+  async getMarketInfo(symbol: string): Promise<MarketResult & { maker: number | undefined; taker: number | undefined }> {
+    await this.ensureMarkets();
+    const m = this.exchange.markets[symbol] as any;
+    if (!m) {
+      throw new Error(`Market not found: ${symbol}`);
+    }
+    return {
+      ...formatMarket(m),
+      maker: m.maker,
+      taker: m.taker,
+    };
   }
 
   // ── Helpers ──────────────────────────────────────────────

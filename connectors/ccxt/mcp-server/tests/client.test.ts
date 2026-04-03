@@ -214,7 +214,7 @@ describe('getBars', () => {
 });
 
 describe('getOrderBook', () => {
-  it('returns bids and asks', async () => {
+  it('returns bids and asks with spread analysis', async () => {
     const mock = createMockCcxtExchange();
     const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
     const ob = await client.getOrderBook('BTC/USDT');
@@ -224,7 +224,27 @@ describe('getOrderBook', () => {
     expect(ob.asks).toHaveLength(2);
     expect(ob.bids[0][0]).toBe(64990);
     expect(ob.asks[0][0]).toBe(65010);
+    expect(ob.bestBid).toBe(64990);
+    expect(ob.bestAsk).toBe(65010);
+    expect(ob.mid).toBe(65000);
+    expect(ob.spread).toBe(20);
+    expect(ob.spreadBps).toBeTypeOf('number');
+    expect(ob.spreadBps).toBeGreaterThan(0);
     expect(ob.timestamp).toBe(1700000000000);
+  });
+
+  it('handles empty order book gracefully', async () => {
+    const mock = createMockCcxtExchange({
+      fetchOrderBook: async () => ({ bids: [], asks: [], timestamp: 1700000000000 }),
+    });
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const ob = await client.getOrderBook('BTC/USDT');
+
+    expect(ob.bestBid).toBeUndefined();
+    expect(ob.bestAsk).toBeUndefined();
+    expect(ob.mid).toBeUndefined();
+    expect(ob.spread).toBeUndefined();
+    expect(ob.spreadBps).toBeUndefined();
   });
 });
 
@@ -495,6 +515,123 @@ describe('getBalance', () => {
     const btc = balances.find(b => b.currency === 'BTC');
     expect(btc!.total).toBe(-0.5);
     expect(btc!.free).toBe(-0.5);
+  });
+});
+
+// ── Precision rounding ─────────────────────────────────────
+
+describe('ensureMarkets', () => {
+  it('loads markets only once', async () => {
+    let loadCount = 0;
+    const mock = createMockCcxtExchange({
+      loadMarkets: async () => { loadCount++; return {}; },
+    });
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    await client.ensureMarkets();
+    await client.ensureMarkets();
+    expect(loadCount).toBe(1);
+  });
+});
+
+describe('roundAmount', () => {
+  it('rounds using exchange precision', () => {
+    const mock = createMockCcxtExchange({
+      amountToPrecision: (_symbol: string, amount: number) => amount.toFixed(4),
+    });
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    expect(client.roundAmount('BTC/USDT', 1.123456789)).toBe(1.1235);
+  });
+
+  it('returns original on error', () => {
+    const mock = createMockCcxtExchange({
+      amountToPrecision: () => { throw new Error('no market'); },
+    });
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    expect(client.roundAmount('BTC/USDT', 1.5)).toBe(1.5);
+  });
+});
+
+describe('roundPrice', () => {
+  it('rounds using exchange precision', () => {
+    const mock = createMockCcxtExchange({
+      priceToPrecision: (_symbol: string, price: number) => price.toFixed(2),
+    });
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    expect(client.roundPrice('BTC/USDT', 65123.456)).toBe(65123.46);
+  });
+
+  it('returns original on error', () => {
+    const mock = createMockCcxtExchange({
+      priceToPrecision: () => { throw new Error('no market'); },
+    });
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    expect(client.roundPrice('BTC/USDT', 100)).toBe(100);
+  });
+});
+
+// ── Quoting & Fees ─────────────────────────────────────────
+
+describe('getQuote', () => {
+  it('returns spread analysis from ticker', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const q = await client.getQuote('BTC/USDT');
+
+    expect(q.symbol).toBe('BTC/USDT');
+    expect(q.bid).toBe(64990);
+    expect(q.ask).toBe(65010);
+    expect(q.mid).toBe(65000);
+    expect(q.spread).toBe(20);
+    expect(q.spreadBps).toBeTypeOf('number');
+    expect(q.spreadBps).toBeGreaterThan(0);
+    expect(q.last).toBe(65000);
+  });
+
+  it('handles missing bid/ask', async () => {
+    const mock = createMockCcxtExchange({
+      fetchTicker: async () => ({
+        symbol: 'BTC/USDT', last: 65000,
+        bid: undefined, ask: undefined,
+        high: 66000, low: 64000, open: 64500, close: 65000,
+        baseVolume: 1000, quoteVolume: 65000000,
+        change: 500, percentage: 0.77, timestamp: 1700000000000,
+      }),
+    });
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const q = await client.getQuote('BTC/USDT');
+
+    expect(q.mid).toBeUndefined();
+    expect(q.spread).toBeUndefined();
+    expect(q.spreadBps).toBeUndefined();
+  });
+});
+
+describe('getMarketInfo', () => {
+  it('returns market with fee rates', async () => {
+    const mock = createMockCcxtExchange({
+      markets: {
+        'BTC/USDT': {
+          symbol: 'BTC/USDT', base: 'BTC', quote: 'USDT', type: 'spot',
+          active: true,
+          precision: { amount: 8, price: 2 },
+          limits: { amount: { min: 0.0001, max: 100 }, price: { min: 0.01, max: 1000000 } },
+          maker: 0.001, taker: 0.002,
+        },
+      },
+    });
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const info = await client.getMarketInfo('BTC/USDT');
+
+    expect(info.symbol).toBe('BTC/USDT');
+    expect(info.precision.amount).toBe(8);
+    expect(info.maker).toBe(0.001);
+    expect(info.taker).toBe(0.002);
+  });
+
+  it('throws for unknown symbol', async () => {
+    const mock = createMockCcxtExchange({ markets: {} });
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    await expect(client.getMarketInfo('FAKE/USDT')).rejects.toThrow('Market not found');
   });
 });
 

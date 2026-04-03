@@ -4,6 +4,15 @@ import { createMockClient, MockMcpServer } from './helpers.js';
 
 function setup(overrides: Record<string, unknown> = {}) {
   const client = createMockClient({
+    getTicker: async (symbol: string) => ({
+      symbol, last: 65000, bid: 64990, ask: 65010, high: 66000, low: 64000,
+      open: 64500, close: 65000, volume: 1234.5, quoteVolume: 80000000,
+      change: 500, percentage: 0.77, timestamp: 1700000000000,
+    }),
+    getQuote: async (symbol: string) => ({
+      symbol, bid: 64990, bidSize: 1.5, ask: 65010, askSize: 1.0,
+      mid: 65000, spread: 20, spreadBps: 3.08, last: 65000, timestamp: 1700000000000,
+    }),
     getTickers: async () => [
       { symbol: 'BTC/USDT', last: 65000, bid: 64990, ask: 65010, high: 66000, low: 64000, open: 64500, close: 65000, volume: 1234.5, quoteVolume: 80000000, change: 500, percentage: 0.77, timestamp: 1700000000000 },
       { symbol: 'ETH/USDT', last: 3500, bid: 3499, ask: 3501, high: 3600, low: 3400, open: 3450, close: 3500, volume: 5000, quoteVolume: 17500000, change: 50, percentage: 1.43, timestamp: 1700000000000 },
@@ -16,6 +25,7 @@ function setup(overrides: Record<string, unknown> = {}) {
       symbol: 'BTC/USDT',
       bids: [[64990, 1.5], [64980, 2.0]],
       asks: [[65010, 1.0], [65020, 1.8]],
+      bestBid: 64990, bestAsk: 65010, mid: 65000, spread: 20, spreadBps: 3.08,
       timestamp: 1700000000000,
     }),
     getTrades: async () => [
@@ -131,10 +141,42 @@ describe('get_bars tool', () => {
   });
 });
 
+// ── get_ticker ────────────────────────────────────────────
+
+describe('get_ticker tool', () => {
+  it('returns single ticker', async () => {
+    const { server } = setup();
+    const result = await server.callTool('get_ticker', { symbol: 'BTC/USDT' });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.symbol).toBe('BTC/USDT');
+    expect(data.last).toBe(65000);
+    expect(data.bid).toBe(64990);
+    expect(data.ask).toBe(65010);
+  });
+});
+
+// ── get_quote ─────────────────────────────────────────────
+
+describe('get_quote tool', () => {
+  it('returns spread analysis', async () => {
+    const { server } = setup();
+    const result = await server.callTool('get_quote', { symbol: 'BTC/USDT' });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.symbol).toBe('BTC/USDT');
+    expect(data.bid).toBe(64990);
+    expect(data.ask).toBe(65010);
+    expect(data.mid).toBe(65000);
+    expect(data.spread).toBe(20);
+    expect(data.spreadBps).toBe(3.08);
+  });
+});
+
 // ── get_order_book ─────────────────────────────────────────
 
 describe('get_order_book tool', () => {
-  it('returns bids and asks with correct shape', async () => {
+  it('returns bids and asks with spread analysis', async () => {
     const { server } = setup();
     const result = await server.callTool('get_order_book', { symbol: 'BTC/USDT', limit: 20 });
 
@@ -144,6 +186,11 @@ describe('get_order_book tool', () => {
     expect(data.asks).toHaveLength(2);
     expect(data.bids[0]).toEqual([64990, 1.5]);
     expect(data.asks[0]).toEqual([65010, 1.0]);
+    expect(data.bestBid).toBe(64990);
+    expect(data.bestAsk).toBe(65010);
+    expect(data.mid).toBe(65000);
+    expect(data.spread).toBe(20);
+    expect(data.spreadBps).toBe(3.08);
     expect(data.timestamp).toBe(1700000000000);
   });
 

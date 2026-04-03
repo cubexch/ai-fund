@@ -7,6 +7,9 @@ import { parseArgs, resolveCredentials, envPrefix } from './cli/common.js';
 import { registerAccountTools } from './tools/account.js';
 import { registerOrderTools } from './tools/orders.js';
 import { registerMarketDataTools } from './tools/market-data.js';
+import { registerStrategyTools } from './tools/strategy.js';
+import { registerDatastoreTools } from './tools/datastore.js';
+import { MarketDataStore } from '../../../../lib/datastore.js';
 
 // ── Parse CLI args + resolve credentials ──────────────────────
 
@@ -21,12 +24,25 @@ const server = new McpServer({
   version: '0.1.0',
 });
 
+// ── Initialize DuckDB store (lazy — only created on first use) ──
+const dbPath = process.env.MARKET_DB_PATH || `.desk/data/${exchangeId}.duckdb`;
+let store: MarketDataStore | undefined;
+try {
+  store = new MarketDataStore(dbPath);
+  await store.init();
+  process.stderr.write(`[ccxt-${exchangeId}] DuckDB: ${dbPath}\n`);
+} catch (err: any) {
+  process.stderr.write(`[ccxt-${exchangeId}] DuckDB: disabled (${err.message})\n`);
+  store = undefined;
+}
+
 const client = new ExchangeClient({
   exchangeId,
   apiKey: creds.apiKey || undefined,
   secret: creds.secret || undefined,
   password: creds.password || undefined,
   sandbox: creds.sandbox,
+  store,
 });
 
 if (client.hasCredentials) {
@@ -40,6 +56,8 @@ if (client.hasCredentials) {
 registerMarketDataTools(server, client);
 registerOrderTools(server, client);
 registerAccountTools(server, client);
+registerStrategyTools(server, client);
+registerDatastoreTools(server, client);
 
 // ── Start server ───────────────────────────────────────────
 

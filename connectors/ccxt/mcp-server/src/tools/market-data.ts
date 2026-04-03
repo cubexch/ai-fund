@@ -8,6 +8,28 @@ import { handler } from './handler.js';
 
 export function registerMarketDataTools(server: McpServer, client: ExchangeClient) {
   server.tool(
+    'get_ticker',
+    `Get current price for a single symbol on ${client.name}. Faster than get_tickers for single lookups.`,
+    {
+      symbol: z.string().describe('Trading pair (e.g., BTC/USDT, ETH/USD)'),
+    } as any,
+    handler(async (params: any) => {
+      return client.getTicker(params.symbol);
+    }),
+  );
+
+  server.tool(
+    'get_quote',
+    `Get best bid/ask quote with spread analysis for a symbol on ${client.name}. Essential for market-making and arbitrage — returns mid price, spread in absolute and basis points.`,
+    {
+      symbol: z.string().describe('Trading pair (e.g., BTC/USDT)'),
+    } as any,
+    handler(async (params: any) => {
+      return client.getQuote(params.symbol);
+    }),
+  );
+
+  server.tool(
     'get_tickers',
     `Get current prices for one or more symbols on ${client.name}. Returns last price, bid/ask, 24h high/low, volume, and change.`,
     {
