@@ -160,7 +160,6 @@ const GEO_FALLBACKS: Record<string, string[]> = {
   'binance': ['binanceus'],
   'bitfinex': ['bitfinex2'],
   'huobi': ['huobijp'],
-  'ftx': ['ftxus'],
   'kucoin': ['kucoinfutures'],
 };
 
@@ -338,10 +337,23 @@ export class ExchangeClient {
   // ── Public: Market Data ──────────────────────────────────
 
   async loadMarkets(): Promise<MarketResult[]> {
-    const markets = await this.exchange.loadMarkets();
-    return Object.values(markets)
-      .filter((m): m is NonNullable<typeof m> => m != null)
-      .map(formatMarket);
+    const tried = new Set<string>([this.exchangeId]);
+    while (true) {
+      try {
+        const markets = await this.exchange.loadMarkets();
+        this._marketsLoaded = true;
+        return Object.values(markets)
+          .filter((m): m is NonNullable<typeof m> => m != null)
+          .map(formatMarket);
+      } catch (err: any) {
+        if (isGeoBlock(err) && this.tryGeoFallback(tried)) {
+          tried.add(this.exchangeId);
+          console.error(`[geo-fallback] ${this.originalExchangeId} blocked, trying ${this.exchangeId}`);
+          continue;
+        }
+        throw err;
+      }
+    }
   }
 
   async getTicker(symbol: string): Promise<TickerResult> {
