@@ -1,0 +1,28 @@
+{
+  "name": "@ai-fund/lib",
+  "version": "0.1.0",
+  "description": "Shared libraries for ai-fund: indicators, math, backtesting, signals, regime detection",
+  "type": "module",
+  "exports": {
+    "./indicators": "./indicators.ts",
+    "./math": "./math.ts",
+    "./format": "./format.ts",
+    "./datastore": "./datastore.ts",
+    "./backtester": "./backtester.ts",
+    "./regime-detector": "./regime-detector.ts",
+    "./signal-generator": "./signal-generator.ts",
+    "./connector-interface": "./connector-interface.ts",
+    "./connector-registry": "./connector-registry.ts",
+    "./valuation": "./valuation.ts",
+    "./ingest/exchange": "./ingest/exchange.ts",
+    "./ingest/yahoo": "./ingest/yahoo.ts"
+  },
+  "files": [
+    "*.ts",
+    "ingest/*.ts"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

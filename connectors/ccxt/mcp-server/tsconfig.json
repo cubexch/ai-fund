@@ -6,9 +6,6 @@
     "lib": ["ES2022"],
     "outDir": "dist",
     "baseUrl": ".",
-    "paths": {
-      "@ai-fund/lib/*": ["../../../lib/*"]
-    },
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,

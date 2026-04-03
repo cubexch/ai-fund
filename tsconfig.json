@@ -7,9 +7,6 @@
     "outDir": "dist",
     "rootDir": ".",
     "baseUrl": ".",
-    "paths": {
-      "@ai-fund/lib/*": ["./lib/*"]
-    },
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,

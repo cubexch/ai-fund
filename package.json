@@ -29,6 +29,7 @@
     "yahoo-finance2": "^2.14.0"
   },
   "workspaces": [
+    "lib",
     "connectors/cube/mcp-server",
     "connectors/robinhood/mcp-server",
     "connectors/alpaca/mcp-server",

@@ -16,6 +16,7 @@
     "logout": "tsx src/cli/logout.ts"
   },
   "dependencies": {
+    "@ai-fund/lib": "*",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "ccxt": "^4.4.0",
     "zod": "^3.24.0"

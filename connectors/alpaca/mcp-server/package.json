@@ -16,6 +16,7 @@
     "status": "tsx src/cli/status.ts"
   },
   "dependencies": {
+    "@ai-fund/lib": "*",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "zod": "^3.24.0"
   },

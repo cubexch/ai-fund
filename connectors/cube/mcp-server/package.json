@@ -15,6 +15,7 @@
     "logout": "tsx src/cli/logout.ts"
   },
   "dependencies": {
+    "@ai-fund/lib": "*",
     "@cubexch/client": "^1.14.2",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "open": "^10.0.0",
