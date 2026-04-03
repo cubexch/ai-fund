@@ -490,16 +490,18 @@ export function registerStrategyTools(server: McpServer, client: ExchangeClient)
       let perpPrice: number;
       try {
         const spotTicker = await client.getTicker(spotSymbol);
-        spotPrice = spotTicker.last ?? spotTicker.mid ?? spotTicker.bid;
-        if (spotPrice == null) throw new Error('No spot price available');
+        const sp = spotTicker.last ?? spotTicker.bid;
+        if (sp == null) throw new Error('No spot price available');
+        spotPrice = sp;
       } catch (err: any) {
         throw new Error(`Cannot fetch spot price for ${spotSymbol}: ${err.message}`);
       }
 
       try {
         const perpTicker = await client.getTicker(perpSymbol);
-        perpPrice = perpTicker.last ?? perpTicker.mid ?? perpTicker.bid;
-        if (perpPrice == null) throw new Error('No perp price available');
+        const pp = perpTicker.last ?? perpTicker.bid;
+        if (pp == null) throw new Error('No perp price available');
+        perpPrice = pp;
       } catch (err: any) {
         throw new Error(`Cannot fetch perp price for ${perpSymbol}: ${err.message}`);
       }

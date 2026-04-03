@@ -279,7 +279,7 @@ describe.skipIf(!available)('TradeJournal', () => {
 
   describe('init guard', () => {
     it('throws if not initialized', async () => {
-      const uninit = new TradeJournal(':memory:');
+      const uninit = new TradeJournalClass(':memory:');
       await expect(uninit.query({})).rejects.toThrow('not initialized');
     });
   });

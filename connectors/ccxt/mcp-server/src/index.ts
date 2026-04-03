@@ -10,6 +10,11 @@ import { registerMarketDataTools } from './tools/market-data.js';
 import { registerStrategyTools } from './tools/strategy.js';
 import { registerDatastoreTools } from './tools/datastore.js';
 import { registerExecutionTools } from './tools/execution.js';
+import { registerScannerTools } from './tools/scanner.js';
+import { registerRegimeTools } from './tools/regime.js';
+import { registerBacktestTools } from './tools/backtest.js';
+import { registerAlgorithmTools } from './tools/algorithms.js';
+import { registerRiskTools } from './tools/risk.js';
 import { MarketDataStore } from '../../../../lib/datastore.js';
 
 // ── Parse CLI args + resolve credentials ──────────────────────
@@ -60,6 +65,11 @@ registerAccountTools(server, client);
 registerStrategyTools(server, client);
 registerDatastoreTools(server, client);
 registerExecutionTools(server, client);
+registerScannerTools(server, () => client);
+registerRegimeTools(server, client);
+registerBacktestTools(server, () => client);
+registerAlgorithmTools(server, client);
+registerRiskTools(server, client);
 
 // ── Start server ───────────────────────────────────────────
 

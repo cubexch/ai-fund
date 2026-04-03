@@ -390,7 +390,7 @@ describe('get_pnl_attribution tool', () => {
       group_by: 'day',
       since: '2024-06-01',
     });
-    const sqlArg = mockJournalSql.mock.calls[0][0] as string;
+    const sqlArg = (mockJournalSql.mock.calls[0] as unknown[])[0] as string;
     expect(sqlArg).toContain('WHERE timestamp >=');
   });
 

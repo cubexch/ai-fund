@@ -147,6 +147,11 @@ All connectors follow a standard tool naming convention (Alpaca-style, snake_cas
 - *Strategy*: `get_technical_analysis`, `calculate_position_size`, `get_fees`, `get_exchange_info`, `get_market_info`, `assess_portfolio_risk`, `get_optimal_entry`
 - *Execution*: `get_execution_quality`, `get_spread_monitor`, `get_order_flow_imbalance`, `detect_arbitrage_opportunity`, `get_latency_stats`, `get_market_microstructure`, `get_momentum_scanner`
 - *Datastore (DuckDB)*: `ingest_history`, `query_market_data`, `get_cached_symbols`, `analyze_cross_symbol`, `get_volume_profile`, `get_vwap`, `get_trade_journal`, `get_pnl_report`
+- *Algorithms*: `plan_twap`, `plan_vwap`, `plan_iceberg`, `analyze_sniper`, `compare_execution_plans`, `simulate_market_impact`, `plan_smart_route`, `calculate_implementation_shortfall`
+- *Risk*: `set_risk_limits`, `get_portfolio_exposure`, `check_position_limits`, `calculate_var`, `get_drawdown_monitor`, `check_correlation_risk`, `simulate_stress_test`, `check_pre_trade`, `get_risk_dashboard`, `get_margin_health`
+- *Backtesting*: `backtest_strategy`, `compare_strategies`, `optimize_strategy`, `walk_forward_test` (9 built-in strategies: SMA crossover, RSI mean reversion, MACD momentum, Bollinger breakout/mean-reversion, EMA trend, stochastic, ADX, multi-indicator confluence)
+- *Regime Detection*: `detect_market_regime`, `scan_regime_changes`, `get_regime_history`, `match_strategy_to_regime`
+- *Signal Scanner*: `scan_signals`, `scan_market`, `find_support_resistance`, `detect_patterns`, `get_signal_dashboard`, `scan_divergences`, `get_multi_timeframe_signals`, `scan_breakouts`
 
 ### Tool Namespacing
 
