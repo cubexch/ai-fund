@@ -22,6 +22,7 @@
     "./options": "./options.ts",
     "./monte-carlo": "./monte-carlo.ts",
     "./portfolio-analytics": "./portfolio-analytics.ts",
+    "./factor-model": "./factor-model.ts",
     "./funding": "./funding.ts",
     "./ingest/exchange": "./ingest/exchange.ts",
     "./ingest/yahoo": "./ingest/yahoo.ts",
