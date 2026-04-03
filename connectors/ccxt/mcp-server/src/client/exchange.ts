@@ -828,20 +828,40 @@ export class ExchangeClient {
 
   // ── Helpers ──────────────────────────────────────────────
 
+  /**
+   * Format a CCXT ticker into our typed interface.
+   *
+   * Handles exchanges (e.g. Coinbase) that return incomplete tickers:
+   * - bid/ask may be empty strings or zero → normalized to undefined
+   * - last may be missing → derived from bid/ask midpoint
+   * - volume/high/low/change may be missing → left as undefined
+   *   (callers must handle undefined gracefully)
+   */
   private formatTicker(t: Ticker): TickerResult {
+    // Sanitize: some exchanges return empty strings or 0 for missing fields
+    const num = (v: unknown): number | undefined => {
+      if (v == null || v === '' || v === 0) return undefined;
+      const n = typeof v === 'string' ? parseFloat(v) : v;
+      return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : undefined;
+    };
+
+    const bid = num(t.bid);
+    const ask = num(t.ask);
+    const last = num(t.last) ?? (bid != null && ask != null ? (bid + ask) / 2 : undefined);
+
     return {
       symbol: str(t.symbol),
-      last: t.last,
-      bid: t.bid,
-      ask: t.ask,
-      high: t.high,
-      low: t.low,
-      open: t.open,
-      close: t.close,
-      volume: t.baseVolume,
-      quoteVolume: t.quoteVolume,
-      change: t.change,
-      percentage: t.percentage,
+      last,
+      bid,
+      ask,
+      high: num(t.high),
+      low: num(t.low),
+      open: num(t.open),
+      close: num(t.close),
+      volume: num(t.baseVolume),
+      quoteVolume: num(t.quoteVolume),
+      change: t.change != null && t.change !== 0 ? t.change : undefined,
+      percentage: t.percentage != null && t.percentage !== 0 ? t.percentage : undefined,
       timestamp: t.timestamp,
     };
   }

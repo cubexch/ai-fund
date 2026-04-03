@@ -1,6 +1,10 @@
 /**
  * Risk management engine tools.
  * Position limits, VaR, drawdown monitoring, stress testing, pre-trade checks.
+ *
+ * Thin wrappers around @ai-fund/lib/portfolio-analytics — all pure computation
+ * is delegated to the shared library. This file handles MCP registration,
+ * auth gating, exchange data fetching, and response shaping.
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -8,9 +12,19 @@ import { z } from 'zod';
 import type { ExchangeClient } from '../client/exchange';
 import { handler, authHandler } from './handler';
 import {
-  valueAtRisk, maxDrawdown, sharpeRatio, sortinoRatio,
-  returns, correlationMatrix, mean, standardDeviation,
+  valueAtRisk, returns,
 } from '@ai-fund/lib/math';
+import {
+  resolvePrice,
+  computePortfolioExposure,
+  checkPreTrade,
+  simulateStressTest,
+  monitorDrawdown,
+  computeMarginHealth,
+  computeRiskDashboard,
+  detectCorrelationClusters,
+  STRESS_SCENARIOS,
+} from '@ai-fund/lib/portfolio-analytics';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -31,17 +45,6 @@ const DEFAULT_RISK_LIMITS: RiskLimits = {
   maxConcentrationPct: 40,
   dailyLossLimitPct: 5,
 };
-
-/** Resolve a USD-equivalent price for a currency using ticker data. */
-function resolvePrice(
-  currency: string,
-  tickers: { symbol: string; last: number | undefined }[],
-): number {
-  if (currency === 'USDT' || currency === 'USD') return 1;
-  const symbol = `${currency}/USDT`;
-  const ticker = tickers.find(t => t.symbol === symbol);
-  return ticker?.last || 0;
-}
 
 export function registerRiskTools(server: McpServer, client: ExchangeClient) {
   // Scoped per-registration — each exchange gets its own limits, not shared globally
@@ -79,47 +82,13 @@ export function registerRiskTools(server: McpServer, client: ExchangeClient) {
       const balances = await client.getBalance();
       const tickers = await client.getTickers();
 
-      let grossLong = 0;
-      let grossShort = 0;
-      const positions: { currency: string; value: number; weight: number; side: string }[] = [];
-
-      // Get total portfolio value
-      let totalValue = 0;
-      for (const bal of balances) {
-        if (bal.total === 0) continue;
-        const price = resolvePrice(bal.currency, tickers);
-        const value = bal.total * price;
-        totalValue += Math.abs(value);
-      }
-
-      for (const bal of balances) {
-        if (bal.total === 0) continue;
-        const price = resolvePrice(bal.currency, tickers);
-        const value = bal.total * price;
-        const weight = totalValue > 0 ? (value / totalValue) * 100 : 0;
-        const side = value >= 0 ? 'long' : 'short';
-
-        if (value > 0) grossLong += value;
-        else grossShort += Math.abs(value);
-
-        positions.push({ currency: bal.currency, value, weight, side });
-      }
-
-      positions.sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+      const exposure = computePortfolioExposure(balances, tickers);
 
       return {
         exchange: client.exchangeId,
-        totalValue,
-        grossExposure: grossLong + grossShort,
-        netExposure: grossLong - grossShort,
-        longExposure: grossLong,
-        shortExposure: grossShort,
-        longShortRatio: grossShort > 0 ? grossLong / grossShort : null,
-        numPositions: positions.filter(p => Math.abs(p.value) > 1).length,
-        positions,
+        ...exposure,
         limits: { ...riskLimits },
-        topConcentration: positions.length > 0 ? positions[0].weight : 0,
-        concentrationAlert: positions.length > 0 && positions[0].weight > riskLimits.maxConcentrationPct,
+        concentrationAlert: exposure.topConcentration > riskLimits.maxConcentrationPct,
       };
     }),
   );
@@ -257,24 +226,12 @@ export function registerRiskTools(server: McpServer, client: ExchangeClient) {
         currentEquity += bal.total * resolvePrice(bal.currency, tickers);
       }
 
-      // Use recent bars of a stable reference to estimate peak
-      // This is an approximation — real peak tracking needs persistent state
-      const peakEstimate = currentEquity * 1.05; // conservative 5% above current
-      const drawdownPct = ((peakEstimate - currentEquity) / peakEstimate) * 100;
-      const recoveryNeeded = ((peakEstimate / currentEquity) - 1) * 100;
-
-      const status = drawdownPct > riskLimits.maxDrawdownPct ? 'CRITICAL'
-        : drawdownPct > riskLimits.maxDrawdownPct * 0.7 ? 'WARNING' : 'OK';
+      const result = monitorDrawdown(currentEquity, riskLimits.maxDrawdownPct);
 
       return {
         exchange: client.exchangeId,
-        currentEquity,
-        estimatedPeak: peakEstimate,
-        drawdownPct,
-        recoveryNeeded,
+        ...result,
         maxAllowedDrawdown: riskLimits.maxDrawdownPct,
-        status,
-        circuitBreaker: drawdownPct > riskLimits.maxDrawdownPct,
       };
     }),
   );
@@ -320,44 +277,11 @@ export function registerRiskTools(server: McpServer, client: ExchangeClient) {
         return { exchange: client.exchangeId, message: 'Insufficient price data for correlation analysis', riskScore: 0 };
       }
 
-      // Align series lengths
-      const minLen = Math.min(...returnsSeries.map(r => r.length));
-      const aligned = returnsSeries.map(r => r.slice(0, minLen));
-
-      const corrResult = correlationMatrix(aligned);
-      const matrix = corrResult.matrix;
-
-      // Find highly correlated pairs
-      const highCorrelations: { pair: [string, string]; correlation: number }[] = [];
-      for (let i = 0; i < validSymbols.length; i++) {
-        for (let j = i + 1; j < validSymbols.length; j++) {
-          const corr = matrix[i][j];
-          if (Math.abs(corr) >= params.threshold) {
-            highCorrelations.push({
-              pair: [validSymbols[i], validSymbols[j]],
-              correlation: Math.round(corr * 1000) / 1000,
-            });
-          }
-        }
-      }
-
-      const avgCorrelation = matrix.length > 1
-        ? matrix.reduce((sum: number, row: number[], i: number) =>
-            sum + row.reduce((s: number, v: number, j: number) => i !== j ? s + v : s, 0), 0)
-          / (matrix.length * (matrix.length - 1))
-        : 0;
-
-      const riskScore = Math.min(100, (highCorrelations.length / Math.max(1, validSymbols.length * (validSymbols.length - 1) / 2)) * 100);
+      const result = detectCorrelationClusters(returnsSeries, validSymbols, params.threshold);
 
       return {
         exchange: client.exchangeId,
-        numHoldings: validSymbols.length,
-        threshold: params.threshold,
-        avgCorrelation: Math.round(avgCorrelation * 1000) / 1000,
-        highCorrelations,
-        numHighlyCorrelated: highCorrelations.length,
-        riskScore: Math.round(riskScore),
-        status: riskScore > 60 ? 'HIGH_RISK' : riskScore > 30 ? 'MODERATE' : 'DIVERSIFIED',
+        ...result,
         symbols: validSymbols,
       };
     }),
@@ -373,13 +297,6 @@ export function registerRiskTools(server: McpServer, client: ExchangeClient) {
       custom_changes: z.string().optional().describe('For custom: JSON like {"BTC":-0.3,"ETH":-0.4} (decimal pct changes)'),
     } as any,
     authHandler(client, async (params: any) => {
-      const scenarios: Record<string, Record<string, number>> = {
-        btc_crash_2022: { BTC: -0.65, ETH: -0.72, SOL: -0.85, AVAX: -0.80, LINK: -0.70, default: -0.60 },
-        luna_collapse: { BTC: -0.30, ETH: -0.35, SOL: -0.45, AVAX: -0.40, default: -0.35 },
-        ftx_contagion: { BTC: -0.25, ETH: -0.30, SOL: -0.60, FTT: -0.97, default: -0.30 },
-        flash_crash: { BTC: -0.15, ETH: -0.20, SOL: -0.25, default: -0.18 },
-      };
-
       let changes: Record<string, number>;
       if (params.scenario === 'custom') {
         try {
@@ -388,50 +305,18 @@ export function registerRiskTools(server: McpServer, client: ExchangeClient) {
           throw new Error('Invalid JSON in custom_changes');
         }
       } else {
-        changes = scenarios[params.scenario] || {};
+        changes = STRESS_SCENARIOS[params.scenario] || {};
       }
 
       const balances = await client.getBalance();
       const tickers = await client.getTickers();
 
-      let currentValue = 0;
-      let stressedValue = 0;
-      const impacts: { currency: string; currentValue: number; stressedValue: number; changePct: number; loss: number }[] = [];
-
-      for (const bal of balances) {
-        if (bal.total === 0) continue;
-        const price = resolvePrice(bal.currency, tickers);
-        const value = bal.total * price;
-        currentValue += value;
-
-        const changePct = changes[bal.currency] ?? (changes as any).default ?? 0;
-        const stressed = value * (1 + changePct);
-        stressedValue += stressed;
-
-        if (Math.abs(changePct) > 0) {
-          impacts.push({
-            currency: bal.currency,
-            currentValue: value,
-            stressedValue: stressed,
-            changePct: changePct * 100,
-            loss: value - stressed,
-          });
-        }
-      }
-
-      impacts.sort((a, b) => b.loss - a.loss);
-      const totalLoss = currentValue - stressedValue;
-      const lossPct = currentValue > 0 ? (totalLoss / currentValue) * 100 : 0;
+      const result = simulateStressTest(balances, tickers, changes, riskLimits.maxDrawdownPct);
 
       return {
         exchange: client.exchangeId,
         scenario: params.scenario,
-        currentPortfolioValue: currentValue,
-        stressedPortfolioValue: stressedValue,
-        totalLoss,
-        lossPct,
-        impacts,
-        survivable: lossPct < riskLimits.maxDrawdownPct,
+        ...result,
         maxAllowedDrawdown: riskLimits.maxDrawdownPct,
       };
     }),
@@ -449,59 +334,22 @@ export function registerRiskTools(server: McpServer, client: ExchangeClient) {
       price: z.number().describe('Expected price'),
     } as any,
     authHandler(client, async (params: any) => {
-      const orderValue = params.amount * params.price;
       const balances = await client.getBalance();
       const tickers = await client.getTickers();
 
-      // Portfolio value
-      let totalValue = 0;
-      for (const bal of balances) {
-        totalValue += Math.abs(bal.total * resolvePrice(bal.currency, tickers));
-      }
-
-      const orderPct = totalValue > 0 ? (orderValue / totalValue) * 100 : 100;
-
-      const checks = [
-        {
-          name: 'position_size',
-          passed: orderPct <= riskLimits.maxPositionPct,
-          detail: `${orderPct.toFixed(1)}% of portfolio (max ${riskLimits.maxPositionPct}%)`,
-        },
-        {
-          name: 'order_value',
-          passed: orderValue > 0,
-          detail: `Order value: $${orderValue.toFixed(2)}`,
-        },
-        {
-          name: 'portfolio_exists',
-          passed: totalValue > 0,
-          detail: `Portfolio: $${totalValue.toFixed(2)}`,
-        },
-      ];
-
-      // Check if we have sufficient balance for buys
-      if (params.side === 'buy') {
-        const quoteCurrency = params.symbol.split('/')[1] || 'USDT';
-        const quoteBal = balances.find((b: any) => b.currency === quoteCurrency);
-        const available = quoteBal?.free || 0;
-        checks.push({
-          name: 'sufficient_balance',
-          passed: available >= orderValue,
-          detail: `Available ${quoteCurrency}: ${available.toFixed(2)}, needed: ${orderValue.toFixed(2)}`,
-        });
-      }
-
-      const allPassed = checks.every(c => c.passed);
+      const result = checkPreTrade(
+        balances,
+        tickers,
+        { symbol: params.symbol, side: params.side, amount: params.amount, price: params.price },
+        { maxPositionPct: riskLimits.maxPositionPct },
+      );
 
       return {
         symbol: params.symbol,
         side: params.side,
         amount: params.amount,
         price: params.price,
-        orderValue,
-        decision: allPassed ? 'GO' : 'NO_GO',
-        reason: allPassed ? 'All risk checks passed' : checks.filter(c => !c.passed).map(c => c.detail).join('; '),
-        checks,
+        ...result,
         limits: { ...riskLimits },
       };
     }),
@@ -517,35 +365,26 @@ export function registerRiskTools(server: McpServer, client: ExchangeClient) {
       const balances = await client.getBalance();
       const tickers = await client.getTickers();
 
-      let totalValue = 0;
-      const holdings: { currency: string; value: number; pct: number }[] = [];
-      for (const bal of balances) {
-        if (bal.total === 0) continue;
-        const price = resolvePrice(bal.currency, tickers);
-        const value = bal.total * price;
-        totalValue += Math.abs(value);
-        if (Math.abs(value) > 1) {
-          holdings.push({ currency: bal.currency, value, pct: 0 });
-        }
-      }
-      holdings.forEach(h => { h.pct = totalValue > 0 ? (Math.abs(h.value) / totalValue) * 100 : 0; });
-      holdings.sort((a, b) => b.pct - a.pct);
-
-      const topConcentration = holdings.length > 0 ? holdings[0].pct : 0;
-      const concentrationStatus = topConcentration > riskLimits.maxConcentrationPct ? 'red'
-        : topConcentration > riskLimits.maxConcentrationPct * 0.7 ? 'yellow' : 'green';
+      const dashboard = computeRiskDashboard(balances, tickers, riskLimits.maxConcentrationPct);
 
       return {
         exchange: client.exchangeId,
         timestamp: Date.now(),
-        portfolioValue: totalValue,
-        numPositions: holdings.length,
+        portfolioValue: dashboard.portfolioValue,
+        numPositions: dashboard.numPositions,
         limits: { ...riskLimits },
         metrics: {
-          concentration: { value: topConcentration, status: concentrationStatus, topHolding: holdings[0]?.currency || 'none' },
-          diversification: { value: holdings.length, status: holdings.length >= 5 ? 'green' : holdings.length >= 3 ? 'yellow' : 'red' },
+          concentration: {
+            value: dashboard.topConcentration,
+            status: dashboard.concentrationStatus,
+            topHolding: dashboard.holdings[0]?.currency || 'none',
+          },
+          diversification: {
+            value: dashboard.numPositions,
+            status: dashboard.diversificationStatus,
+          },
         },
-        holdings: holdings.slice(0, 10),
+        holdings: dashboard.holdings,
       };
     }),
   );
@@ -558,27 +397,12 @@ export function registerRiskTools(server: McpServer, client: ExchangeClient) {
     { symbol: z.string().optional().describe('Optional symbol to check specific position') } as any,
     authHandler(client, async (params: any) => {
       const balances = await client.getBalance();
-      let totalEquity = 0;
-      let totalUsed = 0;
-      for (const bal of balances) {
-        if (bal.currency === 'USDT' || bal.currency === 'USD') {
-          totalEquity += bal.total;
-          totalUsed += bal.used;
-        }
-      }
 
-      const freeMargin = totalEquity - totalUsed;
-      const marginRatio = totalEquity > 0 ? (totalUsed / totalEquity) * 100 : 0;
-      const healthScore = Math.max(0, 100 - marginRatio);
+      const result = computeMarginHealth(balances, ['USDT', 'USD']);
 
       return {
         exchange: client.exchangeId,
-        totalEquity,
-        usedMargin: totalUsed,
-        freeMargin,
-        marginRatio,
-        healthScore,
-        status: healthScore > 70 ? 'HEALTHY' : healthScore > 40 ? 'CAUTION' : 'DANGER',
+        ...result,
       };
     }),
   );

@@ -153,8 +153,8 @@ describe('registerMarketDataTools', () => {
       expect(result.content[0].text).toContain('Insufficient data');
     });
 
-    it('computes requested indicators with sufficient data', async () => {
-      // Generate 50 candles with varying prices
+    it('computes RSI correctly for sinusoidal prices', async () => {
+      // Sinusoidal prices oscillate → RSI should be near neutral (30-70)
       const candles = Array.from({ length: 50 }, (_, i) => ({
         startTime: Date.now() - (50 - i) * 3_600_000,
         open: String(100 + Math.sin(i * 0.3) * 5),
@@ -174,12 +174,121 @@ describe('registerMarketDataTools', () => {
       });
       const data = JSON.parse(result.content[0].text);
 
-      expect(data.rsi).toBeDefined();
-      expect(data.rsi.signal).toMatch(/OVERBOUGHT|OVERSOLD|NEUTRAL/);
-      expect(data.macd).toBeDefined();
-      expect(data.macd.trend).toMatch(/BULLISH|BEARISH/);
-      expect(data.bollinger).toBeDefined();
-      expect(data.atr).toBeDefined();
+      // RSI should be a number between 0-100
+      expect(parseFloat(data.rsi.value)).toBeGreaterThanOrEqual(0);
+      expect(parseFloat(data.rsi.value)).toBeLessThanOrEqual(100);
+      // Sinusoidal → expect NEUTRAL (not extreme)
+      expect(data.rsi.signal).toBe('NEUTRAL');
+      // recent should have 5 values
+      expect(data.rsi.recent).toHaveLength(5);
+      data.rsi.recent.forEach((v: number) => {
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(100);
+      });
+    });
+
+    it('computes MACD with histogram sign matching trend', async () => {
+      const candles = Array.from({ length: 50 }, (_, i) => ({
+        startTime: Date.now() - (50 - i) * 3_600_000,
+        open: String(100 + Math.sin(i * 0.3) * 5),
+        high: String(105 + Math.sin(i * 0.3) * 5),
+        low: String(95 + Math.sin(i * 0.3) * 5),
+        close: String(102 + Math.sin(i * 0.3) * 5),
+        volume: String(1000 + i * 10),
+      }));
+      iridium.getPriceHistory.mockResolvedValue(candles);
+
+      const handler = server.getHandler('get_technical_analysis')!;
+      const result = await handler({
+        marketId: 1, interval: '1h', limit: 200, indicators: ['macd'],
+      });
+      const data = JSON.parse(result.content[0].text);
+
+      // MACD components are numbers (as strings with fixed decimals)
+      expect(parseFloat(data.macd.macd)).toBeTypeOf('number');
+      expect(parseFloat(data.macd.signal)).toBeTypeOf('number');
+      expect(parseFloat(data.macd.histogram)).toBeTypeOf('number');
+      // Trend matches histogram sign
+      const hist = parseFloat(data.macd.histogram);
+      expect(data.macd.trend).toBe(hist > 0 ? 'BULLISH' : 'BEARISH');
+      // Recent histogram has 5 entries
+      expect(data.macd.recentHistogram).toHaveLength(5);
+    });
+
+    it('computes Bollinger Bands with upper > middle > lower', async () => {
+      const candles = Array.from({ length: 50 }, (_, i) => ({
+        startTime: Date.now() - (50 - i) * 3_600_000,
+        open: String(100 + Math.sin(i * 0.3) * 5),
+        high: String(105 + Math.sin(i * 0.3) * 5),
+        low: String(95 + Math.sin(i * 0.3) * 5),
+        close: String(102 + Math.sin(i * 0.3) * 5),
+        volume: String(1000 + i * 10),
+      }));
+      iridium.getPriceHistory.mockResolvedValue(candles);
+
+      const handler = server.getHandler('get_technical_analysis')!;
+      const result = await handler({
+        marketId: 1, interval: '1h', limit: 200, indicators: ['bollinger'],
+      });
+      const data = JSON.parse(result.content[0].text);
+
+      const upper = parseFloat(data.bollinger.upper);
+      const middle = parseFloat(data.bollinger.middle);
+      const lower = parseFloat(data.bollinger.lower);
+      expect(upper).toBeGreaterThan(middle);
+      expect(middle).toBeGreaterThan(lower);
+      // Bandwidth should be positive
+      expect(parseFloat(data.bollinger.bandwidth)).toBeGreaterThan(0);
+      // Position should describe where price is relative to bands
+      expect(data.bollinger.pricePosition).toMatch(/ABOVE_UPPER|UPPER_HALF|LOWER_HALF|BELOW_LOWER/);
+    });
+
+    it('computes ATR as a positive value', async () => {
+      const candles = Array.from({ length: 50 }, (_, i) => ({
+        startTime: Date.now() - (50 - i) * 3_600_000,
+        open: String(100 + Math.sin(i * 0.3) * 5),
+        high: String(105 + Math.sin(i * 0.3) * 5),
+        low: String(95 + Math.sin(i * 0.3) * 5),
+        close: String(102 + Math.sin(i * 0.3) * 5),
+        volume: String(1000 + i * 10),
+      }));
+      iridium.getPriceHistory.mockResolvedValue(candles);
+
+      const handler = server.getHandler('get_technical_analysis')!;
+      const result = await handler({
+        marketId: 1, interval: '1h', limit: 200, indicators: ['atr'],
+      });
+      const data = JSON.parse(result.content[0].text);
+
+      expect(parseFloat(data.atr.value)).toBeGreaterThan(0);
+      // Regime should be a valid string
+      expect(data.atr.regime).toMatch(/CONTRACTING|STABLE|EXPANDING|SPIKE/);
+      // Ratio should be a positive number
+      expect(parseFloat(data.atr.ratio)).toBeGreaterThan(0);
+    });
+
+    it('computes RSI > 70 for monotonically rising prices', async () => {
+      // Note: the tool reverses candles (most recent first after reverse)
+      // So we generate candles in descending time order, with ascending prices
+      // after reverse → closes will be ascending → RSI > 70
+      const candles = Array.from({ length: 50 }, (_, i) => ({
+        startTime: Date.now() - i * 3_600_000, // i=0 is most recent
+        open: String(200 - i * 2),
+        high: String(203 - i * 2),
+        low: String(199 - i * 2),
+        close: String(202 - i * 2),
+        volume: '1000',
+      }));
+      iridium.getPriceHistory.mockResolvedValue(candles);
+
+      const handler = server.getHandler('get_technical_analysis')!;
+      const result = await handler({
+        marketId: 1, interval: '1h', limit: 200, indicators: ['rsi'],
+      });
+      const data = JSON.parse(result.content[0].text);
+
+      expect(parseFloat(data.rsi.value)).toBeGreaterThan(70);
+      expect(data.rsi.signal).toBe('OVERBOUGHT');
     });
   });
 });

@@ -1,12 +1,12 @@
 # AI Fund
 
-An AI trading desk with 42 hedge fund agent personas (including 20 named personas like Arthur Hayes, Jim Simons, George Soros, and Jesse Livermore) for Claude Code. Trade on any exchange — Cube, OKX, Kraken, Binance, Coinbase, and 100+ more via CCXT.
+An AI trading desk with 44 hedge fund agent personas (including 21 named personas like Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, and Warren Buffett) for Claude Code. 148 MCP tools across 3 built-in connectors. 16 shared analysis libraries. Trade on any exchange — Cube, OKX, Kraken, Binance, Coinbase, and 100+ more via CCXT.
 
 ## Project Structure
 
 ```
 ai-fund/
-├── skills/              # 42 agent personas (SKILL.md each) + _template/
+├── skills/              # 44 agent personas (SKILL.md each) + _template/
 ├── connectors/cube/     # Built-in Cube Exchange MCP server
 │   └── mcp-server/
 ├── connectors/alpaca/   # Built-in Alpaca MCP server (stocks, ETFs, crypto)
@@ -85,19 +85,30 @@ After every code change, run the following before considering the work done:
 - **Imports**: ES module syntax only (`import`/`export`), no `require()`. Use `.js` extensions in import paths.
 - **Commit messages**: Conventional Commits format — `feat(skills): add new persona`, `fix(cube): correct order signing`, `docs: update exchange table`. Scopes: `skills`, `cube`, `lib`, `desk`, `commands`, `docs`
 
-## Shared Libraries
+## Shared Libraries (16 modules, 120+ exported functions)
 
-- **`lib/indicators.ts`** — `sma`, `ema`, `rsi`, `macd`, `bollingerBands`, `atr`, `obv`, `stochastic`, `adx` + `OHLCV` interface
-- **`lib/math.ts`** — `kelly`, `fixedFractionalSize`, `valueAtRisk`, `maxDrawdown`, `sharpeRatio`, `sortinoRatio`, `calmarRatio`, `correlation`, `correlationMatrix`, `mean`, `standardDeviation`, `zScore`, `returns`, `winRate`, `profitFactor`
+- **`lib/indicators.ts`** — `sma`, `ema`, `rsi`, `macd`, `bollingerBands`, `atr`, `obv`, `stochastic`, `adx`, `vwap`, `momentum`, `hurst` + `OHLCV` interface
+- **`lib/math.ts`** — `kelly`, `fixedFractionalSize`, `valueAtRisk`, `maxDrawdown`, `sharpeRatio`, `sortinoRatio`, `calmarRatio`, `correlation`, `correlationMatrix`, `mean`, `standardDeviation`, `zScore`, `returns`, `winRate`, `profitFactor`, `annualizedVolatility`, `beta`, `alpha`, `informationRatio`, `tailRisk`
 - **`lib/format.ts`** — `usd`, `pct`, `qty`, `price`, `compact`, `timestamp`, `duration`, `signedValue`, `grade`, `assetIcon`, `labelAsset` + `ASSET_ICONS` map
+- **`lib/execution-planner.ts`** — `planTwap`, `planVwap`, `planIceberg`, `analyzeSniper`, `estimateMarketImpact`, `realizedVolatility`, `compareExecutionPlans`, `calculateImplementationShortfall`
+- **`lib/execution-analytics.ts`** — `simulateOrderBookFill`, `analyzeDepthAtBands`, `computeOrderBookImbalance`, `analyzeOrderBookShape`, `computeWeightedMid`, `analyzeTradeFlow`, `computeMomentumScore`, `computeExecutionQuality`, `recommendEntry`
+- **`lib/portfolio-analytics.ts`** — `resolvePrice`, `computePortfolioExposure`, `checkPreTrade`, `simulateStressTest`, `assessPortfolioRisk`, `calculateRebalanceTrades`, `detectCorrelationClusters`, `monitorDrawdown`, `computeMarginHealth`, `computeRiskDashboard`
+- **`lib/confluence-detector.ts`** — `detectConfluence`, `analyzeTimeframeSignals`, `detectBbSqueeze`, `scanMeanReversion`, `computeVolTermStructure`, `classifyVolRegime`
+- **`lib/grid-trading.ts`** — `computeDcaSchedule`, `optimizeGridParams`, `analyzeBasisTrade`, `classifyVolRegime`
+- **`lib/volume-profile.ts`** — `computeVolumeProfile`, `detectCorrelationRegime`
 - **`lib/datastore.ts`** — `MarketDataStore` (DuckDB columnar store for OHLCV data with SQL queries, Parquet I/O, incremental updates)
+- **`lib/backtester.ts`** — `Backtester` class (9 built-in strategies, walk-forward optimization)
+- **`lib/regime-detector.ts`** — `RegimeDetector` class (trend/range/volatile regime classification)
+- **`lib/signal-generator.ts`** — `SignalGenerator` class (multi-indicator signal scanning)
+- **`lib/valuation.ts`** — 19 valuation functions (DCF, NVT, MVRV, stock-to-flow, etc.)
+- **`lib/connector-registry.ts`** — Connector discovery and registration
 - **`lib/ingest/exchange.ts`** — `ingestFromExchange` (generic exchange data ingester into DuckDB)
 
 ## Testing
 
 Tests live in `connectors/*/mcp-server/tests/` using vitest.
 - **Cube**: `cd connectors/cube/mcp-server && npm test`
-- **CCXT**: `cd connectors/ccxt/mcp-server && npx vitest run` (190+ tests)
+- **CCXT**: `cd connectors/ccxt/mcp-server && npx vitest run` (672 tests)
 
 ### Writing Tests
 

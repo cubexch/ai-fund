@@ -46,7 +46,7 @@ describe('registerAccountTools', () => {
   });
 
   describe('get_positions', () => {
-    it('returns positions from iridium', async () => {
+    it('returns positions with correct structure', async () => {
       const positions = { spot: { inner: [{ assetId: 1, amount: '100' }] } };
       iridium.getPositions.mockResolvedValue(positions);
 
@@ -54,7 +54,9 @@ describe('registerAccountTools', () => {
       const result = await handler({});
       const data = JSON.parse(result.content[0].text);
 
-      expect(data.spot).toBeDefined();
+      expect(data.spot.inner).toHaveLength(1);
+      expect(data.spot.inner[0].assetId).toBe(1);
+      expect(data.spot.inner[0].amount).toBe('100');
       expect(iridium.getPositions).toHaveBeenCalledWith(1);
     });
 

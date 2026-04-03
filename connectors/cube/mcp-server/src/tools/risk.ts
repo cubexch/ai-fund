@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { IridiumClient } from '../client/iridium';
+import { kelly, fixedFractionalSize } from '@ai-fund/lib/math';
 
 export function registerRiskTools(server: McpServer, iridium: IridiumClient) {
   const defaultSubaccountId = () => iridium.getDefaultSubaccountId();
@@ -111,23 +112,25 @@ export function registerRiskTools(server: McpServer, iridium: IridiumClient) {
         };
       }
 
-      // Fixed fractional sizing
+      // Fixed fractional sizing — uses shared lib
       const maxLoss = params.portfolioValue * params.riskPerTrade;
-      const fixedFractionalSize = maxLoss / riskPerUnit;
-      const fixedFractionalValue = fixedFractionalSize * params.entryPrice;
+      const ffSize = fixedFractionalSize(
+        params.portfolioValue, params.riskPerTrade,
+        params.entryPrice, params.stopLossPrice,
+      );
+      const fixedFractionalValue = ffSize * params.entryPrice;
 
       let kellySize: number | undefined;
       let kellyFraction: number | undefined;
 
-      // Kelly criterion (if win rate and avg win/loss provided)
+      // Kelly criterion (if win rate and avg win/loss provided) — uses shared lib
       if (params.winRate && params.avgWinLoss) {
-        kellyFraction = params.winRate - (1 - params.winRate) / params.avgWinLoss;
-        // Half-Kelly for safety
-        const halfKelly = Math.max(0, kellyFraction * 0.5);
-        kellySize = (params.portfolioValue * halfKelly) / params.entryPrice;
+        kellyFraction = kelly(params.winRate, params.avgWinLoss, false); // full Kelly
+        const halfKellyFraction = kelly(params.winRate, params.avgWinLoss, true); // half-Kelly
+        kellySize = (params.portfolioValue * halfKellyFraction) / params.entryPrice;
       }
 
-      const recommendedSize = kellySize ? Math.min(fixedFractionalSize, kellySize) : fixedFractionalSize;
+      const recommendedSize = kellySize ? Math.min(ffSize, kellySize) : ffSize;
 
       return {
         content: [
@@ -136,7 +139,7 @@ export function registerRiskTools(server: McpServer, iridium: IridiumClient) {
             text: JSON.stringify(
               {
                 fixedFractional: {
-                  size: fixedFractionalSize.toFixed(6),
+                  size: ffSize.toFixed(6),
                   value: `$${fixedFractionalValue.toFixed(2)}`,
                   maxLoss: `$${maxLoss.toFixed(2)}`,
                   riskPercent: `${(params.riskPerTrade * 100).toFixed(1)}%`,

@@ -7,6 +7,7 @@ import { loadCredentials } from './client/credential-store';
 import { registerAccountTools } from './tools/account';
 import { registerOrderTools } from './tools/orders';
 import { registerMarketDataTools } from './tools/market-data';
+import { registerAnalysisTools } from './tools/analysis';
 
 const server = new McpServer({
   name: 'alpaca-trading',
@@ -42,6 +43,7 @@ if (client.hasCredentials) {
 registerAccountTools(server, client);
 registerOrderTools(server, client);
 registerMarketDataTools(server, client);
+registerAnalysisTools(server, client);
 
 // ── Start server ────────────────────────────────────────────
 

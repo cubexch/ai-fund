@@ -1436,6 +1436,23 @@ describe('optimize_grid_params tool', () => {
     expect(data.gridLevels).toHaveLength(5);
   });
 
+  it('places returned grid levels at cell midpoints, not band boundaries', async () => {
+    const { server } = setup();
+    const result = await server.callTool('optimize_grid_params', {
+      symbol: 'BTC/USDT',
+      num_grids: 5,
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    const firstExpected = data.priceRange.bbLower + data.spacing / 2;
+    const lastExpected = data.priceRange.bbUpper - data.spacing / 2;
+
+    expect(Math.abs(data.gridLevels[0].price - firstExpected)).toBeLessThanOrEqual(0.02);
+    expect(Math.abs(data.gridLevels[data.gridLevels.length - 1].price - lastExpected)).toBeLessThanOrEqual(0.02);
+    expect(data.gridLevels[0].price).toBeGreaterThan(data.priceRange.bbLower);
+    expect(data.gridLevels[data.gridLevels.length - 1].price).toBeLessThan(data.priceRange.bbUpper);
+  });
+
   it('grid levels are sorted by price ascending', async () => {
     const { server } = setup();
     const result = await server.callTool('optimize_grid_params', {
