@@ -7,4 +7,4 @@ export {
   type SignalType,
   type SignalStrength,
   type ScanResult,
-} from '../../../../../lib/signal-generator.js';
+} from '@ai-fund/lib/signal-generator';

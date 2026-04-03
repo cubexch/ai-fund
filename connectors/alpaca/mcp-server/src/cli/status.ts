@@ -8,8 +8,8 @@
  *   2. Credential store (~/.alpaca/credentials.json or keychain)
  */
 
-import { AlpacaClient } from '../client/api.js';
-import { loadCredentials, getBackendName } from '../client/credential-store.js';
+import { AlpacaClient } from '../client/api';
+import { loadCredentials, getBackendName } from '../client/credential-store';
 
 async function main() {
   const backend = await getBackendName();

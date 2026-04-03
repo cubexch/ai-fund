@@ -8,7 +8,7 @@ import {
   beta, alpha, informationRatio, upsideCapture, downsideCapture,
   linearRegressionSlope, coefficientOfVariation, drawdownSeries,
   rollingReturns, benchmarkReturn, trackingError, maxConsecutiveLosses, expectancy,
-} from '../../../../lib/math.js';
+} from '@ai-fund/lib/math';
 
 // ── Position Sizing ──────────────────────────────────────────
 

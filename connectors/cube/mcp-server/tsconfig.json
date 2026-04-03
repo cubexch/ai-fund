@@ -1,10 +1,14 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "Node16",
-    "moduleResolution": "Node16",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
     "lib": ["ES2022"],
     "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "@ai-fund/lib/*": ["../../../lib/*"]
+    },
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,

@@ -11,7 +11,7 @@ import {
   fromHex,
   CREDENTIALS_PATH,
   type SigningCredentials,
-} from '../src/client/signing.js';
+} from '../src/client/signing';
 import { readFile, unlink, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 

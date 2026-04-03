@@ -13,9 +13,9 @@
  * pre-answer the keypair question. Headless mode is auto-enabled.
  */
 
-import { loadCredentials, getBackendName, importPrivateKey, type Ed25519KeyPair } from '../client/signing.js';
-import { getEnvironment } from '../client/auth.js';
-import { deviceAuthFlow, DeviceAuthError, type DeviceAuthEvent } from '../client/device-auth.js';
+import { loadCredentials, getBackendName, importPrivateKey, type Ed25519KeyPair } from '../client/signing';
+import { getEnvironment } from '../client/auth';
+import { deviceAuthFlow, DeviceAuthError, type DeviceAuthEvent } from '../client/device-auth';
 import { execFile } from 'node:child_process';
 
 // ── ANSI helpers (no dependencies) ───────────────────────────

@@ -1,9 +1,9 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import type { IridiumClient } from '../client/iridium.js';
-import type { MendelevClient } from '../client/mendelev.js';
-import { sma, ema, rsi, macd, bollingerBands, atr, adx, obv, stochastic } from '../../../../../lib/indicators.js';
-import type { OHLCV } from '../../../../../lib/indicators.js';
+import type { IridiumClient } from '../client/iridium';
+import type { MendelevClient } from '../client/mendelev';
+import { sma, ema, rsi, macd, bollingerBands, atr, adx, obv, stochastic } from '@ai-fund/lib/indicators';
+import type { OHLCV } from '@ai-fund/lib/indicators';
 
 export function registerMarketDataTools(server: McpServer, iridium: IridiumClient, mendelev?: MendelevClient) {
   const defaultSubaccountId = () => iridium.getDefaultSubaccountId();

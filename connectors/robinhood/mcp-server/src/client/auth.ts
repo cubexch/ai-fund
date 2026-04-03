@@ -16,8 +16,8 @@ import {
   loadCredentialsRaw,
   saveCredentials,
   type RobinhoodCredentials,
-} from './credential-store.js';
-import { httpRequest } from './http.js';
+} from './credential-store';
+import { httpRequest } from './http';
 
 // ── Constants ────────────────────────────────────────────────
 

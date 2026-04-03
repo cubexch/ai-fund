@@ -1,6 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import type { AlpacaClient } from '../client/api.js';
+import type { AlpacaClient } from '../client/api';
 
 export function registerMarketDataTools(server: McpServer, client: AlpacaClient) {
   server.tool(

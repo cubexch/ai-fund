@@ -8,8 +8,8 @@ import {
   deleteCredentials,
   getBackendName,
   type CredentialStore,
-} from '../src/client/credential-store.js';
-import type { SigningCredentials } from '../src/client/signing.js';
+} from '../src/client/credential-store';
+import type { SigningCredentials } from '../src/client/signing';
 
 // ── Test Fixtures ────────────────────────────────────────────
 

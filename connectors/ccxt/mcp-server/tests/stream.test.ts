@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import ccxt from 'ccxt';
-import { StreamManager } from '../src/client/stream.js';
+import { StreamManager } from '../src/client/stream';
 
 const hasPro = typeof (ccxt as any).pro === 'object' && (ccxt as any).pro !== null;
 

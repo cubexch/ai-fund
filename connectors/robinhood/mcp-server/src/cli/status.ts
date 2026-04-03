@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { loadCredentials, loadCredentialsRaw, getBackendName } from '../client/credential-store.js';
+import { loadCredentials, loadCredentialsRaw, getBackendName } from '../client/credential-store';
 
 async function main() {
   const backend = await getBackendName();

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isMintAddress, KNOWN_MINTS, formatToken } from '../src/tools/defi.js';
+import { isMintAddress, KNOWN_MINTS, formatToken } from '../src/tools/defi';
 
 // ── isMintAddress ────────────────────────────────────────────
 

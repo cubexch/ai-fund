@@ -5,12 +5,12 @@
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import type { ExchangeClient } from '../client/exchange.js';
-import { handler, authHandler } from './handler.js';
+import type { ExchangeClient } from '../client/exchange';
+import { handler, authHandler } from './handler';
 import {
   valueAtRisk, maxDrawdown, sharpeRatio, sortinoRatio,
   returns, correlationMatrix, mean, standardDeviation,
-} from '../../../../../lib/math.js';
+} from '@ai-fund/lib/math';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 

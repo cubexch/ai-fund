@@ -18,7 +18,7 @@ vi.mock('../src/client/credential-store.js', () => ({
   saveCredentials: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { AuthManager } from '../src/client/auth.js';
+import { AuthManager } from '../src/client/auth';
 
 // robin_stocks reference (from globals.py + authentication.py):
 //
@@ -273,7 +273,7 @@ describe('Auth request format (matches robin_stocks)', () => {
 describe('HTTP default headers (matches robin_stocks globals.py)', () => {
   it('default headers match robin_stocks SESSION.headers', async () => {
     // Import the actual http module (not mocked)
-    const { httpRequest: realHttpRequest } = await vi.importActual<typeof import('../src/client/http.js')>('../src/client/http.js');
+    const { httpRequest: realHttpRequest } = await vi.importActual<typeof import('../src/client/http')>('../src/client/http.js');
 
     // We can't easily inspect the headers without making a request,
     // but we can verify the module loads without errors

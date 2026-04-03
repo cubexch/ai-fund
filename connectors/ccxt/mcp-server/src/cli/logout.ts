@@ -8,8 +8,8 @@
  *   npm run logout -- --exchange binance    # Binance
  */
 
-import { deleteCredentials, getBackendName } from '../client/credential-store.js';
-import { parseArgs } from './common.js';
+import { deleteCredentials, getBackendName } from '../client/credential-store';
+import { parseArgs } from './common';
 
 async function main() {
   const { exchangeId } = parseArgs();

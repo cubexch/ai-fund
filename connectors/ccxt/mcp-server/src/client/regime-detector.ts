@@ -8,4 +8,4 @@ export {
   type RegimeTransition,
   type RegimeRecommendation,
   type RegimeHistoryEntry,
-} from '../../../../../lib/regime-detector.js';
+} from '@ai-fund/lib/regime-detector';

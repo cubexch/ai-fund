@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ExchangeClient } from '../src/client/exchange.js';
+import { ExchangeClient } from '../src/client/exchange';
 
 // ── Mock CCXT exchange for unit testing ─────────────────────
 

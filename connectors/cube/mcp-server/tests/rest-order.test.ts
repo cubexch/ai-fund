@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { IridiumClient } from '../src/client/iridium.js';
+import { IridiumClient } from '../src/client/iridium';
 
 /**
  * Integration test: REST order placement via Iridium client.

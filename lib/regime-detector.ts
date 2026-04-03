@@ -6,14 +6,14 @@
  * Tracks regime transitions over time and provides strategy recommendations.
  */
 
-import type { Bar } from './connector-interface.js';
+import type { Bar } from './connector-interface';
 import {
   sma, rsi, bollingerBands, atr, adx,
   type OHLCV,
-} from './indicators.js';
+} from './indicators';
 import {
   standardDeviation, mean, returns as calcReturns,
-} from './math.js';
+} from './math';
 
 // ── Types ────────────────────────────────────────────────────
 

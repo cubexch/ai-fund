@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { registerMarketDataTools } from '../src/tools/market-data.js';
+import { registerMarketDataTools } from '../src/tools/market-data';
 
 function createMockServer() {
   const tools = new Map<string, Function>();

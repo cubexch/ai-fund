@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateSignature, getEnvironment } from '../src/client/auth.js';
+import { generateSignature, getEnvironment } from '../src/client/auth';
 
 describe('getEnvironment', () => {
   it('returns production config for "production"', () => {

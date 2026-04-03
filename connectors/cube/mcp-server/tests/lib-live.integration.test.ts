@@ -5,11 +5,11 @@
  * Run with: npx vitest run tests/lib-live.integration.test.ts
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import type { OHLCV } from '../../../../lib/indicators.js';
+import type { OHLCV } from '@ai-fund/lib/indicators';
 import {
   sma, ema, rsi, macd, bollingerBands, atr, adx, obv, stochastic,
   hurst, momentum, historicalVolatility, vwap, volumeSpike,
-} from '../../../../lib/indicators.js';
+} from '@ai-fund/lib/indicators';
 import {
   kelly, fixedFractionalSize, valueAtRisk, maxDrawdown,
   sharpeRatio, sortinoRatio, calmarRatio,
@@ -19,14 +19,14 @@ import {
   beta, alpha, informationRatio, upsideCapture, downsideCapture,
   linearRegressionSlope, coefficientOfVariation, drawdownSeries,
   rollingReturns, benchmarkReturn, trackingError, maxConsecutiveLosses, expectancy,
-} from '../../../../lib/math.js';
+} from '@ai-fund/lib/math';
 import {
   dcf, marginOfSafety, intrinsicValue, grahamNumber, ownerEarnings,
   wacc, capm, pegRatio, fcfYield, evToEbitda,
   nvtRatio, mvrvRatio, stockToFlow, stockToFlowPrice,
   priceToFeesRatio, feeBasedValuation, metcalfeValuation,
   thermocapMultiple, mcapToTvl,
-} from '../../../../lib/valuation.js';
+} from '@ai-fund/lib/valuation';
 
 // ── Cube public API helpers ─────────────────────────────────
 

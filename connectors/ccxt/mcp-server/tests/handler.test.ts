@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { handler, authHandler } from '../src/tools/handler.js';
-import { createMockClient } from './helpers.js';
+import { handler, authHandler } from '../src/tools/handler';
+import { createMockClient } from './helpers';
 
 describe('handler wrapper', () => {
   it('serializes return value as JSON text content', async () => {

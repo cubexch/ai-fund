@@ -8,7 +8,7 @@
  */
 
 import yahooFinance from 'yahoo-finance2';
-import { MarketDataStore, type OHLCVRow } from '../datastore.js';
+import { MarketDataStore, type OHLCVRow } from '../datastore';
 
 // ── Types ────────────────────────────────────────────────────
 

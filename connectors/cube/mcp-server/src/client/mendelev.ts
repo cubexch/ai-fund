@@ -1,5 +1,5 @@
 import { WebSocket } from 'ws';
-import { getEnvironment } from './auth.js';
+import { getEnvironment } from './auth';
 import {
   MdMessagesMethods,
   ClientMessageMethods,

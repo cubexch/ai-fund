@@ -6,16 +6,16 @@
  * a comprehensive metrics suite using lib/math.ts where possible.
  */
 
-import type { Bar } from './connector-interface.js';
+import type { Bar } from './connector-interface';
 import {
   sma, ema, rsi, macd, bollingerBands, stochastic,
   type OHLCV,
-} from './indicators.js';
+} from './indicators';
 import {
   sharpeRatio, sortinoRatio, maxDrawdown, calmarRatio,
   winRate as calcWinRate, profitFactor as calcProfitFactor,
   returns as calcReturns, mean,
-} from './math.js';
+} from './math';
 
 // ── Public Interfaces ───────────────────────────────────────
 

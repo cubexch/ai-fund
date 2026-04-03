@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { deleteCredentials, getBackendName } from '../client/credential-store.js';
+import { deleteCredentials, getBackendName } from '../client/credential-store';
 
 async function main() {
   const backend = await getBackendName();

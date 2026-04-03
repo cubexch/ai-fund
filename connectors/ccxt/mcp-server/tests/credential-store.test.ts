@@ -7,8 +7,8 @@ import {
   deleteCredentials,
   getBackendName,
   type CcxtCredentials,
-} from '../src/client/credential-store.js';
-import { MemoryStore } from './helpers.js';
+} from '../src/client/credential-store';
+import { MemoryStore } from './helpers';
 
 describe('credential store', () => {
   let store: MemoryStore;

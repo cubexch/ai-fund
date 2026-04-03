@@ -1,16 +1,16 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import type { ExchangeClient } from '../client/exchange.js';
-import { handler } from './handler.js';
-import { MarketDataStore, type OHLCVRow } from '../../../../../lib/datastore.js';
-import type { TradeJournal } from '../client/trade-journal.js';
+import type { ExchangeClient } from '../client/exchange';
+import { handler } from './handler';
+import { MarketDataStore, type OHLCVRow } from '@ai-fund/lib/datastore';
+import type { TradeJournal } from '../client/trade-journal';
 import {
   sma, ema, rsi, bollingerBands, atr, obv, type OHLCV,
-} from '../../../../../lib/indicators.js';
+} from '@ai-fund/lib/indicators';
 import {
   correlation, correlationMatrix, returns, mean, standardDeviation,
   sharpeRatio, sortinoRatio, maxDrawdown, winRate, profitFactor,
-} from '../../../../../lib/math.js';
+} from '@ai-fund/lib/math';
 
 // Cast schemas to any to avoid TS2589 "excessively deep type instantiation" with zod + MCP SDK
 /* eslint-disable @typescript-eslint/no-explicit-any */

@@ -5,8 +5,8 @@
  * Usage: npm run status
  */
 
-import { loadCredentials, getBackendName, CREDENTIALS_PATH } from '../client/signing.js';
-import { resolveAuth, resetAuth } from '../client/auth.js';
+import { loadCredentials, getBackendName, CREDENTIALS_PATH } from '../client/signing';
+import { resolveAuth, resetAuth } from '../client/auth';
 
 const isColor = process.stdout.isTTY && !process.env.NO_COLOR;
 const c = {

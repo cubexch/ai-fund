@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { registerAccountTools } from '../src/tools/account.js';
+import { registerAccountTools } from '../src/tools/account';
 
 function createMockServer() {
   const tools = new Map<string, Function>();

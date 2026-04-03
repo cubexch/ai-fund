@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { createMockClient, MockMcpServer } from './helpers.js';
+import { createMockClient, MockMcpServer } from './helpers';
 
 // ── Attempt to import algorithm tool registration ────────────
 
 let registerAlgorithmTools: any;
 let available = false;
 try {
-  const mod = await import('../src/tools/algorithms.js');
+  const mod = await import('../src/tools/algorithms');
   registerAlgorithmTools = mod.registerAlgorithmTools;
   available = true;
 } catch {

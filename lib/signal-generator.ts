@@ -3,12 +3,12 @@
  * from technical indicator analysis on OHLCV bars.
  */
 
-import type { Bar } from './connector-interface.js';
+import type { Bar } from './connector-interface';
 import {
   sma, ema, rsi, macd, bollingerBands, atr, adx, stochastic,
   type OHLCV,
-} from './indicators.js';
-import { mean, standardDeviation } from './math.js';
+} from './indicators';
+import { mean, standardDeviation } from './math';
 
 // ── Types ────────────────────────────────────────────────────
 

@@ -5,9 +5,9 @@
  * Usage: tsx src/cli/status.ts [--exchange coinbase]
  */
 
-import { ExchangeClient } from '../client/exchange.js';
-import { getBackendName } from '../client/credential-store.js';
-import { parseArgs, resolveCredentials } from './common.js';
+import { ExchangeClient } from '../client/exchange';
+import { getBackendName } from '../client/credential-store';
+import { parseArgs, resolveCredentials } from './common';
 
 const { exchangeId, sandbox: cliSandbox } = parseArgs();
 const creds = await resolveCredentials(exchangeId, cliSandbox);

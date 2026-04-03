@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MendelevClient } from '../src/client/mendelev.js';
+import { MendelevClient } from '../src/client/mendelev';
 
 /**
  * Tests for MendelevClient data accessors and state management.

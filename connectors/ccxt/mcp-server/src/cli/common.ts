@@ -3,7 +3,7 @@
  * Used by index.ts, login.ts, logout.ts, and status.ts.
  */
 
-import { loadCredentials, validateExchangeId } from '../client/credential-store.js';
+import { loadCredentials, validateExchangeId } from '../client/credential-store';
 
 // ── CLI arg parsing ────────────────────────────────────────────
 

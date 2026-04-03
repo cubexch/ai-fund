@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { registerMarketResources } from '../src/resources/markets.js';
-import { registerPortfolioResources } from '../src/resources/portfolio.js';
+import { registerMarketResources } from '../src/resources/markets';
+import { registerPortfolioResources } from '../src/resources/portfolio';
 
 function createMockServer() {
   const resources = new Map<string, Function>();

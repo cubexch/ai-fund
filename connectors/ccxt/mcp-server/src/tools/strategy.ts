@@ -1,17 +1,17 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import type { ExchangeClient } from '../client/exchange.js';
-import { handler, authHandler } from './handler.js';
+import type { ExchangeClient } from '../client/exchange';
+import { handler, authHandler } from './handler';
 import {
   sma, ema, rsi, macd, bollingerBands, atr, adx, obv, stochastic,
   type OHLCV,
-} from '../../../../../lib/indicators.js';
+} from '@ai-fund/lib/indicators';
 import {
   kelly, fixedFractionalSize,
   valueAtRisk, maxDrawdown, sharpeRatio, sortinoRatio,
   annualizedVolatility, returns, correlationMatrix, mean,
   zScore, standardDeviation,
-} from '../../../../../lib/math.js';
+} from '@ai-fund/lib/math';
 
 // Cast schemas to any to avoid TS2589 "excessively deep type instantiation" with zod + MCP SDK
 /* eslint-disable @typescript-eslint/no-explicit-any */

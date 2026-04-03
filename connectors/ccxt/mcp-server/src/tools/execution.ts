@@ -1,9 +1,9 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import ccxt from 'ccxt';
-import type { ExchangeClient } from '../client/exchange.js';
-import type { StreamManager } from '../client/stream.js';
-import { handler, authHandler } from './handler.js';
+import type { ExchangeClient } from '../client/exchange';
+import type { StreamManager } from '../client/stream';
+import { handler, authHandler } from './handler';
 
 // Cast schemas to any to avoid TS2589 "excessively deep type instantiation" with zod + MCP SDK
 /* eslint-disable @typescript-eslint/no-explicit-any */

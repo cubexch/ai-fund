@@ -8,7 +8,7 @@ import {
   getBackendName,
   type CredentialStore,
   type AlpacaCredentials,
-} from '../src/client/credential-store.js';
+} from '../src/client/credential-store';
 
 // ── In-memory store for testing ─────────────────────────────
 

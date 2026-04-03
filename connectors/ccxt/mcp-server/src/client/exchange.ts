@@ -8,9 +8,9 @@
  */
 
 import ccxt, { type Exchange, type Ticker, type Order } from 'ccxt';
-import { MarketDataStore, type OHLCVRow } from '../../../../../lib/datastore.js';
-import { RateLimiter } from './rate-limiter.js';
-import { LatencyTracker } from './latency-tracker.js';
+import { MarketDataStore, type OHLCVRow } from '@ai-fund/lib/datastore';
+import { RateLimiter } from './rate-limiter';
+import { LatencyTracker } from './latency-tracker';
 
 // ── Types ────────────────────────────────────────────────────
 

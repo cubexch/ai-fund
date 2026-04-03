@@ -14,10 +14,10 @@
  * Validates credentials by calling fetchBalance before saving.
  */
 
-import { ExchangeClient } from '../client/exchange.js';
-import { saveCredentials, getBackendName } from '../client/credential-store.js';
-import { sanitizeError } from '../client/sanitize.js';
-import { parseArgs, envPrefix } from './common.js';
+import { ExchangeClient } from '../client/exchange';
+import { saveCredentials, getBackendName } from '../client/credential-store';
+import { sanitizeError } from '../client/sanitize';
+import { parseArgs, envPrefix } from './common';
 
 function prompt(question: string, hidden = false): Promise<string> {
   return new Promise(resolve => {
