@@ -57,11 +57,6 @@ describe('cube CLI parser helpers', () => {
     expect(parseTopLevel(['--version']).global).toMatchObject({ version: true });
     expect(parseTopLevel(['-h']).global).toMatchObject({ h: true, help: true });
     expect(parseTopLevel(['-v', 'tools']).global).toMatchObject({ v: true, version: true });
-    expect(parseTopLevel(['echo', '--json', '--count', '2'])).toMatchObject({
-      command: 'echo',
-      commandTokens: ['--json', '--count', '2'],
-      global: {},
-    });
   });
 
   it('parses tool params with typed coercion', () => {
@@ -122,6 +117,14 @@ describe('cube CLI catalog surface', () => {
 
     expect(names).toEqual(expectedResources);
   });
+
+  it('normalizes plain object tool schemas into real zod schemas', () => {
+    const catalog = makeMinimalCatalog();
+    const tool = catalog.tools.get('get_positions');
+
+    expect(tool).toBeDefined();
+    expect(typeof tool?.schema?.safeParse).toBe('function');
+  });
 });
 
 describe('cube runCli execution contract', () => {
@@ -132,91 +135,181 @@ describe('cube runCli execution contract', () => {
     expect(result.output.stdout[0]).toBe(`${packageJson.name} ${packageJson.version}`);
   });
 
-  it('executes tool handlers with clean output', async () => {
+  it('renders main help with product groups and top-level auth commands', async () => {
+    const result = await runCli(['help'], makeMinimalCatalog());
+    const body = result.output.stdout.join('\n');
+
+    expect(result.code).toBe(0);
+    expect(body).toContain('cube account positions');
+    expect(body).toContain('cube market tickers');
+    expect(body).toContain('cube login');
+    expect(body).toContain('Legacy aliases (deprecated)');
+  });
+
+  it('routes `cube account positions` to the positions tool and renders a table', async () => {
     const catalog = makeMinimalCatalog();
-    catalog.tools.set('ping', {
-      name: 'ping',
-      description: 'Return a pong payload.',
+    catalog.tools.set('get_positions', {
+      name: 'get_positions',
+      description: 'positions',
       schema: z.object({
-        message: z.string().default('pong'),
+        subaccountId: z.number().optional(),
       }),
-      handler: async params => ({
+      handler: async () => ({
         content: [
           {
             type: 'text',
-            text: JSON.stringify({ code: 'pong', message: params.message }, null, 2),
+            text: JSON.stringify({
+              spot: {
+                name: 'spot',
+                inner: [
+                  {
+                    assetId: 1,
+                    accountingType: 'spot',
+                    amount: '1.5',
+                    receivedAmount: '0',
+                    pendingDeposits: '0',
+                  },
+                ],
+              },
+            }),
           },
         ],
       }),
     });
 
-    const result = await runCli(['ping', '--message', 'alpha'], catalog);
+    const result = await runCli(['account', 'positions'], catalog);
+    const body = result.output.stdout.join('\n');
 
     expect(result.code).toBe(0);
-    expect(result.output.stdout.join('\n')).toContain('code: pong');
+    expect(body).toContain('Positions');
+    expect(body).toContain('ASSET-1');
+    expect(body).toContain('Est. USD');
   });
 
-  it('errors on unknown top-level command', async () => {
+  it('renders explicit empty state for authenticated positions reads', async () => {
     const catalog = makeMinimalCatalog();
-    const result = await runCli(['not-a-command'], catalog);
-
-    expect(result.code).toBe(1);
-    expect(result.output.stderr.join('\n')).toContain('Unknown command');
-  });
-
-  it('prints resource content via `resources <name>`', async () => {
-    const catalog = makeMinimalCatalog();
-    catalog.resources.set('hello', {
-      name: 'hello',
-      uri: 'cube://hello',
-      description: 'hello resource',
-      handler: () => ({
-        contents: [
+    catalog.tools.set('get_positions', {
+      name: 'get_positions',
+      description: 'positions',
+      schema: z.object({
+        subaccountId: z.number().optional(),
+      }),
+      handler: async () => ({
+        content: [
           {
-            uri: 'cube://hello',
-            mimeType: 'text/plain',
-            text: 'hello world',
+            type: 'text',
+            text: JSON.stringify({ spot: { name: 'spot', inner: [] } }),
           },
         ],
       }),
     });
 
-    const result = await runCli(['resources', 'hello'], catalog);
+    const result = await runCli(['account', 'positions'], catalog);
 
     expect(result.code).toBe(0);
-    expect(result.output.stdout.join('\n')).toContain('hello world');
+    expect(result.output.stdout.join('\n')).toContain('No positions found');
   });
 
-  it('formats tool list in JSON with --json', async () => {
+  it('executes direct MCP aliases with a deprecation warning', async () => {
     const catalog = makeMinimalCatalog();
-    const result = await runCli(['tools', '--json'], catalog);
+    catalog.tools.set('get_positions', {
+      name: 'get_positions',
+      description: 'positions',
+      schema: z.object({}),
+      handler: async () => ({
+        content: [{ type: 'text', text: JSON.stringify({ spot: { name: 'spot', inner: [] } }) }],
+      }),
+    });
+
+    const result = await runCli(['get_positions'], catalog);
+
+    expect(result.code).toBe(0);
+    expect(result.output.stderr.join('\n')).toContain('deprecated');
+    expect(result.output.stdout.join('\n')).toContain('No positions found');
+  });
+
+  it('executes `cube tools get_positions` instead of showing tool help', async () => {
+    const catalog = makeMinimalCatalog();
+    catalog.tools.set('get_positions', {
+      name: 'get_positions',
+      description: 'positions',
+      schema: z.object({}),
+      handler: async () => ({
+        content: [{ type: 'text', text: JSON.stringify({ spot: { name: 'spot', inner: [] } }) }],
+      }),
+    });
+
+    const result = await runCli(['tools', 'get_positions'], catalog);
+
+    expect(result.code).toBe(0);
+    expect(result.output.stderr.join('\n')).toContain('deprecated');
+    expect(result.output.stdout.join('\n')).toContain('No positions found');
+    expect(result.output.stdout.join('\n')).not.toContain('No parameters.');
+  });
+
+  it('renders market ticker data as a readable table', async () => {
+    const catalog = makeMinimalCatalog();
+    catalog.tools.set('get_tickers', {
+      name: 'get_tickers',
+      description: 'tickers',
+      schema: z.object({}),
+      handler: async () => ({
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify([
+              {
+                symbol: 'BTCUSDC',
+                lastPrice: 60000,
+                change24h: 2.5,
+                bidPrice: 59990,
+                askPrice: 60010,
+                quoteVolume24h: 123456789,
+              },
+            ]),
+          },
+        ],
+      }),
+    });
+
+    const result = await runCli(['market', 'tickers'], catalog);
+    const body = result.output.stdout.join('\n');
+
+    expect(result.code).toBe(0);
+    expect(body).toContain('BTCUSDC');
+    expect(body).toContain('24h Quote Vol');
+  });
+
+  it('preserves machine-readable output with --json', async () => {
+    const catalog = makeMinimalCatalog();
+    catalog.tools.set('get_positions', {
+      name: 'get_positions',
+      description: 'positions',
+      schema: z.object({}),
+      handler: async () => ({
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({ spot: { name: 'spot', inner: [] } }),
+          },
+        ],
+      }),
+    });
+
+    const result = await runCli(['--json', 'account', 'positions'], catalog);
+    const body = JSON.parse(result.output.stdout[0]);
+
+    expect(result.code).toBe(0);
+    expect(body.spot.name).toBe('spot');
+  });
+
+  it('lists legacy MCP tools in JSON with `cube mcp tools`', async () => {
+    const catalog = makeMinimalCatalog();
+    const result = await runCli(['--json', 'mcp', 'tools'], catalog);
 
     expect(result.code).toBe(0);
     const body = JSON.parse(result.output.stdout[0]);
-
     expect(body).toBeInstanceOf(Array);
     expect(body.some((entry: any) => entry.name === 'get_positions')).toBe(true);
-  });
-
-  it('formats tool list in JSON with short `-j` flag', async () => {
-    const catalog = makeMinimalCatalog();
-    const result = await runCli(['-j', 'tools'], catalog);
-
-    expect(result.code).toBe(0);
-    const body = JSON.parse(result.output.stdout[0]);
-
-    expect(body).toBeInstanceOf(Array);
-    expect(body.some((entry: any) => entry.name === 'place_order')).toBe(true);
-  });
-
-  it('formats resources in JSON with short `-j` flag', async () => {
-    const catalog = makeMinimalCatalog();
-    const result = await runCli(['-j', 'resources'], catalog);
-
-    expect(result.code).toBe(0);
-    const body = JSON.parse(result.output.stdout[0]);
-
-    expect(body).toBeInstanceOf(Array);
-    expect(body.some((entry: any) => entry.name === 'portfolio')).toBe(true);
   });
 });
