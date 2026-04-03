@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 let RegimeDetectorClass: any;
 let available = false;
 try {
-  const mod = await import('../src/client/regime-detector.js');
+  const mod = await import('../src/client/regime-detector');
   RegimeDetectorClass = mod.RegimeDetector;
   available = true;
 } catch {

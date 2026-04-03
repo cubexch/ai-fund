@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseArgs, envPrefix } from '../src/cli/common.js';
+import { parseArgs, envPrefix } from '../src/cli/common';
 
 describe('parseArgs', () => {
   it('defaults to coinbase', () => {

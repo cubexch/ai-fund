@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { loadCredentials, importPrivateKey, signMessage, fromHex, type SigningCredentials } from './signing.js';
+import { loadCredentials, importPrivateKey, signMessage, fromHex, type SigningCredentials } from './signing';
 
 export interface CubeCredentials {
   apiKey: string;

@@ -2,7 +2,7 @@
  * Test helpers — mock fetch and McpServer for tool testing.
  */
 
-import type { FetchFn, AlpacaClient } from '../src/client/api.js';
+import type { FetchFn, AlpacaClient } from '../src/client/api';
 
 /**
  * Create a mock fetch function that returns predefined responses.
@@ -46,7 +46,7 @@ export interface FetchCall {
  */
 export async function createMockClient(responses: MockResponse[]) {
   // Dynamic import to avoid circular issues
-  const { AlpacaClient } = await import('../src/client/api.js');
+  const { AlpacaClient } = await import('../src/client/api');
   const fetch = mockFetch(responses);
   const client = new AlpacaClient({
     apiKey: 'test-key',

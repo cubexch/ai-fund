@@ -6,8 +6,8 @@
  * for future use with the official crypto API at docs.robinhood.com/crypto/trading.
  */
 
-import { AuthManager } from './auth.js';
-import { httpRequest } from './http.js';
+import { AuthManager } from './auth';
+import { httpRequest } from './http';
 
 // ── Constants ────────────────────────────────────────────────
 

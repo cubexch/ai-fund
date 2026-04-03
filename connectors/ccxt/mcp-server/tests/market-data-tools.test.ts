@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { registerMarketDataTools } from '../src/tools/market-data.js';
-import { createMockClient, MockMcpServer } from './helpers.js';
+import { registerMarketDataTools } from '../src/tools/market-data';
+import { createMockClient, MockMcpServer } from './helpers';
 
 function setup(overrides: Record<string, unknown> = {}) {
   const client = createMockClient({

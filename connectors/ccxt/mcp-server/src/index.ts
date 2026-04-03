@@ -2,20 +2,20 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { ExchangeClient } from './client/exchange.js';
-import { parseArgs, resolveCredentials, envPrefix } from './cli/common.js';
-import { registerAccountTools } from './tools/account.js';
-import { registerOrderTools } from './tools/orders.js';
-import { registerMarketDataTools } from './tools/market-data.js';
-import { registerStrategyTools } from './tools/strategy.js';
-import { registerDatastoreTools } from './tools/datastore.js';
-import { registerExecutionTools } from './tools/execution.js';
-import { registerScannerTools } from './tools/scanner.js';
-import { registerRegimeTools } from './tools/regime.js';
-import { registerBacktestTools } from './tools/backtest.js';
-import { registerAlgorithmTools } from './tools/algorithms.js';
-import { registerRiskTools } from './tools/risk.js';
-import { MarketDataStore } from '../../../../lib/datastore.js';
+import { ExchangeClient } from './client/exchange';
+import { parseArgs, resolveCredentials, envPrefix } from './cli/common';
+import { registerAccountTools } from './tools/account';
+import { registerOrderTools } from './tools/orders';
+import { registerMarketDataTools } from './tools/market-data';
+import { registerStrategyTools } from './tools/strategy';
+import { registerDatastoreTools } from './tools/datastore';
+import { registerExecutionTools } from './tools/execution';
+import { registerScannerTools } from './tools/scanner';
+import { registerRegimeTools } from './tools/regime';
+import { registerBacktestTools } from './tools/backtest';
+import { registerAlgorithmTools } from './tools/algorithms';
+import { registerRiskTools } from './tools/risk';
+import { MarketDataStore } from '@ai-fund/lib/datastore';
 
 // ── Parse CLI args + resolve credentials ──────────────────────
 

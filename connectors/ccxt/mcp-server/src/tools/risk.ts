@@ -5,12 +5,12 @@
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import type { ExchangeClient } from '../client/exchange.js';
-import { handler, authHandler } from './handler.js';
+import type { ExchangeClient } from '../client/exchange';
+import { handler, authHandler } from './handler';
 import {
   valueAtRisk, maxDrawdown, sharpeRatio, sortinoRatio,
   returns, correlationMatrix, mean, standardDeviation,
-} from '../../../../../lib/math.js';
+} from '@ai-fund/lib/math';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -31,6 +31,17 @@ const DEFAULT_RISK_LIMITS: RiskLimits = {
   maxConcentrationPct: 40,
   dailyLossLimitPct: 5,
 };
+
+/** Resolve a USD-equivalent price for a currency using ticker data. */
+function resolvePrice(
+  currency: string,
+  tickers: { symbol: string; last: number | undefined }[],
+): number {
+  if (currency === 'USDT' || currency === 'USD') return 1;
+  const symbol = `${currency}/USDT`;
+  const ticker = tickers.find(t => t.symbol === symbol);
+  return ticker?.last || 0;
+}
 
 export function registerRiskTools(server: McpServer, client: ExchangeClient) {
   // Scoped per-registration — each exchange gets its own limits, not shared globally
@@ -76,9 +87,7 @@ export function registerRiskTools(server: McpServer, client: ExchangeClient) {
       let totalValue = 0;
       for (const bal of balances) {
         if (bal.total === 0) continue;
-        const symbol = `${bal.currency}/USDT`;
-        const ticker = tickers.find(t => t.symbol === symbol);
-        const price = ticker?.last || (bal.currency === 'USDT' || bal.currency === 'USD' ? 1 : 0);
+        const price = resolvePrice(bal.currency, tickers);
         const value = bal.total * price;
         totalValue += Math.abs(value);
       }
@@ -87,9 +96,7 @@ export function registerRiskTools(server: McpServer, client: ExchangeClient) {
 
       for (const bal of balances) {
         if (bal.total === 0) continue;
-        const symbol = `${bal.currency}/USDT`;
-        const ticker = tickers.find(t => t.symbol === symbol);
-        const price = ticker?.last || (bal.currency === 'USDT' || bal.currency === 'USD' ? 1 : 0);
+        const price = resolvePrice(bal.currency, tickers);
         const value = bal.total * price;
         const weight = (value / totalValue) * 100;
         const side = value >= 0 ? 'long' : 'short';
@@ -109,7 +116,7 @@ export function registerRiskTools(server: McpServer, client: ExchangeClient) {
         netExposure: grossLong - grossShort,
         longExposure: grossLong,
         shortExposure: grossShort,
-        longShortRatio: grossShort > 0 ? grossLong / grossShort : Infinity,
+        longShortRatio: grossShort > 0 ? grossLong / grossShort : null,
         numPositions: positions.filter(p => Math.abs(p.value) > 1).length,
         positions,
         limits: { ...riskLimits },
@@ -137,10 +144,7 @@ export function registerRiskTools(server: McpServer, client: ExchangeClient) {
       // Estimate portfolio value
       let totalValue = 0;
       for (const bal of balances) {
-        const sym = `${bal.currency}/USDT`;
-        const t = tickers.find(tk => tk.symbol === sym);
-        const p = t?.last || (bal.currency === 'USDT' || bal.currency === 'USD' ? 1 : 0);
-        totalValue += Math.abs(bal.total * p);
+        totalValue += Math.abs(bal.total * resolvePrice(bal.currency, tickers));
       }
 
       const orderValue = params.amount * params.price;
@@ -193,12 +197,9 @@ export function registerRiskTools(server: McpServer, client: ExchangeClient) {
       const holdingSymbols: string[] = [];
       for (const bal of balances) {
         if (bal.total === 0) continue;
-        const sym = `${bal.currency}/USDT`;
-        const t = tickers.find(tk => tk.symbol === sym);
-        const p = t?.last || (bal.currency === 'USDT' || bal.currency === 'USD' ? 1 : 0);
-        totalValue += bal.total * p;
+        totalValue += bal.total * resolvePrice(bal.currency, tickers);
         if (bal.currency !== 'USDT' && bal.currency !== 'USD' && bal.total > 0) {
-          holdingSymbols.push(sym);
+          holdingSymbols.push(`${bal.currency}/USDT`);
         }
       }
 
@@ -255,10 +256,7 @@ export function registerRiskTools(server: McpServer, client: ExchangeClient) {
 
       let currentEquity = 0;
       for (const bal of balances) {
-        const sym = `${bal.currency}/USDT`;
-        const t = tickers.find(tk => tk.symbol === sym);
-        const p = t?.last || (bal.currency === 'USDT' || bal.currency === 'USD' ? 1 : 0);
-        currentEquity += bal.total * p;
+        currentEquity += bal.total * resolvePrice(bal.currency, tickers);
       }
 
       // Use recent bars of a stable reference to estimate peak
@@ -404,9 +402,7 @@ export function registerRiskTools(server: McpServer, client: ExchangeClient) {
 
       for (const bal of balances) {
         if (bal.total === 0) continue;
-        const sym = `${bal.currency}/USDT`;
-        const t = tickers.find(tk => tk.symbol === sym);
-        const price = t?.last || (bal.currency === 'USDT' || bal.currency === 'USD' ? 1 : 0);
+        const price = resolvePrice(bal.currency, tickers);
         const value = bal.total * price;
         currentValue += value;
 
@@ -462,10 +458,7 @@ export function registerRiskTools(server: McpServer, client: ExchangeClient) {
       // Portfolio value
       let totalValue = 0;
       for (const bal of balances) {
-        const sym = `${bal.currency}/USDT`;
-        const t = tickers.find(tk => tk.symbol === sym);
-        const p = t?.last || (bal.currency === 'USDT' || bal.currency === 'USD' ? 1 : 0);
-        totalValue += Math.abs(bal.total * p);
+        totalValue += Math.abs(bal.total * resolvePrice(bal.currency, tickers));
       }
 
       const orderPct = totalValue > 0 ? (orderValue / totalValue) * 100 : 100;
@@ -530,10 +523,8 @@ export function registerRiskTools(server: McpServer, client: ExchangeClient) {
       const holdings: { currency: string; value: number; pct: number }[] = [];
       for (const bal of balances) {
         if (bal.total === 0) continue;
-        const sym = `${bal.currency}/USDT`;
-        const t = tickers.find(tk => tk.symbol === sym);
-        const p = t?.last || (bal.currency === 'USDT' || bal.currency === 'USD' ? 1 : 0);
-        const value = bal.total * p;
+        const price = resolvePrice(bal.currency, tickers);
+        const value = bal.total * price;
         totalValue += Math.abs(value);
         if (Math.abs(value) > 1) {
           holdings.push({ currency: bal.currency, value, pct: 0 });

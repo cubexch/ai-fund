@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeError } from '../src/client/sanitize.js';
+import { sanitizeError } from '../src/client/sanitize';
 
 describe('sanitizeError', () => {
   it('passes through normal error messages unchanged', () => {

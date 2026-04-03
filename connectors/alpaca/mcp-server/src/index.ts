@@ -2,11 +2,11 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { AlpacaClient } from './client/api.js';
-import { loadCredentials } from './client/credential-store.js';
-import { registerAccountTools } from './tools/account.js';
-import { registerOrderTools } from './tools/orders.js';
-import { registerMarketDataTools } from './tools/market-data.js';
+import { AlpacaClient } from './client/api';
+import { loadCredentials } from './client/credential-store';
+import { registerAccountTools } from './tools/account';
+import { registerOrderTools } from './tools/orders';
+import { registerMarketDataTools } from './tools/market-data';
 
 const server = new McpServer({
   name: 'alpaca-trading',

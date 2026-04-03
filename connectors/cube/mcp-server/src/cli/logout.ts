@@ -5,7 +5,7 @@
  * Usage: npm run logout
  */
 
-import { deleteCredentials, getBackendName } from '../client/signing.js';
+import { deleteCredentials, getBackendName } from '../client/signing';
 
 const isColor = process.stdout.isTTY && !process.env.NO_COLOR;
 const c = {

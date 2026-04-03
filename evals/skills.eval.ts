@@ -25,7 +25,7 @@ import {
   REQUIRED_SECTIONS,
   KNOWN_TOOLS,
   type ParsedSkill,
-} from './skill-parser.js';
+} from './skill-parser';
 
 // ── Setup ────────────────────────────────────────────────────
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { RateLimiter } from '../src/client/rate-limiter.js';
+import { RateLimiter } from '../src/client/rate-limiter';
 
 describe('RateLimiter', () => {
   it('allows burst requests up to burst limit', async () => {

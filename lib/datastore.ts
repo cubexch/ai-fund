@@ -9,7 +9,7 @@
 import { Database } from 'duckdb';
 import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { OHLCV } from './indicators.js';
+import type { OHLCV } from './indicators';
 
 // ── Types ────────────────────────────────────────────────────
 

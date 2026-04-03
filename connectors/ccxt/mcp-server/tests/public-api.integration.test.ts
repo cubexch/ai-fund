@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { ExchangeClient } from '../src/client/exchange.js';
+import { ExchangeClient } from '../src/client/exchange';
 
 // Use coinbase — well-known, public endpoints work without auth
 const client = new ExchangeClient({ exchangeId: 'coinbase' });

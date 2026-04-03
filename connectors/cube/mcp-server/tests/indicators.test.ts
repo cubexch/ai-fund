@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { sma, ema, rsi, macd, bollingerBands, atr, adx, obv, stochastic, hurst, momentum, historicalVolatility, vwap, volumeSpike } from '../../../../lib/indicators.js';
-import type { OHLCV } from '../../../../lib/indicators.js';
+import { sma, ema, rsi, macd, bollingerBands, atr, adx, obv, stochastic, hurst, momentum, historicalVolatility, vwap, volumeSpike } from '@ai-fund/lib/indicators';
+import type { OHLCV } from '@ai-fund/lib/indicators';
 
 // Helper: generate simple OHLCV data
 function generateCandles(count: number, basePrice: number = 100, volatility: number = 2): OHLCV[] {

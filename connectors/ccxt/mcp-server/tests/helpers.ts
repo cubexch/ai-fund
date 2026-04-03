@@ -2,9 +2,9 @@
  * Test helpers — mock CCXT exchange, McpServer, and MemoryStore for tool testing.
  */
 
-import type { ExchangeClient } from '../src/client/exchange.js';
-import type { CredentialStore, CcxtCredentials } from '../src/client/credential-store.js';
-import { LatencyTracker } from '../src/client/latency-tracker.js';
+import type { ExchangeClient } from '../src/client/exchange';
+import type { CredentialStore, CcxtCredentials } from '../src/client/credential-store';
+import { LatencyTracker } from '../src/client/latency-tracker';
 
 // ── In-memory credential store for testing ────────────────
 

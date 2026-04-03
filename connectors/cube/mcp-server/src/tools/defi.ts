@@ -1,8 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import type { IridiumClient, TokenSearchResult, Ticker } from '../client/iridium.js';
-import type { OsmiumClient } from '../client/osmium.js';
-import { getSigningCredentials } from '../client/auth.js';
+import type { IridiumClient, TokenSearchResult, Ticker } from '../client/iridium';
+import type { OsmiumClient } from '../client/osmium';
+import { getSigningCredentials } from '../client/auth';
 
 export function isMintAddress(value: string): boolean {
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);

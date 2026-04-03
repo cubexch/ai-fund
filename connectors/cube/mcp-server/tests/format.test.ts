@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   usd, pct, qty, price, compact, timestamp, duration,
   signedValue, assetIcon, labelAsset, grade, ASSET_ICONS,
-} from '../../../../lib/format.js';
+} from '@ai-fund/lib/format';
 
 describe('usd', () => {
   it('formats with $ prefix and commas', () => {

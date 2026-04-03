@@ -13,7 +13,7 @@ import { execFile } from 'node:child_process';
 import { readFile, writeFile, mkdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir, platform } from 'node:os';
-import type { SigningCredentials } from './signing.js';
+import type { SigningCredentials } from './signing';
 
 // ── Constants ────────────────────────────────────────────────
 

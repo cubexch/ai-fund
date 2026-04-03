@@ -1,17 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 // DuckDB is a root-level dependency; skip if not resolvable from this workspace
-let TradeJournalClass: typeof import('../src/client/trade-journal.js').TradeJournal;
+let TradeJournalClass: typeof import('../src/client/trade-journal').TradeJournal;
 let available = false;
 try {
-  const mod = await import('../src/client/trade-journal.js');
+  const mod = await import('../src/client/trade-journal');
   TradeJournalClass = mod.TradeJournal;
   available = true;
 } catch {
   // duckdb not resolvable — skip tests
 }
 
-import type { TradeRecord } from '../src/client/trade-journal.js';
+import type { TradeRecord } from '../src/client/trade-journal';
 
 describe.skipIf(!available)('TradeJournal', () => {
   let journal: InstanceType<typeof TradeJournalClass>;

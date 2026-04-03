@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { registerOrderTools } from '../src/tools/orders.js';
-import { createMockClient, MockMcpServer } from './helpers.js';
+import { registerOrderTools } from '../src/tools/orders';
+import { createMockClient, MockMcpServer } from './helpers';
 
 function setup(overrides: Record<string, unknown> = {}) {
   const client = createMockClient({

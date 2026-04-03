@@ -9,8 +9,8 @@
  */
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
-import { generateKeyPair, encodeVerificationKey, saveCredentials, toHex, type Ed25519KeyPair } from './signing.js';
-import { CUBE_HOST, rewriteUrl } from './auth.js';
+import { generateKeyPair, encodeVerificationKey, saveCredentials, toHex, type Ed25519KeyPair } from './signing';
+import { CUBE_HOST, rewriteUrl } from './auth';
 
 // ── Types ────────────────────────────────────────────────────
 

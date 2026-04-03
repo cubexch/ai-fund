@@ -3,8 +3,8 @@
  * boilerplate from every tool registration.
  */
 
-import type { ExchangeClient } from '../client/exchange.js';
-import { sanitizeError } from '../client/sanitize.js';
+import type { ExchangeClient } from '../client/exchange';
+import { sanitizeError } from '../client/sanitize';
 
 type ToolResult = {
   [x: string]: unknown;

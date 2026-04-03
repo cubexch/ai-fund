@@ -11,8 +11,8 @@
  *   ROBINHOOD_USERNAME=user@example.com ROBINHOOD_PASSWORD=... ROBINHOOD_MFA_CODE=123456 npm run login
  */
 
-import { AuthManager } from '../client/auth.js';
-import { getBackendName } from '../client/credential-store.js';
+import { AuthManager } from '../client/auth';
+import { getBackendName } from '../client/credential-store';
 
 function prompt(question: string, hidden = false): Promise<string> {
   return new Promise(resolve => {

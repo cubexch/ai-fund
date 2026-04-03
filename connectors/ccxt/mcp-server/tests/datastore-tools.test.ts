@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { registerDatastoreTools } from '../src/tools/datastore.js';
-import { createMockClient, MockMcpServer } from './helpers.js';
+import { registerDatastoreTools } from '../src/tools/datastore';
+import { createMockClient, MockMcpServer } from './helpers';
 
 // ── Mock MarketDataStore ─────────────────────────────────────
 

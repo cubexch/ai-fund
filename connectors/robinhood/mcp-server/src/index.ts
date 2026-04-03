@@ -2,11 +2,11 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { AuthManager } from './client/auth.js';
-import { RobinhoodClient } from './client/api.js';
-import { registerMarketDataTools } from './tools/market-data.js';
-import { registerAccountTools } from './tools/account.js';
-import { registerOrderTools } from './tools/orders.js';
+import { AuthManager } from './client/auth';
+import { RobinhoodClient } from './client/api';
+import { registerMarketDataTools } from './tools/market-data';
+import { registerAccountTools } from './tools/account';
+import { registerOrderTools } from './tools/orders';
 
 const server = new McpServer({
   name: 'robinhood-trading',

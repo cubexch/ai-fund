@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import type { IridiumClient, Market } from '../client/iridium.js';
-import type { OsmiumClient } from '../client/osmium.js';
+import type { IridiumClient, Market } from '../client/iridium';
+import type { OsmiumClient } from '../client/osmium';
 
 /**
  * Convert a human-readable price/quantity to lot units using market tick sizes.

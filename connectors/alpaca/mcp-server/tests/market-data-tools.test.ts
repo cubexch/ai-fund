@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { AlpacaClient } from '../src/client/api.js';
-import { registerMarketDataTools } from '../src/tools/market-data.js';
-import { MockMcpServer, mockFetch } from './helpers.js';
+import { AlpacaClient } from '../src/client/api';
+import { registerMarketDataTools } from '../src/tools/market-data';
+import { MockMcpServer, mockFetch } from './helpers';
 
 function setup(responses: { status?: number; body?: unknown }[]) {
   const fetch = mockFetch(responses);

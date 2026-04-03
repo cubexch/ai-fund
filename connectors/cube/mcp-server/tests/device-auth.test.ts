@@ -10,8 +10,8 @@ import {
   type DeviceCodeResponse,
   type DeviceTokenResponse,
   type CallbackServer,
-} from '../src/client/device-auth.js';
-import { generateKeyPair } from '../src/client/signing.js';
+} from '../src/client/device-auth';
+import { generateKeyPair } from '../src/client/signing';
 
 // ── Helpers ──────────────────────────────────────────────────
 

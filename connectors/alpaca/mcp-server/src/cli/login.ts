@@ -13,8 +13,8 @@
  * Defaults to paper trading unless --live is passed.
  */
 
-import { AlpacaClient } from '../client/api.js';
-import { saveCredentials, getBackendName } from '../client/credential-store.js';
+import { AlpacaClient } from '../client/api';
+import { saveCredentials, getBackendName } from '../client/credential-store';
 
 function prompt(question: string, hidden = false): Promise<string> {
   return new Promise(resolve => {

@@ -1,5 +1,5 @@
-import { buildAuthHeaders, getEnvironment, resetAuth, fetchAccessToken, type AccessToken } from './auth.js';
-import { ASSET_ICONS } from '../../../../../lib/format.js';
+import { buildAuthHeaders, getEnvironment, resetAuth, fetchAccessToken, type AccessToken } from './auth';
+import { ASSET_ICONS } from '@ai-fund/lib/format';
 
 // ── Interval helpers ─────────────────────────────────────
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { registerStrategyTools } from '../src/tools/strategy.js';
-import { createMockClient, MockMcpServer } from './helpers.js';
+import { registerStrategyTools } from '../src/tools/strategy';
+import { createMockClient, MockMcpServer } from './helpers';
 
 function setup(overrides: Record<string, unknown> = {}) {
   const client = createMockClient({

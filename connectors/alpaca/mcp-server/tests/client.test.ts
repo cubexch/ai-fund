@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AlpacaClient } from '../src/client/api.js';
-import { mockFetch } from './helpers.js';
+import { AlpacaClient } from '../src/client/api';
+import { mockFetch } from './helpers';
 
 // ── Constructor / config ────────────────────────────────────
 

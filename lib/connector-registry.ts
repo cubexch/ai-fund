@@ -3,7 +3,7 @@
  * and lets the skill layer look them up by name or asset class.
  */
 
-import type { ExchangeConnector } from './connector-interface.js';
+import type { ExchangeConnector } from './connector-interface';
 
 const registry = new Map<string, ExchangeConnector>();
 

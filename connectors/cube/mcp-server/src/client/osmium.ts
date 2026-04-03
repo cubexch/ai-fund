@@ -1,6 +1,6 @@
 import { WebSocket } from 'ws';
-import { fetchAccessToken, getEnvironment, getSigningCredentials, getSigningKey, hasAuth } from './auth.js';
-import { signMessage } from './signing.js';
+import { fetchAccessToken, getEnvironment, getSigningCredentials, getSigningKey, hasAuth } from './auth';
+import { signMessage } from './signing';
 import {
   CredentialsMethods,
   OrderRequestMethods,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { LatencyTracker } from '../src/client/latency-tracker.js';
+import { LatencyTracker } from '../src/client/latency-tracker';
 
 describe('LatencyTracker', () => {
   it('record + stats: computes count, avg, min, max, percentiles', () => {

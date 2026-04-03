@@ -5,8 +5,8 @@
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import type { ExchangeClient } from '../client/exchange.js';
-import { handler } from './handler.js';
+import type { ExchangeClient } from '../client/exchange';
+import { handler } from './handler';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 

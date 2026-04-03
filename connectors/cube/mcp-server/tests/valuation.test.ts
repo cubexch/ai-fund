@@ -5,7 +5,7 @@ import {
   nvtRatio, mvrvRatio, stockToFlow, stockToFlowPrice,
   priceToFeesRatio, feeBasedValuation, metcalfeValuation,
   thermocapMultiple, mcapToTvl,
-} from '../../../../lib/valuation.js';
+} from '@ai-fund/lib/valuation';
 
 // ── Universal ────────────────────────────────────────────────
 

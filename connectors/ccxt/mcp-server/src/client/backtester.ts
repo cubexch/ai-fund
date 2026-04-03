@@ -13,4 +13,4 @@ export {
   type RunOptions,
   type WalkForwardOptions,
   type OptimizeOptions,
-} from '../../../../../lib/backtester.js';
+} from '@ai-fund/lib/backtester';

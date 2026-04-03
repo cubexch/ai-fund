@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { registerExecutionTools } from '../src/tools/execution.js';
-import { createMockClient, MockMcpServer } from './helpers.js';
+import { registerExecutionTools } from '../src/tools/execution';
+import { createMockClient, MockMcpServer } from './helpers';
 
 // ── Setup ─────────────────────────────────────────────────
 

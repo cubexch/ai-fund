@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { IridiumClient } from '../src/client/iridium.js';
-import type { Ticker, Market, Kline, ParsedOrderBook, ParsedRecentTrades } from '../src/client/iridium.js';
+import { IridiumClient } from '../src/client/iridium';
+import type { Ticker, Market, Kline, ParsedOrderBook, ParsedRecentTrades } from '../src/client/iridium';
 
 /**
  * Integration tests for the Cube Exchange Iridium client.

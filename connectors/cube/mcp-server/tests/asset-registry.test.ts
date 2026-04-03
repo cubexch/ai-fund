@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { AssetRegistry } from '../src/client/iridium.js';
-import type { Market } from '../src/client/iridium.js';
+import { AssetRegistry } from '../src/client/iridium';
+import type { Market } from '../src/client/iridium';
 
 function makeMarket(overrides: Partial<Market> & Pick<Market, 'symbol' | 'baseAssetId' | 'quoteAssetId'>): Market {
   return {

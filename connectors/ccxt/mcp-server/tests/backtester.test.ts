@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 let BacktesterClass: any;
 let available = false;
 try {
-  const mod = await import('../src/client/backtester.js');
+  const mod = await import('../src/client/backtester');
   BacktesterClass = mod.Backtester;
   available = true;
 } catch {

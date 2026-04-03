@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toLots, fromLots, SIDE_MAP, TIF_MAP, ORDER_TYPE_MAP } from '../src/tools/orders.js';
+import { toLots, fromLots, SIDE_MAP, TIF_MAP, ORDER_TYPE_MAP } from '../src/tools/orders';
 
 describe('toLots', () => {
   it('converts price with tick size 0.01', () => {

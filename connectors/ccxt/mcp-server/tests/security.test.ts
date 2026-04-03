@@ -5,9 +5,9 @@ import {
   loadCredentials,
   saveCredentials,
   deleteCredentials,
-} from '../src/client/credential-store.js';
-import { ExchangeClient } from '../src/client/exchange.js';
-import { MemoryStore } from './helpers.js';
+} from '../src/client/credential-store';
+import { ExchangeClient } from '../src/client/exchange';
+import { MemoryStore } from './helpers';
 
 // ── Path traversal prevention ───────────────────────────────
 

@@ -1,8 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import type { ExchangeClient } from '../client/exchange.js';
-import { handler } from './handler.js';
-import { RegimeDetector } from '../client/regime-detector.js';
+import type { ExchangeClient } from '../client/exchange';
+import { handler } from './handler';
+import { RegimeDetector } from '../client/regime-detector';
 
 // Cast schemas to any to avoid TS2589 "excessively deep type instantiation" with zod + MCP SDK
 /* eslint-disable @typescript-eslint/no-explicit-any */

@@ -8,9 +8,9 @@
  */
 
 import ccxt, { type Exchange, type Ticker, type Order } from 'ccxt';
-import { MarketDataStore, type OHLCVRow } from '../../../../../lib/datastore.js';
-import { RateLimiter } from './rate-limiter.js';
-import { LatencyTracker } from './latency-tracker.js';
+import { MarketDataStore, type OHLCVRow } from '@ai-fund/lib/datastore';
+import { RateLimiter } from './rate-limiter';
+import { LatencyTracker } from './latency-tracker';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -221,9 +221,9 @@ export class ExchangeClient {
   /** The original exchange ID before any geo-fallback. */
   readonly originalExchangeId: string;
   /** DuckDB store for read-through caching. Null when not configured. */
-  store: MarketDataStore | null;
+  readonly store: MarketDataStore | null;
   /** Trade journal for auto-recording executions. */
-  journal: any;  // TradeJournal | null
+  readonly journal: any;  // TradeJournal | null
   /** Per-method API latency tracker for performance monitoring. */
   readonly latency = new LatencyTracker();
 
@@ -404,26 +404,26 @@ export class ExchangeClient {
           ts: new Date(b.timestamp),
           open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume,
         }));
-        this.store.insertOHLCV(rows).catch(err => {
+        this.store.insertOHLCV(rows).catch((err: any) => {
           process.stderr.write(`[ccxt] DuckDB write error: ${err?.message ?? err}\n`);
         }); // best-effort persist
       }
 
       // Merge cached + fresh, dedup by timestamp
       if (cached.length > 0 && fresh.length > 0) {
-        const seen = new Set(cached.map(c => c.timestamp));
-        const merged = cached.map(c => ({
+        const seen = new Set(cached.map((c: any) => c.timestamp));
+        const merged = cached.map((c: any) => ({
           timestamp: c.timestamp, open: c.open, high: c.high,
           low: c.low, close: c.close, volume: c.volume,
         }));
         for (const f of fresh) {
           if (!seen.has(f.timestamp)) merged.push(f);
         }
-        merged.sort((a, b) => a.timestamp - b.timestamp);
+        merged.sort((a: any, b: any) => a.timestamp - b.timestamp);
         return limit ? merged.slice(-limit) : merged;
       }
 
-      return fresh.length > 0 ? fresh : cached.map(c => ({
+      return fresh.length > 0 ? fresh : cached.map((c: any) => ({
         timestamp: c.timestamp, open: c.open, high: c.high,
         low: c.low, close: c.close, volume: c.volume,
       }));
@@ -480,8 +480,8 @@ export class ExchangeClient {
       .filter(m =>
         m.active !== false &&
         (str(m.symbol).toLowerCase().includes(q) ||
-         str(m.base).toLowerCase().includes(q) ||
-         str(m.quote).toLowerCase().includes(q))
+          str(m.base).toLowerCase().includes(q) ||
+          str(m.quote).toLowerCase().includes(q))
       )
       .slice(0, 20)
       .map(formatMarket);
@@ -572,7 +572,7 @@ export class ExchangeClient {
         timestamp: result.timestamp ?? Date.now(),
         orderId: result.id,
         strategy: null,
-      }).catch(() => {}); // best-effort, don't block order flow
+      }).catch((err: any) => { process.stderr.write(`[ccxt] journal write error: ${err?.message ?? err}\n`); });
     }
     return result;
   }
@@ -621,7 +621,7 @@ export class ExchangeClient {
         timestamp: result.timestamp ?? Date.now(),
         orderId: result.id,
         strategy: null,
-      }).catch(() => {}); // best-effort, don't block order flow
+      }).catch((err: any) => { process.stderr.write(`[ccxt] journal write error: ${err?.message ?? err}\n`); });
     }
     return result;
   }
