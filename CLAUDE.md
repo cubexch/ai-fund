@@ -16,6 +16,12 @@ ai-fund/
 │       ├── src/tools/       # market-data, orders, account, defi, risk
 │       ├── src/resources/   # markets, portfolio
 │       └── tests/           # vitest test suites
+├── connectors/ccxt/     # Built-in CCXT MCP server (Coinbase, Binance, 100+ exchanges)
+│   └── mcp-server/
+│       ├── src/cli/         # status
+│       ├── src/client/      # exchange wrapper, rate limiter, latency tracker, trade journal
+│       ├── src/tools/       # market-data, orders, account, strategy, execution, datastore
+│       └── tests/           # vitest test suites (190+ tests)
 ├── lib/                 # Shared TS: indicators, math, format
 ├── bin/desk-state       # CLI for .desk/ state management
 ├── scripts/install.js   # npx ai-fund install|list
@@ -35,7 +41,7 @@ ai-fund/
 
 - **Requirements**: Node >= 20, ES modules (`"type": "module"`)
 - **TypeScript**: Strict mode, ES2022 target, Node16 module resolution
-- **Build**: `npm run build` — compiles Cube, Robinhood, and Alpaca MCP server workspaces
+- **Build**: `npm run build` — compiles Cube, Robinhood, Alpaca, and CCXT MCP server workspaces
 - **Dev**: `npm run dev` — runs Cube MCP server with watch
 - **Typecheck**: `npm run typecheck` — runs `tsc --noEmit` across project
 - **Test**: `cd connectors/cube/mcp-server && npm test` — vitest (auth, signing, indicators, format, REST orders, WebSocket, credential store, device auth, integration)
@@ -56,7 +62,9 @@ PRs that fail CI will not be merged. Fix locally before pushing.
 After every code change, run the following before considering the work done:
 
 1. **Typecheck**: `npm run typecheck` — must pass with zero errors
-2. **Unit tests**: `cd connectors/cube/mcp-server && npm test` — run the full vitest suite; fix any failures before committing
+2. **Unit tests**: Run relevant test suites; fix any failures before committing
+   - Cube: `cd connectors/cube/mcp-server && npm test`
+   - CCXT: `cd connectors/ccxt/mcp-server && npx vitest run`
 3. **Update docs**: If your change affects architecture, commands, agent categories, shared libraries, or exchange support, update `CLAUDE.md` and `README.md` to reflect the new state
 
 ### Task Completion Checklists
@@ -82,10 +90,14 @@ After every code change, run the following before considering the work done:
 - **`lib/indicators.ts`** — `sma`, `ema`, `rsi`, `macd`, `bollingerBands`, `atr`, `obv`, `stochastic`, `adx` + `OHLCV` interface
 - **`lib/math.ts`** — `kelly`, `fixedFractionalSize`, `valueAtRisk`, `maxDrawdown`, `sharpeRatio`, `sortinoRatio`, `calmarRatio`, `correlation`, `correlationMatrix`, `mean`, `standardDeviation`, `zScore`, `returns`, `winRate`, `profitFactor`
 - **`lib/format.ts`** — `usd`, `pct`, `qty`, `price`, `compact`, `timestamp`, `duration`, `signedValue`, `grade`, `assetIcon`, `labelAsset` + `ASSET_ICONS` map
+- **`lib/datastore.ts`** — `MarketDataStore` (DuckDB columnar store for OHLCV data with SQL queries, Parquet I/O, incremental updates)
+- **`lib/ingest/exchange.ts`** — `ingestFromExchange` (generic exchange data ingester into DuckDB)
 
 ## Testing
 
-Tests live in `connectors/cube/mcp-server/tests/` using vitest. Run with `cd connectors/cube/mcp-server && npm test`.
+Tests live in `connectors/*/mcp-server/tests/` using vitest.
+- **Cube**: `cd connectors/cube/mcp-server && npm test`
+- **CCXT**: `cd connectors/ccxt/mcp-server && npx vitest run` (190+ tests)
 
 ### Writing Tests
 
@@ -130,6 +142,16 @@ All connectors follow a standard tool naming convention (Alpaca-style, snake_cas
 **Core tools every connector provides:** `place_order`, `cancel_order`, `get_positions`, `get_account`, `get_tickers`, `get_bars`, `get_orders`, `get_fills`, `close_position`
 
 **Advanced tools (Cube reference implementation):** `get_quote`, `execute_trade`, `compare_venues`, `search_assets`, `get_trending`, `get_portfolio`, `get_fees`, `get_technical_analysis`, `calculate_position_size`
+
+**CCXT advanced tools (market-maker/arbitrage grade):**
+- *Strategy*: `get_technical_analysis`, `calculate_position_size`, `get_fees`, `get_exchange_info`, `get_market_info`, `assess_portfolio_risk`, `get_optimal_entry`
+- *Execution*: `get_execution_quality`, `get_spread_monitor`, `get_order_flow_imbalance`, `detect_arbitrage_opportunity`, `get_latency_stats`, `get_market_microstructure`, `get_momentum_scanner`
+- *Datastore (DuckDB)*: `ingest_history`, `query_market_data`, `get_cached_symbols`, `analyze_cross_symbol`, `get_volume_profile`, `get_vwap`, `get_trade_journal`, `get_pnl_report`
+- *Algorithms*: `plan_twap`, `plan_vwap`, `plan_iceberg`, `analyze_sniper`, `compare_execution_plans`, `simulate_market_impact`, `plan_smart_route`, `calculate_implementation_shortfall`
+- *Risk*: `set_risk_limits`, `get_portfolio_exposure`, `check_position_limits`, `calculate_var`, `get_drawdown_monitor`, `check_correlation_risk`, `simulate_stress_test`, `check_pre_trade`, `get_risk_dashboard`, `get_margin_health`
+- *Backtesting*: `backtest_strategy`, `compare_strategies`, `optimize_strategy`, `walk_forward_test` (9 built-in strategies: SMA crossover, RSI mean reversion, MACD momentum, Bollinger breakout/mean-reversion, EMA trend, stochastic, ADX, multi-indicator confluence)
+- *Regime Detection*: `detect_market_regime`, `scan_regime_changes`, `get_regime_history`, `match_strategy_to_regime`
+- *Signal Scanner*: `scan_signals`, `scan_market`, `find_support_resistance`, `detect_patterns`, `get_signal_dashboard`, `scan_divergences`, `get_multi_timeframe_signals`, `scan_breakouts`
 
 ### Tool Namespacing
 
@@ -181,12 +203,10 @@ commands:
 |----------|-----------|-------|
 | Cube | Built-in (`connectors/cube/`) | Recommended — 200us matching, lowest fees |
 | Alpaca | Built-in (`connectors/alpaca/`) | Stocks, ETFs, crypto — paper trading built-in |
+| CCXT (Coinbase, Binance, 100+) | Built-in (`connectors/ccxt/`) | Universal adapter — any CCXT exchange, sandbox support |
 | OKX | `@okx_ai/okx-trade-mcp` | 107 tools, spot/futures/options |
 | Kraken | `kraken-cli` | Rust binary, built-in paper trading |
-| Binance | `ccxt-mcp` | Via CCXT universal adapter |
-| Coinbase | `@coinbase/agentkit` | Wallet + trading |
 | Robinhood | Built-in (`connectors/robinhood/`) | Roadmap — crypto only (official API) |
-| 100+ more | `ccxt-mcp` | Any CCXT-supported exchange |
 
 ## Desk State (`.desk/`)
 

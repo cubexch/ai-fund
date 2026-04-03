@@ -151,13 +151,13 @@ When handing an AI agent access to exchange credentials, think about security. S
 
 ### Crypto Exchanges
 
-| | Cube | Binance | Coinbase | Kraken | OKX |
+| | Cube | Coinbase | Binance | Kraken | OKX |
 |---|---|---|---|---|---|
-| **Connector** | Built-in MCP | ccxt-mcp | AgentKit | CLI | okx-mcp |
-| **Auth** | Local (no keys) | Key+secret | Key+secret | Key+secret | Key+secret+pass |
+| **Connector** | Built-in MCP | Built-in (CCXT) | Built-in (CCXT) | CLI | okx-mcp |
+| **Auth** | Local (no keys) | Key+secret+pass | Key+secret | Key+secret | Key+secret+pass |
 | **Spot** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Perps** | ✅ | ✅ | Limited | ✅ | ✅ |
-| **Paper** | ✅ | Testnet | ❌ | ✅ | Demo |
+| **Perps** | ✅ | Limited | ✅ | ✅ | ✅ |
+| **Paper** | ✅ | Sandbox | Testnet | ✅ | Demo |
 
 ### Equities and Multi-Asset Platforms
 
@@ -487,6 +487,6 @@ MIT.
 - [OKX Trade Kit — 107 trading tools via MCP](https://github.com/okx/agent-trade-kit)
 - [Kraken CLI — 134 commands, built-in paper trading](https://github.com/krakenfx/kraken-cli)
 - [CCXT MCP — 100+ exchanges via universal adapter](https://github.com/lazy-dinosaur/ccxt-mcp)
-- [Coinbase AgentKit — wallet + onchain + trading](https://github.com/coinbase/agentkit)
+- [CCXT — universal exchange adapter (Coinbase, Binance, 100+)](https://github.com/ccxt/ccxt)
 - [Claude Code — AI runtime that powers the desk](https://claude.ai/code)
 - [Connectors Guide — how to add any exchange](connectors/README.md)

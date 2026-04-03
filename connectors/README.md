@@ -10,10 +10,11 @@ ai-fund connects to exchanges via typed connectors that implement `ExchangeConne
 | **[Alpaca](https://alpaca.markets)** | Built-in | Ships with this repo | ✅ Ready — stocks, ETFs, crypto, paper trading |
 | **[OKX](https://okx.com)** | `@okx_ai/okx-trade-mcp` | `npm i -g @okx_ai/okx-trade-mcp` | ✅ Ready — 107 tools, spot/futures/options |
 | **[Kraken](https://kraken.com)** | `kraken-cli` | [Install Kraken CLI](https://github.com/krakenfx/kraken-cli) | ✅ Ready — 134 commands, built-in paper trading |
-| **[Binance](https://binance.com)** | `ccxt-mcp` | `npm i -g ccxt-mcp` | ✅ Via CCXT — 100+ exchanges |
-| **[Bybit](https://bybit.com)** | `ccxt-mcp` | `npm i -g ccxt-mcp` | ✅ Via CCXT |
+| **[Coinbase](https://coinbase.com)** | Built-in (CCXT) | Ships with this repo | ✅ Ready — default exchange for CCXT connector |
+| **[Binance](https://binance.com)** | Built-in (CCXT) | Ships with this repo | ✅ Ready — via `--exchange binance` |
+| **[Bybit](https://bybit.com)** | Built-in (CCXT) | Ships with this repo | ✅ Ready — via `--exchange bybit` |
+| **100+ more** | Built-in (CCXT) | Ships with this repo | ✅ Any CCXT-supported exchange |
 | **[Robinhood](https://robinhood.com)** | Built-in | Ships with this repo | 🗓 Roadmap — crypto only (official API), no stocks |
-| **[Coinbase](https://coinbase.com)** | `@coinbase/agentkit` | [AgentKit docs](https://github.com/coinbase/agentkit) | ✅ Ready — wallet + trading |
 | **[Hyperliquid](https://hyperliquid.xyz)** | Community MCP | [Options](https://github.com/search?q=hyperliquid+mcp) | 🔧 Community |
 
 ## Architecture
@@ -66,7 +67,81 @@ Run `/setup` → select Hyperliquid → enter wallet address and private key. Se
 
 ### Any CCXT Exchange (Binance, Bybit, 100+ more)
 
-Run `/setup` → select "Other exchange via CCXT" → enter exchange name and API keys. See `connectors/ccxt/README.md`.
+```bash
+# Install Kraken CLI: https://github.com/krakenfx/kraken-cli
+curl -sSf https://raw.githubusercontent.com/krakenfx/kraken-cli/main/install.sh | sh
+kraken auth login
+```
+
+Then enable it in `.mcp.json`:
+```json
+{
+  "kraken": {
+    "disabled": false
+  }
+}
+```
+
+### 4. Add Coinbase (or any CCXT exchange)
+
+The built-in CCXT connector supports Coinbase, Binance, Bybit, and 100+ exchanges. No extra install needed.
+
+Credentials are per-exchange via env vars: `<EXCHANGE>_API_KEY`, `<EXCHANGE>_SECRET`, `<EXCHANGE>_PASSWORD`. Falls back to generic `CCXT_*` vars.
+
+**Coinbase (default):**
+```json
+{
+  "coinbase": {
+    "disabled": false,
+    "command": "npx",
+    "args": ["tsx", "connectors/ccxt/mcp-server/src/index.ts"],
+    "env": {
+      "COINBASE_API_KEY": "your-api-key",
+      "COINBASE_SECRET": "your-api-secret",
+      "COINBASE_PASSPHRASE": "your-passphrase",
+      "COINBASE_SANDBOX": "true"
+    }
+  }
+}
+```
+
+**Binance:**
+```json
+{
+  "binance": {
+    "disabled": false,
+    "command": "npx",
+    "args": ["tsx", "connectors/ccxt/mcp-server/src/index.ts", "--exchange", "binance"],
+    "env": {
+      "BINANCE_API_KEY": "your-key",
+      "BINANCE_SECRET": "your-secret",
+      "BINANCE_SANDBOX": "true"
+    }
+  }
+}
+```
+
+**Market data only (no API key needed):**
+```json
+{
+  "coinbase": {
+    "disabled": false,
+    "command": "npx",
+    "args": ["tsx", "connectors/ccxt/mcp-server/src/index.ts"]
+  }
+}
+```
+
+## Multi-Exchange Strategies
+
+With multiple exchanges connected, the desk unlocks powerful strategies:
+
+| Strategy | How It Works |
+|----------|-------------|
+| **Cross-Exchange Arbitrage** | The Arbitrageur scans all connected exchanges for price discrepancies. Buy on the cheaper exchange, sell on the more expensive one. |
+| **Smart Order Routing** | The Execution Trader routes large orders to the exchange with the deepest liquidity and tightest spread. |
+| **Multi-Venue Market Making** | The Market Maker quotes on multiple exchanges simultaneously, capturing spreads across venues. |
+| **Best Execution** | Compare fill quality across exchanges. Route to the venue that consistently delivers the best fills. |
 
 ## Unified Tool API
 
