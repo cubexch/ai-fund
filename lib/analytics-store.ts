@@ -1,7 +1,9 @@
 /**
  * DuckDB-powered analytics engine for institutional-scale quantitative analysis.
- * Uses SQL for heavy lifting (rolling windows, cross-asset joins), then passes
- * results to pure function libs for final computation.
+ *
+ * Uses DuckDB's analytical SQL for heavy lifting (rolling windows, cross-asset
+ * joins, aggregations across hundreds of assets), then passes structured results
+ * to pure function libs for factor decomposition and risk modeling.
  */
 
 import { MarketDataStore } from './datastore.js';
@@ -10,10 +12,32 @@ import { mean, standardDeviation, correlation, returns as computeReturns } from 
 
 // ── Types ────────────────────────────────────────────────
 
-export interface RollingCorrelationSnapshot {
+export interface ReturnSeriesParams {
+  symbols: string[];
+  interval: string;
+  start?: Date;
+  end?: Date;
+  exchange?: string;
+}
+
+export interface RollingCorrelationParams {
+  symbols: string[];
+  interval: string;
+  window: number;
+  step?: number;
+}
+
+export interface RollingCorrelationEntry {
   timestamp: Date;
   matrix: number[][];
   symbols: string[];
+}
+
+export interface CrossSectionalParams {
+  metric: 'momentum' | 'volatility' | 'volume' | 'return';
+  interval: string;
+  lookback: number;
+  date?: Date;
 }
 
 export interface CrossSectionalEntry {
@@ -24,18 +48,39 @@ export interface CrossSectionalEntry {
   quintile: number;
 }
 
-export interface FactorReturnsFromDB {
+export interface FactorReturnsParams {
+  interval: string;
+  lookback: number;
+  characteristics?: Record<string, { marketCap?: number; bookToMarket?: number }>;
+}
+
+export interface FactorReturnsResult {
   market: number[];
   smb: number[];
   momentum: number[];
   timestamps: Date[];
 }
 
-export interface CovarianceFromDB {
+export interface CovarianceParams {
+  symbols: string[];
+  interval: string;
+  lookback: number;
+  method?: 'sample' | 'exponential';
+  halfLife?: number;
+}
+
+export interface CovarianceResult {
   matrix: number[][];
   symbols: string[];
   method: string;
   dataPoints: number;
+}
+
+export interface RollingBetaParams {
+  symbol: string;
+  benchmark: string;
+  interval: string;
+  window: number;
 }
 
 export interface RollingBetaEntry {
@@ -45,32 +90,44 @@ export interface RollingBetaEntry {
   rSquared: number;
 }
 
-export interface RiskReportResult {
+export interface RiskReportParams {
   symbols: string[];
-  covMatrix: number[][];
-  pcaFactors: Array<{ eigenvalue: number; varianceExplained: number; loadings: Record<string, number> }>;
-  componentVaR: { portfolioVaR: number; components: Array<{ index: number; componentVaR: number; pctContribution: number }> };
-  riskDecomp: {
-    totalRisk: number;
-    systematicRisk: number;
-    idiosyncraticRisk: number;
-    diversificationRatio: number;
-  };
-  dataPoints: number;
+  interval: string;
+  lookback?: number;
 }
 
-export interface ScreenResult {
-  symbol: string;
-  metrics: Record<string, number>;
+export interface ScreenParams {
+  filters: Array<{
+    metric: 'avg_volume' | 'volatility' | 'return' | 'sharpe';
+    operator: '>' | '<' | '>=' | '<=';
+    value: number;
+    lookback: number;
+  }>;
+  interval: string;
+  limit?: number;
 }
 
-export interface PairCorrelation {
+export interface PairwiseCorrelationParams {
+  symbols?: string[];
+  interval: string;
+  lookback: number;
+  minCorrelation?: number;
+}
+
+export interface PairwiseCorrelationEntry {
   symbolA: string;
   symbolB: string;
   correlation: number;
 }
 
-export interface RegimeStatEntry {
+export interface RegimeStatsParams {
+  symbol: string;
+  interval: string;
+  lookback: number;
+  regimeWindow?: number;
+}
+
+export interface RegimeStatsEntry {
   timestamp: Date;
   mean: number;
   volatility: number;
@@ -79,22 +136,24 @@ export interface RegimeStatEntry {
   regime: string;
 }
 
-// ── Analytics Store ──────────────────────────────────────
+// ── AnalyticsStore ──────────────────────────────────────
 
 export class AnalyticsStore {
-  constructor(private store: MarketDataStore) {}
+  private store: MarketDataStore;
+
+  constructor(store: MarketDataStore) {
+    this.store = store;
+  }
+
+  // ── 1. Return Series Extraction ─────────────────────────
 
   /**
-   * Extract aligned return series for multiple assets via SQL.
+   * Extract aligned return series via SQL with GROUP BY.
+   * Returns per-period percentage returns keyed by symbol.
    */
-  async getReturnsSeries(params: {
-    symbols: string[];
-    interval: string;
-    start?: Date;
-    end?: Date;
-    exchange?: string;
-  }): Promise<Record<string, number[]>> {
+  async getReturnsSeries(params: ReturnSeriesParams): Promise<Record<string, number[]>> {
     const { symbols, interval, start, end, exchange } = params;
+
     if (symbols.length === 0) return {};
 
     const conditions = ['interval = ?'];
@@ -113,559 +172,800 @@ export class AnalyticsStore {
       sqlParams.push(end.toISOString());
     }
 
-    // Fetch close prices for all symbols
+    // Build symbol filter
     const placeholders = symbols.map(() => '?').join(', ');
     conditions.push(`symbol IN (${placeholders})`);
     sqlParams.push(...symbols);
 
-    const rows = await this.store.sql(
-      `SELECT symbol, ts, close
-       FROM ohlcv
-       WHERE ${conditions.join(' AND ')}
-       ORDER BY symbol, ts ASC`,
-      sqlParams,
-    );
+    const rows = await this.store.sql(`
+      WITH prices AS (
+        SELECT symbol, ts, close,
+               LAG(close) OVER (PARTITION BY symbol ORDER BY ts) AS prev_close
+        FROM ohlcv
+        WHERE ${conditions.join(' AND ')}
+      ),
+      rets AS (
+        SELECT symbol, ts,
+               CASE WHEN prev_close IS NOT NULL AND prev_close != 0
+                    THEN (close - prev_close) / prev_close
+                    ELSE NULL END AS ret
+        FROM prices
+      )
+      SELECT symbol, ts, ret
+      FROM rets
+      WHERE ret IS NOT NULL
+      ORDER BY ts, symbol
+    `, sqlParams);
 
-    // Group by symbol
-    const pricesBySymbol: Record<string, number[]> = {};
+    // Group by symbol preserving time alignment
+    const result: Record<string, number[]> = {};
+    for (const s of symbols) {
+      result[s] = [];
+    }
     for (const row of rows) {
       const sym = row.symbol as string;
-      if (!pricesBySymbol[sym]) pricesBySymbol[sym] = [];
-      pricesBySymbol[sym].push(row.close as number);
-    }
-
-    // Convert prices to returns
-    const result: Record<string, number[]> = {};
-    for (const [sym, prices] of Object.entries(pricesBySymbol)) {
-      if (prices.length < 2) continue;
-      result[sym] = computeReturns(prices);
+      if (result[sym]) {
+        result[sym].push(row.ret as number);
+      }
     }
 
     return result;
   }
 
+  // ── 2. Rolling Correlation Matrix ───────────────────────
+
   /**
-   * Compute rolling correlation matrices.
+   * Rolling correlation matrices using DuckDB window functions.
+   * Computes correlation over a sliding window of return observations.
    */
-  async rollingCorrelationMatrix(params: {
-    symbols: string[];
-    interval: string;
-    window: number;
-    step?: number;
-  }): Promise<RollingCorrelationSnapshot[]> {
+  async rollingCorrelationMatrix(params: RollingCorrelationParams): Promise<RollingCorrelationEntry[]> {
     const { symbols, interval, window, step = 1 } = params;
-    const returnsSeries = await this.getReturnsSeries({ symbols, interval });
 
-    const symList = symbols.filter(s => returnsSeries[s]?.length > 0);
-    if (symList.length < 2) return [];
+    if (symbols.length < 2) return [];
 
-    const n = Math.min(...symList.map(s => returnsSeries[s].length));
-    if (n < window) return [];
+    // Extract aligned close prices
+    const placeholders = symbols.map(() => '?').join(', ');
+    const rows = await this.store.sql(`
+      SELECT ts, symbol, close
+      FROM ohlcv
+      WHERE symbol IN (${placeholders})
+        AND interval = ?
+      ORDER BY ts, symbol
+    `, [...symbols, interval]);
 
-    const snapshots: RollingCorrelationSnapshot[] = [];
+    if (rows.length === 0) return [];
 
-    for (let i = window - 1; i < n; i += step) {
-      const matrix: number[][] = [];
-      for (let a = 0; a < symList.length; a++) {
-        const row: number[] = [];
-        for (let b = 0; b < symList.length; b++) {
-          if (a === b) {
-            row.push(1);
-          } else {
-            const sliceA = returnsSeries[symList[a]].slice(i - window + 1, i + 1);
-            const sliceB = returnsSeries[symList[b]].slice(i - window + 1, i + 1);
-            row.push(correlation(sliceA, sliceB));
-          }
+    // Build time-aligned price matrix
+    const timeMap = new Map<string, Map<string, number>>();
+    for (const row of rows) {
+      const tsKey = new Date(row.ts as string | Date).toISOString();
+      if (!timeMap.has(tsKey)) timeMap.set(tsKey, new Map());
+      timeMap.get(tsKey)!.set(row.symbol as string, row.close as number);
+    }
+
+    // Filter to timestamps where all symbols have data
+    const timestamps: string[] = [];
+    const priceMatrix: number[][] = []; // [timeIdx][symbolIdx]
+    for (const [ts, symbolMap] of timeMap) {
+      if (symbols.every(s => symbolMap.has(s))) {
+        timestamps.push(ts);
+        priceMatrix.push(symbols.map(s => symbolMap.get(s)!));
+      }
+    }
+
+    if (priceMatrix.length < window + 1) return [];
+
+    // Compute returns
+    const returnMatrix: number[][] = [];
+    for (let i = 1; i < priceMatrix.length; i++) {
+      returnMatrix.push(
+        symbols.map((_, j) =>
+          priceMatrix[i - 1][j] === 0 ? 0 : (priceMatrix[i][j] - priceMatrix[i - 1][j]) / priceMatrix[i - 1][j]
+        )
+      );
+    }
+
+    // Rolling correlation windows
+    const results: RollingCorrelationEntry[] = [];
+    for (let i = window - 1; i < returnMatrix.length; i += step) {
+      const windowReturns = returnMatrix.slice(i - window + 1, i + 1);
+      const n = symbols.length;
+      const matrix: number[][] = Array.from({ length: n }, () => Array(n).fill(0));
+
+      // Extract per-symbol series for this window
+      const seriesBySymbol: number[][] = symbols.map((_, j) =>
+        windowReturns.map(row => row[j])
+      );
+
+      for (let a = 0; a < n; a++) {
+        for (let b = a; b < n; b++) {
+          const corr = a === b ? 1 : correlation(seriesBySymbol[a], seriesBySymbol[b]);
+          matrix[a][b] = corr;
+          matrix[b][a] = corr;
         }
-        matrix.push(row);
       }
 
-      snapshots.push({
-        timestamp: new Date(), // Would need timestamp mapping from DB
+      results.push({
+        timestamp: new Date(timestamps[i + 1]), // +1 because returns are shifted by one
         matrix,
-        symbols: symList,
+        symbols: [...symbols],
       });
     }
 
-    return snapshots;
+    return results;
   }
 
+  // ── 3. Cross-Sectional Sort ─────────────────────────────
+
   /**
-   * Cross-sectional ranking of all assets by a metric.
+   * Rank all assets by a metric in SQL.
+   * Returns sorted array with rank, percentile, and quintile.
    */
-  async crossSectionalSort(params: {
-    metric: 'momentum' | 'volatility' | 'volume' | 'return';
-    interval: string;
-    lookback: number;
-    date?: Date;
-  }): Promise<CrossSectionalEntry[]> {
-    const { metric, interval, lookback } = params;
+  async crossSectionalSort(params: CrossSectionalParams): Promise<CrossSectionalEntry[]> {
+    const { metric, interval, lookback, date } = params;
 
-    let sql: string;
-    const sqlParams: unknown[] = [interval, lookback];
+    const endDate = date ?? new Date();
+    const startDate = new Date(endDate.getTime() - lookback * 24 * 60 * 60 * 1000);
 
+    let metricExpr: string;
     switch (metric) {
       case 'momentum':
-      case 'return':
-        sql = `
-          WITH ranked AS (
-            SELECT symbol,
-              (LAST(close ORDER BY ts) - FIRST(close ORDER BY ts)) / NULLIF(FIRST(close ORDER BY ts), 0) as value
-            FROM ohlcv
-            WHERE interval = ? AND ts >= (SELECT MAX(ts) - INTERVAL ? DAY FROM ohlcv WHERE interval = ?)
-            GROUP BY symbol
-            HAVING COUNT(*) >= 5
-          )
-          SELECT symbol, value FROM ranked ORDER BY value DESC
-        `;
-        sqlParams.push(interval);
+        metricExpr = '(LAST(close ORDER BY ts) - FIRST(close ORDER BY ts)) / NULLIF(FIRST(close ORDER BY ts), 0)';
         break;
       case 'volatility':
-        sql = `
-          WITH daily_rets AS (
-            SELECT symbol, ts,
-              (close - LAG(close) OVER (PARTITION BY symbol ORDER BY ts))
-                / NULLIF(LAG(close) OVER (PARTITION BY symbol ORDER BY ts), 0) as ret
-            FROM ohlcv
-            WHERE interval = ? AND ts >= (SELECT MAX(ts) - INTERVAL ? DAY FROM ohlcv WHERE interval = ?)
-          )
-          SELECT symbol, STDDEV(ret) as value
-          FROM daily_rets
-          WHERE ret IS NOT NULL
-          GROUP BY symbol
-          HAVING COUNT(*) >= 5
-          ORDER BY value DESC
-        `;
-        sqlParams.push(interval);
+        metricExpr = 'STDDEV_SAMP((close - LAG(close) OVER (PARTITION BY symbol ORDER BY ts)) / NULLIF(LAG(close) OVER (PARTITION BY symbol ORDER BY ts), 0))';
         break;
       case 'volume':
-        sql = `
-          SELECT symbol, AVG(volume) as value
-          FROM ohlcv
-          WHERE interval = ? AND ts >= (SELECT MAX(ts) - INTERVAL ? DAY FROM ohlcv WHERE interval = ?)
-          GROUP BY symbol
-          HAVING COUNT(*) >= 5
-          ORDER BY value DESC
-        `;
-        sqlParams.push(interval);
+        metricExpr = 'AVG(volume)';
         break;
-      default:
-        return [];
+      case 'return':
+        metricExpr = '(LAST(close ORDER BY ts) - FIRST(close ORDER BY ts)) / NULLIF(FIRST(close ORDER BY ts), 0)';
+        break;
     }
 
-    const rows = await this.store.sql(sql, sqlParams);
-    const total = rows.length;
+    // volatility needs window functions which can't nest in aggregate; use CTE approach
+    if (metric === 'volatility') {
+      const rows = await this.store.sql(`
+        WITH rets AS (
+          SELECT symbol, ts, close,
+                 LAG(close) OVER (PARTITION BY symbol ORDER BY ts) AS prev_close
+          FROM ohlcv
+          WHERE interval = ?
+            AND ts >= ?
+            AND ts <= ?
+        ),
+        vol AS (
+          SELECT symbol,
+                 STDDEV_SAMP(CASE WHEN prev_close IS NOT NULL AND prev_close != 0
+                   THEN (close - prev_close) / prev_close ELSE NULL END) AS metric_value
+          FROM rets
+          GROUP BY symbol
+          HAVING COUNT(CASE WHEN prev_close IS NOT NULL THEN 1 END) >= 2
+        )
+        SELECT symbol, metric_value,
+               ROW_NUMBER() OVER (ORDER BY metric_value DESC) AS rank
+        FROM vol
+        WHERE metric_value IS NOT NULL
+        ORDER BY metric_value DESC
+      `, [interval, startDate.toISOString(), endDate.toISOString()]);
 
-    return rows.map((row, idx) => ({
-      symbol: row.symbol as string,
-      value: (row.value as number) ?? 0,
-      rank: idx + 1,
-      percentile: total === 0 ? 0 : ((total - idx) / total) * 100,
-      quintile: Math.min(5, Math.ceil(((idx + 1) / total) * 5)) as 1 | 2 | 3 | 4 | 5,
-    }));
+      return this.formatCrossSectional(rows);
+    }
+
+    const rows = await this.store.sql(`
+      WITH metrics AS (
+        SELECT symbol,
+               ${metricExpr} AS metric_value
+        FROM ohlcv
+        WHERE interval = ?
+          AND ts >= ?
+          AND ts <= ?
+        GROUP BY symbol
+        HAVING COUNT(*) >= 2
+      )
+      SELECT symbol, metric_value,
+             ROW_NUMBER() OVER (ORDER BY metric_value DESC) AS rank
+      FROM metrics
+      WHERE metric_value IS NOT NULL
+      ORDER BY metric_value DESC
+    `, [interval, startDate.toISOString(), endDate.toISOString()]);
+
+    return this.formatCrossSectional(rows);
   }
 
-  /**
-   * Build factor return series from stored OHLCV data.
-   */
-  async factorReturnsFromDB(params: {
-    interval: string;
-    lookback: number;
-    characteristics?: Record<string, { marketCap?: number; bookToMarket?: number }>;
-  }): Promise<FactorReturnsFromDB> {
-    const returnsSeries = await this.getReturnsSeries({
-      symbols: [],  // Will need to fetch all
-      interval: params.interval,
-    });
+  private formatCrossSectional(rows: Record<string, unknown>[]): CrossSectionalEntry[] {
+    const total = rows.length;
+    if (total === 0) return [];
 
-    const symbols = Object.keys(returnsSeries);
+    return rows.map(row => {
+      const rank = row.rank as number;
+      return {
+        symbol: row.symbol as string,
+        value: row.metric_value as number,
+        rank,
+        percentile: total === 1 ? 1 : 1 - (rank - 1) / (total - 1),
+        quintile: Math.min(5, Math.ceil(rank / (total / 5))),
+      };
+    });
+  }
+
+  // ── 4. Factor Returns from DB ───────────────────────────
+
+  /**
+   * Build factor returns (market, SMB, momentum) from stored data.
+   * Market factor = equal-weight universe return.
+   * SMB = small minus big (by market cap if provided, else by volume proxy).
+   * Momentum = top-quintile minus bottom-quintile by trailing return.
+   */
+  async factorReturnsFromDB(params: FactorReturnsParams): Promise<FactorReturnsResult> {
+    const { interval, lookback, characteristics } = params;
+
+    const endDate = new Date();
+    const startDate = new Date(endDate.getTime() - lookback * 24 * 60 * 60 * 1000);
+
+    // Get all symbols with data in range
+    const symbolRows = await this.store.sql(`
+      SELECT DISTINCT symbol FROM ohlcv
+      WHERE interval = ? AND ts >= ? AND ts <= ?
+    `, [interval, startDate.toISOString(), endDate.toISOString()]);
+
+    const symbols = symbolRows.map(r => r.symbol as string);
     if (symbols.length < 4) {
       return { market: [], smb: [], momentum: [], timestamps: [] };
     }
 
-    const n = Math.min(...symbols.map(s => returnsSeries[s].length));
-    if (n < 2) return { market: [], smb: [], momentum: [], timestamps: [] };
-
-    // Market factor: equal-weight average of all returns
-    const market: number[] = [];
-    for (let t = 0; t < n; t++) {
-      const rets = symbols.map(s => returnsSeries[s][t]);
-      market.push(mean(rets));
-    }
-
-    // SMB: sort by proxy (average volume * price → market cap proxy)
-    // Use characteristics if provided, otherwise use return volatility as proxy
-    const chars = params.characteristics ?? {};
-    const symbolsBySize = [...symbols].sort((a, b) => {
-      const capA = chars[a]?.marketCap ?? standardDeviation(returnsSeries[a]);
-      const capB = chars[b]?.marketCap ?? standardDeviation(returnsSeries[b]);
-      return capA - capB;
+    // Get all returns
+    const returnsSeries = await this.getReturnsSeries({
+      symbols,
+      interval,
+      start: startDate,
+      end: endDate,
     });
 
-    const smallN = Math.ceil(symbols.length / 3);
-    const bigN = Math.floor(symbols.length * 2 / 3);
-    const smalls = symbolsBySize.slice(0, smallN);
-    const bigs = symbolsBySize.slice(bigN);
+    // Find minimum aligned length
+    const lengths = Object.values(returnsSeries).map(s => s.length);
+    const minLen = Math.min(...lengths);
+    if (minLen < 2) {
+      return { market: [], smb: [], momentum: [], timestamps: [] };
+    }
+
+    // Trim to aligned length
+    const aligned: Record<string, number[]> = {};
+    for (const [sym, rets] of Object.entries(returnsSeries)) {
+      aligned[sym] = rets.slice(rets.length - minLen);
+    }
+    const syms = Object.keys(aligned);
+
+    // Get timestamps
+    const tsRows = await this.store.sql(`
+      SELECT DISTINCT ts FROM ohlcv
+      WHERE interval = ? AND ts >= ? AND ts <= ?
+      ORDER BY ts
+    `, [interval, startDate.toISOString(), endDate.toISOString()]);
+
+    const allTimestamps = tsRows.map(r => new Date(r.ts as string | Date));
+    const timestamps = allTimestamps.slice(allTimestamps.length - minLen);
+
+    // Market factor: equal-weight average return
+    const market: number[] = [];
+    for (let t = 0; t < minLen; t++) {
+      const vals = syms.map(s => aligned[s][t]);
+      market.push(mean(vals));
+    }
+
+    // SMB: sort by market cap or avg volume, long bottom half / short top half
+    let sortedBySize: string[];
+    if (characteristics) {
+      sortedBySize = [...syms].sort((a, b) =>
+        (characteristics[a]?.marketCap ?? 0) - (characteristics[b]?.marketCap ?? 0)
+      );
+    } else {
+      // Use average volume as size proxy
+      const volRows = await this.store.sql(`
+        SELECT symbol, AVG(volume) as avg_vol
+        FROM ohlcv
+        WHERE interval = ? AND ts >= ? AND ts <= ?
+        GROUP BY symbol
+        ORDER BY avg_vol ASC
+      `, [interval, startDate.toISOString(), endDate.toISOString()]);
+      sortedBySize = volRows.map(r => r.symbol as string).filter(s => syms.includes(s));
+    }
+
+    const halfIdx = Math.floor(sortedBySize.length / 2);
+    const smallCap = sortedBySize.slice(0, halfIdx);
+    const bigCap = sortedBySize.slice(halfIdx);
 
     const smb: number[] = [];
-    for (let t = 0; t < n; t++) {
-      const smallRet = mean(smalls.map(s => returnsSeries[s][t]));
-      const bigRet = mean(bigs.map(s => returnsSeries[s][t]));
+    for (let t = 0; t < minLen; t++) {
+      const smallRet = smallCap.length > 0 ? mean(smallCap.map(s => aligned[s]?.[t] ?? 0)) : 0;
+      const bigRet = bigCap.length > 0 ? mean(bigCap.map(s => aligned[s]?.[t] ?? 0)) : 0;
       smb.push(smallRet - bigRet);
     }
 
-    // Momentum: cumulative returns over lookback, long winners short losers
+    // Momentum factor: trailing cumulative return, long winners / short losers
+    const momLookback = Math.min(20, Math.floor(minLen / 2));
     const momentum: number[] = [];
-    const lookback = Math.min(params.lookback, n - 1);
-
-    for (let t = 0; t < n; t++) {
-      if (t < lookback) {
+    for (let t = 0; t < minLen; t++) {
+      if (t < momLookback) {
         momentum.push(0);
         continue;
       }
-      // Rank by past cumulative return
-      const ranked = symbols.map(s => ({
+      // Rank by trailing return
+      const trailingRets = syms.map(s => ({
         sym: s,
-        cumRet: returnsSeries[s].slice(t - lookback, t).reduce((a, b) => a + b, 0),
-      })).sort((a, b) => b.cumRet - a.cumRet);
-
-      const winN = Math.ceil(ranked.length / 3);
-      const loseN = Math.floor(ranked.length * 2 / 3);
-      const winners = ranked.slice(0, winN);
-      const losers = ranked.slice(loseN);
-
-      const winRet = mean(winners.map(w => returnsSeries[w.sym][t]));
-      const loseRet = mean(losers.map(l => returnsSeries[l.sym][t]));
+        ret: aligned[s].slice(t - momLookback, t).reduce((a, b) => a + b, 0),
+      }));
+      trailingRets.sort((a, b) => b.ret - a.ret);
+      const quintileSize = Math.max(1, Math.floor(trailingRets.length / 5));
+      const winners = trailingRets.slice(0, quintileSize).map(x => x.sym);
+      const losers = trailingRets.slice(-quintileSize).map(x => x.sym);
+      const winRet = mean(winners.map(s => aligned[s][t]));
+      const loseRet = mean(losers.map(s => aligned[s][t]));
       momentum.push(winRet - loseRet);
     }
 
-    return { market, smb, momentum, timestamps: [] };
+    return { market, smb, momentum, timestamps };
   }
 
-  /**
-   * Compute covariance matrix from DB data using factor-model lib.
-   */
-  async covarianceFromDB(params: {
-    symbols: string[];
-    interval: string;
-    lookback: number;
-    method?: 'sample' | 'exponential';
-    halfLife?: number;
-  }): Promise<CovarianceFromDB> {
-    const returnsSeries = await this.getReturnsSeries({
-      symbols: params.symbols,
-      interval: params.interval,
-    });
-
-    const validSymbols = params.symbols.filter(s => returnsSeries[s]?.length > 0);
-    if (validSymbols.length === 0) {
-      return { matrix: [], symbols: [], method: params.method ?? 'sample', dataPoints: 0 };
-    }
-
-    // Trim to lookback
-    const trimmed: Record<string, number[]> = {};
-    let minLen = Infinity;
-    for (const s of validSymbols) {
-      const rets = returnsSeries[s];
-      trimmed[s] = rets.slice(Math.max(0, rets.length - params.lookback));
-      minLen = Math.min(minLen, trimmed[s].length);
-    }
-
-    const method = params.method === 'exponential' ? 'exponential' : 'sample';
-    const result = covarianceMatrix(trimmed, method, { halfLife: params.halfLife });
-
-    return {
-      matrix: result.matrix,
-      symbols: result.symbols,
-      method: result.method,
-      dataPoints: minLen,
-    };
-  }
+  // ── 5. Covariance from DB ───────────────────────────────
 
   /**
-   * Rolling beta of asset vs benchmark.
+   * Covariance matrix using DuckDB extraction + covarianceMatrix() from factor-model.
    */
-  async rollingBeta(params: {
-    symbol: string;
-    benchmark: string;
-    interval: string;
-    window: number;
-  }): Promise<RollingBetaEntry[]> {
+  async covarianceFromDB(params: CovarianceParams): Promise<CovarianceResult> {
+    const { symbols, interval, lookback, method = 'sample', halfLife } = params;
+
+    const endDate = new Date();
+    const startDate = new Date(endDate.getTime() - lookback * 24 * 60 * 60 * 1000);
+
     const returnsSeries = await this.getReturnsSeries({
-      symbols: [params.symbol, params.benchmark],
-      interval: params.interval,
+      symbols,
+      interval,
+      start: startDate,
+      end: endDate,
     });
 
-    const assetRets = returnsSeries[params.symbol];
-    const benchRets = returnsSeries[params.benchmark];
-    if (!assetRets || !benchRets) return [];
+    // Count data points (min across symbols)
+    const lengths = Object.values(returnsSeries).map(s => s.length);
+    const dataPoints = lengths.length > 0 ? Math.min(...lengths) : 0;
 
-    const n = Math.min(assetRets.length, benchRets.length);
-    const { window } = params;
-    if (n < window) return [];
-
-    const results: RollingBetaEntry[] = [];
-
-    for (let i = window - 1; i < n; i++) {
-      const aSlice = assetRets.slice(i - window + 1, i + 1);
-      const bSlice = benchRets.slice(i - window + 1, i + 1);
-
-      const bMean = mean(bSlice);
-      const aMean = mean(aSlice);
-
-      let covAB = 0, varB = 0;
-      for (let j = 0; j < window; j++) {
-        const db = bSlice[j] - bMean;
-        covAB += (aSlice[j] - aMean) * db;
-        varB += db * db;
-      }
-      covAB /= (window - 1);
-      varB /= (window - 1);
-
-      const beta = varB === 0 ? 0 : covAB / varB;
-      const alpha = aMean - beta * bMean;
-
-      // R²
-      let ssRes = 0, ssTot = 0;
-      for (let j = 0; j < window; j++) {
-        const pred = alpha + beta * bSlice[j];
-        ssRes += (aSlice[j] - pred) ** 2;
-        ssTot += (aSlice[j] - aMean) ** 2;
-      }
-      const rSquared = ssTot === 0 ? 0 : Math.max(0, 1 - ssRes / ssTot);
-
-      results.push({ timestamp: new Date(), beta, alpha, rSquared });
-    }
-
-    return results;
-  }
-
-  /**
-   * Comprehensive risk report using PCA, VaR, and risk decomposition.
-   */
-  async riskReport(params: {
-    symbols: string[];
-    interval: string;
-    lookback?: number;
-  }): Promise<RiskReportResult> {
-    const lookback = params.lookback ?? 252;
-    const returnsSeries = await this.getReturnsSeries({
-      symbols: params.symbols,
-      interval: params.interval,
-    });
-
-    const validSymbols = params.symbols.filter(s => returnsSeries[s]?.length > 0);
-    if (validSymbols.length === 0) {
+    if (dataPoints < 2) {
       return {
-        symbols: [], covMatrix: [], pcaFactors: [],
-        componentVaR: { portfolioVaR: 0, components: [] },
-        riskDecomp: { totalRisk: 0, systematicRisk: 0, idiosyncraticRisk: 0, diversificationRatio: 1 },
+        matrix: Array.from({ length: symbols.length }, () => Array(symbols.length).fill(0)),
+        symbols,
+        method,
         dataPoints: 0,
       };
     }
 
-    // Trim and compute covariance
-    const trimmed: Record<string, number[]> = {};
-    let minLen = Infinity;
-    for (const s of validSymbols) {
-      const rets = returnsSeries[s];
-      trimmed[s] = rets.slice(Math.max(0, rets.length - lookback));
-      minLen = Math.min(minLen, trimmed[s].length);
-    }
-
-    const cov = covarianceMatrix(trimmed, 'shrinkage');
-    const pca = pcaFactors(trimmed, Math.min(3, validSymbols.length));
-
-    // Equal weight for VaR decomposition
-    const n = validSymbols.length;
-    const weights = Array(n).fill(1 / n);
-    const cVaR = componentVaR(weights, cov.matrix, 0.95);
-    const rDecomp = riskDecomposition(weights, cov.matrix);
+    const factorMethod = method === 'exponential' ? 'exponential' : 'sample';
+    const covResult = covarianceMatrix(
+      returnsSeries,
+      factorMethod,
+      halfLife !== undefined ? { halfLife } : undefined,
+    );
 
     return {
-      symbols: validSymbols,
-      covMatrix: cov.matrix,
-      pcaFactors: pca.factors,
-      componentVaR: cVaR,
-      riskDecomp: {
-        totalRisk: rDecomp.totalRisk,
-        systematicRisk: rDecomp.systematicRisk,
-        idiosyncraticRisk: rDecomp.idiosyncraticRisk,
-        diversificationRatio: rDecomp.diversificationRatio,
-      },
-      dataPoints: minLen,
+      matrix: covResult.matrix,
+      symbols: covResult.symbols,
+      method: covResult.method,
+      dataPoints,
     };
   }
 
+  // ── 6. Rolling Beta ─────────────────────────────────────
+
   /**
-   * Screen the stored universe using SQL-based filters.
+   * Rolling beta of a symbol against a benchmark.
+   * Returns beta, alpha, and R-squared for each window.
    */
-  async screenUniverse(params: {
-    filters: Array<{
-      metric: 'avg_volume' | 'volatility' | 'return' | 'sharpe';
-      operator: '>' | '<' | '>=' | '<=';
-      value: number;
-      lookback: number;
-    }>;
-    interval: string;
-    limit?: number;
-  }): Promise<ScreenResult[]> {
-    const { filters, interval, limit = 100 } = params;
+  async rollingBeta(params: RollingBetaParams): Promise<RollingBetaEntry[]> {
+    const { symbol, benchmark, interval, window } = params;
 
-    // Get all symbols first
-    const allSymbols = await this.store.sql(
-      'SELECT DISTINCT symbol FROM ohlcv WHERE interval = ?',
-      [interval],
-    );
+    // Get aligned returns via SQL
+    const rows = await this.store.sql(`
+      WITH asset_prices AS (
+        SELECT ts, close AS asset_close
+        FROM ohlcv
+        WHERE symbol = ? AND interval = ?
+        ORDER BY ts
+      ),
+      bench_prices AS (
+        SELECT ts, close AS bench_close
+        FROM ohlcv
+        WHERE symbol = ? AND interval = ?
+        ORDER BY ts
+      ),
+      joined AS (
+        SELECT a.ts,
+               a.asset_close,
+               b.bench_close
+        FROM asset_prices a
+        INNER JOIN bench_prices b ON a.ts = b.ts
+        ORDER BY a.ts
+      ),
+      with_prev AS (
+        SELECT ts,
+               asset_close,
+               bench_close,
+               LAG(asset_close) OVER (ORDER BY ts) AS prev_asset,
+               LAG(bench_close) OVER (ORDER BY ts) AS prev_bench
+        FROM joined
+      )
+      SELECT ts,
+             CASE WHEN prev_asset IS NOT NULL AND prev_asset != 0
+                  THEN (asset_close - prev_asset) / prev_asset ELSE NULL END AS asset_ret,
+             CASE WHEN prev_bench IS NOT NULL AND prev_bench != 0
+                  THEN (bench_close - prev_bench) / prev_bench ELSE NULL END AS bench_ret
+      FROM with_prev
+      WHERE prev_asset IS NOT NULL
+      ORDER BY ts
+    `, [symbol, interval, benchmark, interval]);
 
-    const results: ScreenResult[] = [];
+    // Filter out nulls
+    const data = rows.filter(r => r.asset_ret !== null && r.bench_ret !== null);
 
-    for (const row of allSymbols) {
-      const symbol = row.symbol as string;
-      const data = await this.store.sql(
-        'SELECT close, volume FROM ohlcv WHERE symbol = ? AND interval = ? ORDER BY ts DESC LIMIT ?',
-        [symbol, interval, Math.max(...filters.map(f => f.lookback))],
-      );
+    if (data.length < window) return [];
 
-      if (data.length < 5) continue;
+    const results: RollingBetaEntry[] = [];
+    for (let i = window - 1; i < data.length; i++) {
+      const windowData = data.slice(i - window + 1, i + 1);
+      const assetRets = windowData.map(r => r.asset_ret as number);
+      const benchRets = windowData.map(r => r.bench_ret as number);
 
-      const closes = data.map(d => d.close as number).reverse();
-      const volumes = data.map(d => d.volume as number).reverse();
-      const rets = computeReturns(closes);
+      const benchMean = mean(benchRets);
+      const assetMean = mean(assetRets);
 
-      const metrics: Record<string, number> = {
-        avg_volume: mean(volumes),
-        volatility: standardDeviation(rets),
-        return: closes.length >= 2 ? (closes[closes.length - 1] / closes[0] - 1) : 0,
-        sharpe: 0,
-      };
-
-      const vol = metrics.volatility;
-      const avgRet = rets.length > 0 ? mean(rets) : 0;
-      metrics.sharpe = vol === 0 ? 0 : (avgRet / vol) * Math.sqrt(252);
-
-      // Apply filters
-      let passes = true;
-      for (const f of filters) {
-        const val = metrics[f.metric] ?? 0;
-        switch (f.operator) {
-          case '>': if (!(val > f.value)) passes = false; break;
-          case '<': if (!(val < f.value)) passes = false; break;
-          case '>=': if (!(val >= f.value)) passes = false; break;
-          case '<=': if (!(val <= f.value)) passes = false; break;
-        }
+      let covar = 0;
+      let benchVar = 0;
+      for (let j = 0; j < windowData.length; j++) {
+        const da = assetRets[j] - assetMean;
+        const db = benchRets[j] - benchMean;
+        covar += da * db;
+        benchVar += db * db;
       }
+      covar /= (windowData.length - 1);
+      benchVar /= (windowData.length - 1);
 
-      if (passes) results.push({ symbol, metrics });
-      if (results.length >= limit) break;
+      const beta = benchVar === 0 ? 1 : covar / benchVar;
+      const alpha = assetMean - beta * benchMean;
+
+      // R-squared
+      const predicted = benchRets.map(b => alpha + beta * b);
+      const ssRes = assetRets.reduce((s, a, j) => s + (a - predicted[j]) ** 2, 0);
+      const ssTot = assetRets.reduce((s, a) => s + (a - assetMean) ** 2, 0);
+      const rSquared = ssTot === 0 ? 0 : 1 - ssRes / ssTot;
+
+      results.push({
+        timestamp: new Date(data[i].ts as string | Date),
+        beta,
+        alpha,
+        rSquared: Math.max(0, rSquared),
+      });
     }
 
     return results;
   }
 
+  // ── 7. Risk Report ──────────────────────────────────────
+
   /**
-   * All pairwise correlations.
+   * Full risk report using PCA, component VaR, and risk decomposition
+   * from factor-model.ts.
    */
-  async pairwiseCorrelations(params: {
-    symbols?: string[];
-    interval: string;
-    lookback: number;
-    minCorrelation?: number;
-  }): Promise<PairCorrelation[]> {
-    const symbols = params.symbols ?? (await this.store.sql(
-      'SELECT DISTINCT symbol FROM ohlcv WHERE interval = ?',
-      [params.interval],
-    )).map(r => r.symbol as string);
+  async riskReport(params: RiskReportParams): Promise<{
+    pca: { factors: Array<{ eigenvalue: number; varianceExplained: number; loadings: Record<string, number> }>; totalVarianceExplained: number };
+    componentVaR: { portfolioVaR: number; components: Array<{ index: number; componentVaR: number; pctContribution: number }> };
+    riskDecomposition: { totalRisk: number; systematicRisk: number; idiosyncraticRisk: number; diversificationRatio: number; riskContributions: number[]; marginalRiskContributions: number[] };
+    covariance: { matrix: number[][]; symbols: string[] };
+    perAsset: Array<{ symbol: string; annualizedVol: number; meanReturn: number; sharpe: number }>;
+  }> {
+    const { symbols, interval, lookback = 90 } = params;
+
+    const endDate = new Date();
+    const startDate = new Date(endDate.getTime() - lookback * 24 * 60 * 60 * 1000);
 
     const returnsSeries = await this.getReturnsSeries({
       symbols,
-      interval: params.interval,
+      interval,
+      start: startDate,
+      end: endDate,
     });
 
-    const validSymbols = symbols.filter(s => returnsSeries[s]?.length > 0);
-    const minCorr = params.minCorrelation ?? 0;
-    const results: PairCorrelation[] = [];
+    // Per-asset metrics
+    const perAsset = symbols.map(s => {
+      const rets = returnsSeries[s] ?? [];
+      const vol = rets.length >= 2 ? standardDeviation(rets) * Math.sqrt(365) : 0;
+      const avgRet = mean(rets);
+      const sharpe = vol === 0 ? 0 : (avgRet * 365) / vol;
+      return { symbol: s, annualizedVol: vol, meanReturn: avgRet, sharpe };
+    });
 
-    for (let i = 0; i < validSymbols.length; i++) {
-      for (let j = i + 1; j < validSymbols.length; j++) {
-        const a = returnsSeries[validSymbols[i]];
-        const b = returnsSeries[validSymbols[j]];
-        const n = Math.min(a.length, b.length, params.lookback);
-        if (n < 5) continue;
+    // PCA
+    const pcaResult = pcaFactors(returnsSeries);
 
-        const corr = correlation(a.slice(-n), b.slice(-n));
-        if (Math.abs(corr) >= minCorr) {
-          results.push({ symbolA: validSymbols[i], symbolB: validSymbols[j], correlation: corr });
+    // Covariance
+    const covResult = covarianceMatrix(returnsSeries);
+
+    // Equal-weight portfolio for VaR and risk decomposition
+    const n = symbols.length;
+    const weights = n > 0 ? Array(n).fill(1 / n) : [];
+
+    // Map symbols to covariance matrix order
+    const orderedCov = this.reorderCovMatrix(covResult.matrix, covResult.symbols, symbols);
+
+    const cVaR = componentVaR(weights, orderedCov);
+    const riskDecomp = riskDecomposition(weights, orderedCov);
+
+    return {
+      pca: {
+        factors: pcaResult.factors,
+        totalVarianceExplained: pcaResult.totalVarianceExplained,
+      },
+      componentVaR: cVaR,
+      riskDecomposition: riskDecomp,
+      covariance: { matrix: orderedCov, symbols },
+      perAsset,
+    };
+  }
+
+  /**
+   * Reorder covariance matrix to match target symbol order.
+   */
+  private reorderCovMatrix(matrix: number[][], fromSymbols: string[], toSymbols: string[]): number[][] {
+    const n = toSymbols.length;
+    const result: number[][] = Array.from({ length: n }, () => Array(n).fill(0));
+    const indexMap = new Map(fromSymbols.map((s, i) => [s, i]));
+
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        const fi = indexMap.get(toSymbols[i]);
+        const fj = indexMap.get(toSymbols[j]);
+        if (fi !== undefined && fj !== undefined && fi < matrix.length && fj < matrix.length) {
+          result[i][j] = matrix[fi][fj];
+        }
+      }
+    }
+    return result;
+  }
+
+  // ── 8. Universe Screener ────────────────────────────────
+
+  /**
+   * SQL-based universe screener with multiple filter criteria.
+   */
+  async screenUniverse(params: ScreenParams): Promise<Array<{
+    symbol: string;
+    metrics: Record<string, number>;
+  }>> {
+    const { filters, interval, limit = 100 } = params;
+
+    if (filters.length === 0) return [];
+
+    // Determine the max lookback needed
+    const maxLookback = Math.max(...filters.map(f => f.lookback));
+    const endDate = new Date();
+    const startDate = new Date(endDate.getTime() - maxLookback * 24 * 60 * 60 * 1000);
+
+    // Build CTE with returns and metrics per symbol
+    const rows = await this.store.sql(`
+      WITH base AS (
+        SELECT symbol, ts, close, volume,
+               LAG(close) OVER (PARTITION BY symbol ORDER BY ts) AS prev_close
+        FROM ohlcv
+        WHERE interval = ?
+          AND ts >= ?
+          AND ts <= ?
+      ),
+      rets AS (
+        SELECT symbol, ts, close, volume,
+               CASE WHEN prev_close IS NOT NULL AND prev_close != 0
+                    THEN (close - prev_close) / prev_close ELSE NULL END AS ret
+        FROM base
+      ),
+      metrics AS (
+        SELECT symbol,
+               AVG(volume) AS avg_volume,
+               STDDEV_SAMP(ret) AS volatility,
+               (LAST(close ORDER BY ts) - FIRST(close ORDER BY ts))
+                 / NULLIF(FIRST(close ORDER BY ts), 0) AS return,
+               CASE WHEN STDDEV_SAMP(ret) > 0
+                    THEN AVG(ret) / STDDEV_SAMP(ret) * SQRT(365)
+                    ELSE 0 END AS sharpe
+        FROM rets
+        GROUP BY symbol
+        HAVING COUNT(ret) >= 2
+      )
+      SELECT * FROM metrics
+      ORDER BY symbol
+    `, [interval, startDate.toISOString(), endDate.toISOString()]);
+
+    // Apply filters in TypeScript (dynamic SQL with operators is error-prone)
+    const filtered = rows.filter(row => {
+      return filters.every(f => {
+        const val = row[f.metric] as number | null;
+        if (val === null || val === undefined) return false;
+        switch (f.operator) {
+          case '>': return val > f.value;
+          case '<': return val < f.value;
+          case '>=': return val >= f.value;
+          case '<=': return val <= f.value;
+        }
+      });
+    });
+
+    return filtered.slice(0, limit).map(row => ({
+      symbol: row.symbol as string,
+      metrics: {
+        avg_volume: row.avg_volume as number,
+        volatility: row.volatility as number,
+        return: row.return as number,
+        sharpe: row.sharpe as number,
+      },
+    }));
+  }
+
+  // ── 9. Pairwise Correlations ────────────────────────────
+
+  /**
+   * All pairwise correlations via DuckDB self-join.
+   * If symbols not specified, uses all symbols in the store.
+   */
+  async pairwiseCorrelations(params: PairwiseCorrelationParams): Promise<PairwiseCorrelationEntry[]> {
+    const { symbols, interval, lookback, minCorrelation = -1 } = params;
+
+    const endDate = new Date();
+    const startDate = new Date(endDate.getTime() - lookback * 24 * 60 * 60 * 1000);
+
+    // Determine symbols to use
+    let targetSymbols: string[];
+    if (symbols && symbols.length > 0) {
+      targetSymbols = symbols;
+    } else {
+      const symRows = await this.store.sql(`
+        SELECT DISTINCT symbol FROM ohlcv
+        WHERE interval = ? AND ts >= ? AND ts <= ?
+      `, [interval, startDate.toISOString(), endDate.toISOString()]);
+      targetSymbols = symRows.map(r => r.symbol as string);
+    }
+
+    if (targetSymbols.length < 2) return [];
+
+    // Get returns for all symbols
+    const returnsSeries = await this.getReturnsSeries({
+      symbols: targetSymbols,
+      interval,
+      start: startDate,
+      end: endDate,
+    });
+
+    // Compute all pairwise correlations
+    const results: PairwiseCorrelationEntry[] = [];
+    const syms = Object.keys(returnsSeries);
+
+    for (let i = 0; i < syms.length; i++) {
+      for (let j = i + 1; j < syms.length; j++) {
+        const corr = correlation(returnsSeries[syms[i]], returnsSeries[syms[j]]);
+        if (Math.abs(corr) >= Math.abs(minCorrelation)) {
+          results.push({
+            symbolA: syms[i],
+            symbolB: syms[j],
+            correlation: corr,
+          });
         }
       }
     }
 
-    return results.sort((a, b) => Math.abs(b.correlation) - Math.abs(a.correlation));
+    // Sort by absolute correlation descending
+    results.sort((a, b) => Math.abs(b.correlation) - Math.abs(a.correlation));
+
+    return results;
   }
 
+  // ── 10. Regime Stats ────────────────────────────────────
+
   /**
-   * Rolling regime statistics.
+   * Rolling regime statistics using DuckDB window functions.
+   * Computes rolling mean, volatility, skewness, kurtosis, and classifies regime.
    */
-  async regimeStats(params: {
-    symbol: string;
-    interval: string;
-    lookback: number;
-    regimeWindow?: number;
-  }): Promise<RegimeStatEntry[]> {
-    const window = params.regimeWindow ?? 20;
+  async regimeStats(params: RegimeStatsParams): Promise<RegimeStatsEntry[]> {
+    const { symbol, interval, lookback, regimeWindow = 20 } = params;
 
-    const rows = await this.store.sql(
-      `SELECT ts, close FROM ohlcv
-       WHERE symbol = ? AND interval = ?
-       ORDER BY ts DESC LIMIT ?`,
-      [params.symbol, params.interval, params.lookback + window],
-    );
+    const endDate = new Date();
+    const startDate = new Date(endDate.getTime() - lookback * 24 * 60 * 60 * 1000);
 
-    if (rows.length < window + 1) return [];
+    // Use DuckDB window functions for rolling statistics
+    const rows = await this.store.sql(`
+      WITH rets AS (
+        SELECT ts, close,
+               LAG(close) OVER (ORDER BY ts) AS prev_close,
+               CASE WHEN LAG(close) OVER (ORDER BY ts) IS NOT NULL
+                    AND LAG(close) OVER (ORDER BY ts) != 0
+                    THEN (close - LAG(close) OVER (ORDER BY ts))
+                         / LAG(close) OVER (ORDER BY ts)
+                    ELSE NULL END AS ret
+        FROM ohlcv
+        WHERE symbol = ? AND interval = ? AND ts >= ? AND ts <= ?
+        ORDER BY ts
+      ),
+      filtered AS (
+        SELECT ts, ret FROM rets WHERE ret IS NOT NULL
+      ),
+      rolling AS (
+        SELECT ts, ret,
+               AVG(ret) OVER w AS roll_mean,
+               STDDEV_SAMP(ret) OVER w AS roll_vol,
+               COUNT(ret) OVER w AS roll_count
+        FROM filtered
+        WINDOW w AS (ORDER BY ts ROWS BETWEEN ? PRECEDING AND CURRENT ROW)
+      )
+      SELECT ts, ret, roll_mean, roll_vol, roll_count
+      FROM rolling
+      WHERE roll_count >= ?
+      ORDER BY ts
+    `, [symbol, interval, startDate.toISOString(), endDate.toISOString(),
+        regimeWindow - 1, Math.min(regimeWindow, 5)]);
 
-    const closes = rows.map(r => r.close as number).reverse();
-    const timestamps = rows.map(r => new Date(r.ts as string)).reverse();
+    if (rows.length === 0) return [];
 
-    // Compute returns
-    const rets: number[] = [];
-    for (let i = 1; i < closes.length; i++) {
-      rets.push(closes[i] / closes[i - 1] - 1);
+    // Compute skewness and kurtosis in TypeScript (DuckDB aggregates are limited in OVER)
+    // We already have rolling mean and vol from DuckDB; compute higher moments manually
+    const allRets: { ts: Date; ret: number }[] = [];
+    const retRows = await this.store.sql(`
+      WITH rets AS (
+        SELECT ts,
+               CASE WHEN LAG(close) OVER (ORDER BY ts) IS NOT NULL
+                    AND LAG(close) OVER (ORDER BY ts) != 0
+                    THEN (close - LAG(close) OVER (ORDER BY ts))
+                         / LAG(close) OVER (ORDER BY ts)
+                    ELSE NULL END AS ret
+        FROM ohlcv
+        WHERE symbol = ? AND interval = ? AND ts >= ? AND ts <= ?
+        ORDER BY ts
+      )
+      SELECT ts, ret FROM rets WHERE ret IS NOT NULL ORDER BY ts
+    `, [symbol, interval, startDate.toISOString(), endDate.toISOString()]);
+
+    for (const r of retRows) {
+      allRets.push({ ts: new Date(r.ts as string | Date), ret: r.ret as number });
     }
 
-    const results: RegimeStatEntry[] = [];
-
-    for (let i = window - 1; i < rets.length; i++) {
-      const slice = rets.slice(i - window + 1, i + 1);
-      const m = mean(slice);
-      const vol = standardDeviation(slice);
+    const results: RegimeStatsEntry[] = [];
+    for (let i = regimeWindow - 1; i < allRets.length; i++) {
+      const windowRets = allRets.slice(i - regimeWindow + 1, i + 1).map(r => r.ret);
+      const m = mean(windowRets);
+      const vol = standardDeviation(windowRets);
+      const n = windowRets.length;
 
       // Skewness
-      const n = slice.length;
       let skew = 0;
-      if (vol > 0 && n > 2) {
-        const s3 = slice.reduce((s, r) => s + ((r - m) / vol) ** 3, 0);
-        skew = (n / ((n - 1) * (n - 2))) * s3;
+      if (n >= 3 && vol > 0) {
+        const m3 = windowRets.reduce((s, v) => s + ((v - m) / vol) ** 3, 0) / n;
+        skew = m3;
       }
 
-      // Kurtosis
+      // Kurtosis (excess)
       let kurt = 0;
-      if (vol > 0 && n > 3) {
-        const s4 = slice.reduce((s, r) => s + ((r - m) / vol) ** 4, 0);
-        kurt = ((n * (n + 1)) / ((n - 1) * (n - 2) * (n - 3))) * s4
-          - (3 * (n - 1) ** 2) / ((n - 2) * (n - 3));
+      if (n >= 4 && vol > 0) {
+        const m4 = windowRets.reduce((s, v) => s + ((v - m) / vol) ** 4, 0) / n;
+        kurt = m4 - 3;
       }
 
       // Classify regime
+      const annualizedVol = vol * Math.sqrt(365);
       let regime: string;
-      const annVol = vol * Math.sqrt(252);
-      if (annVol > 0.6) regime = 'crisis';
-      else if (annVol > 0.3) regime = 'high_vol';
-      else if (annVol < 0.1) regime = 'low_vol';
-      else if (m > 0) regime = 'trending_up';
-      else regime = 'trending_down';
+      if (annualizedVol > 0.8) {
+        regime = 'crisis';
+      } else if (annualizedVol > 0.5) {
+        regime = 'high-volatility';
+      } else if (Math.abs(m) > vol * 0.5) {
+        regime = m > 0 ? 'trending-up' : 'trending-down';
+      } else {
+        regime = 'mean-reverting';
+      }
 
       results.push({
-        timestamp: timestamps[i + 1] ?? new Date(),
+        timestamp: allRets[i].ts,
         mean: m,
         volatility: vol,
         skewness: skew,

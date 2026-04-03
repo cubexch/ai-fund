@@ -2,7 +2,7 @@
 
 ### Hire your AI trading desk. Fire the ones that miss KPIs.
 
-> 44 AI trading agents. 21 named personas (Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Warren Buffett…). 148 MCP tools. 16 shared analysis libraries. 100+ exchanges via plugins. Paper trading by default. MIT licensed. Runs on [Claude Code](https://claude.ai/code).
+> 45 AI trading agents. 22 named personas (Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Warren Buffett, Peter Lynch…). 150 MCP tools. 28 shared analysis libraries. 100+ exchanges via plugins. Paper trading by default. MIT licensed. Runs on [Claude Code](https://claude.ai/code).
 
 <!-- GitHub Topics (set these in repo Settings > Topics):
 ai-trading, crypto-trading-bot, hedge-fund, ai-hedge-fund, trading-agents, mcp, claude-code, algorithmic-trading, market-making, arbitrage, quantitative-trading, risk-management, multi-exchange, defi, bitcoin, ethereum, crypto-fund -->
@@ -31,7 +31,7 @@ ai-trading, crypto-trading-bot, hedge-fund, ai-hedge-fund, trading-agents, mcp, 
 
 ## What Is ai-fund?
 
-44 autonomous trading agents inside Claude Code. 148 MCP tools across 3 built-in connectors. 16 shared analysis libraries with 120+ pure functions.
+45 autonomous trading agents inside Claude Code. 150 MCP tools across 3 built-in connectors. 28 shared analysis libraries with 250+ pure functions.
 
 21 are named personas — Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Stanley Druckenmiller, Warren Buffett. The other 23 are role-based: scalpers, market makers, risk managers, quants, arbitrageurs.
 
@@ -385,7 +385,7 @@ ai-fund/
 │   ├── alpaca/              # Built-in: stocks, ETFs, crypto (24 tools)
 │   └── README.md            # How to add more exchanges
 ├── skills/                  # 44 agent personas (exchange-agnostic)
-├── lib/                     # 16 shared libraries, 120+ pure functions
+├── lib/                     # 28 shared libraries, 250+ pure functions
 │   ├── indicators.ts        # SMA, EMA, RSI, MACD, BB, ATR, ADX, OBV, Stochastic
 │   ├── math.ts              # Kelly, VaR, Sharpe, Sortino, correlation, drawdown
 │   ├── execution-planner.ts # TWAP, VWAP, iceberg, market impact (Almgren-Chriss)
@@ -403,8 +403,8 @@ ai-fund/
 | Layer | Role |
 |-------|------|
 | `skills/` | 44 agent personalities, strategies, KPIs |
-| `connectors/` | 3 built-in exchange MCP servers (148 tools total) |
-| `lib/` | 16 shared libraries — indicators, risk, execution, portfolio |
+| `connectors/` | 3 built-in exchange MCP servers (150 tools total) |
+| `lib/` | 28 shared libraries — indicators, risk, execution, portfolio, options, stat-arb, microstructure |
 | `.claude/commands/` | Slash commands |
 
 Add an exchange — no agent files change. Write an agent — no exchange code involved.
@@ -414,7 +414,7 @@ Add an exchange — no agent files change. Write an agent — no exchange code i
 ## FAQ
 
 ### What is ai-fund?
-An open-source AI crypto trading framework with 44 agents and 148 MCP tools running inside Claude Code. You hire the ones that match your strategy, fire the ones that miss KPIs. Think of it as a trading desk, not a bot.
+An open-source AI crypto trading framework with 45 agents and 150 MCP tools running inside Claude Code. You hire the ones that match your strategy, fire the ones that miss KPIs. Think of it as a trading desk, not a bot.
 
 ### How many trading agents does ai-fund have?
 44. 21 named personas (Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Warren Buffett, and 16 more) plus 23 role-based agents across six desks. They share 16 analysis libraries with 120+ pure functions for indicators, risk, execution, and portfolio analytics.
