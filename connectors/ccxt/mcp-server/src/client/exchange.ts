@@ -152,6 +152,29 @@ export interface ExchangeInfoResult {
   activeMarkets: number;
 }
 
+// ── Geo-fallback map ────────────────────────────────────────
+// When an exchange API returns a geo-restriction error (HTTP 451, 403, etc.),
+// automatically retry with the regional variant. Zero-config — no proxies needed.
+
+const GEO_FALLBACKS: Record<string, string[]> = {
+  'binance': ['binanceus'],
+  'bitfinex': ['bitfinex2'],
+  'huobi': ['huobijp'],
+  'ftx': ['ftxus'],
+  'kucoin': ['kucoinfutures'],
+};
+
+function isGeoBlock(err: any): boolean {
+  const code = err?.statusCode ?? err?.code;
+  if (code === 451 || code === 403) return true;
+  const msg = String(err?.message ?? '').toLowerCase();
+  return msg.includes('restricted location') ||
+    msg.includes('not available in your') ||
+    msg.includes('service unavailable from') ||
+    msg.includes('geo') ||
+    msg.includes('ip forbidden');
+}
+
 // ── Helpers ────────────────────────────────────────────────
 
 function str(v: string | undefined): string {
@@ -194,7 +217,10 @@ export class ExchangeClient {
   private exchange: Exchange;
   private _sandbox: boolean;
   private limiter: RateLimiter | null;
-  readonly exchangeId: string;
+  private _opts: ExchangeClientOpts;
+  exchangeId: string;
+  /** The original exchange ID before any geo-fallback. */
+  readonly originalExchangeId: string;
   /** DuckDB store for read-through caching. Null when not configured. */
   store: MarketDataStore | null;
   /** Trade journal for auto-recording executions. */
@@ -204,30 +230,51 @@ export class ExchangeClient {
 
   constructor(opts: ExchangeClientOpts) {
     this.exchangeId = opts.exchangeId;
+    this.originalExchangeId = opts.exchangeId;
     this._sandbox = opts.sandbox ?? false;
     this.store = opts.store ?? null;
     this.journal = opts.journal ?? null;
     this.limiter = opts.rateLimit ? new RateLimiter(opts.rateLimit) : null;
+    this._opts = opts;
 
     if (opts.exchangeInstance) {
       this.exchange = opts.exchangeInstance;
     } else {
-      const ExchangeClass = (ccxt as any)[opts.exchangeId];
-      if (!ExchangeClass) {
-        throw new Error(`Unknown exchange: ${opts.exchangeId}. Supported: ${ccxt.exchanges.join(', ')}`);
-      }
-
-      const config: Record<string, unknown> = {};
-      if (opts.apiKey) config.apiKey = opts.apiKey;
-      if (opts.secret) config.secret = opts.secret;
-      if (opts.password) config.password = opts.password;
-
-      this.exchange = new ExchangeClass(config) as Exchange;
-
-      if (opts.sandbox) {
-        this.exchange.setSandboxMode(true);
-      }
+      this.exchange = this.createExchange(opts.exchangeId, opts);
     }
+  }
+
+  private createExchange(exchangeId: string, opts: ExchangeClientOpts): Exchange {
+    const ExchangeClass = (ccxt as any)[exchangeId];
+    if (!ExchangeClass) {
+      throw new Error(`Unknown exchange: ${exchangeId}. Supported: ${ccxt.exchanges.join(', ')}`);
+    }
+
+    const config: Record<string, unknown> = {};
+    if (opts.apiKey) config.apiKey = opts.apiKey;
+    if (opts.secret) config.secret = opts.secret;
+    if (opts.password) config.password = opts.password;
+
+    const ex = new ExchangeClass(config) as Exchange;
+
+    if (opts.sandbox) {
+      ex.setSandboxMode(true);
+    }
+    return ex;
+  }
+
+  /** Swap to a geo-fallback exchange variant. Returns true if successful. */
+  private tryGeoFallback(tried: Set<string>): boolean {
+    const fallbacks = GEO_FALLBACKS[this.originalExchangeId] ?? [];
+    for (const fallbackId of fallbacks) {
+      if (tried.has(fallbackId)) continue;
+      if (!(ccxt as any)[fallbackId]) continue;
+      this.exchange = this.createExchange(fallbackId, this._opts);
+      this.exchangeId = fallbackId;
+      this._marketsLoaded = false;
+      return true;
+    }
+    return false;
   }
 
   get hasCredentials(): boolean {
@@ -244,11 +291,10 @@ export class ExchangeClient {
 
   private _marketsLoaded = false;
 
-  /** Ensure markets are loaded (cached by CCXT after first call). */
+  /** Ensure markets are loaded, with automatic geo-fallback on region blocks. */
   async ensureMarkets(): Promise<void> {
     if (!this._marketsLoaded) {
-      await this.exchange.loadMarkets();
-      this._marketsLoaded = true;
+      await this.loadMarkets();
     }
   }
 
