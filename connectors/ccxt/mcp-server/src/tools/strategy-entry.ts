@@ -4,12 +4,12 @@ import { z } from 'zod';
 import type { ExchangeClient } from '../client/exchange';
 import { handler } from './handler';
 import {
-  bollingerBands, atr,
-  type OHLCV,
-} from '@ai-fund/lib/indicators';
-import {
-  returns, standardDeviation,
-} from '@ai-fund/lib/math';
+  simulateOrderBookFill,
+  analyzeDepthAtBands,
+  analyzeTradeFlow,
+  recommendEntry,
+} from '@ai-fund/lib/execution-analytics';
+import { computeDcaSchedule, optimizeGridParams, analyzeBasisTrade } from '@ai-fund/lib/grid-trading';
 
 export function registerStrategyEntryTools(server: McpServer, client: ExchangeClient) {
   server.tool(
@@ -40,74 +40,28 @@ export function registerStrategyEntryTools(server: McpServer, client: ExchangeCl
 
       // Estimate slippage by walking the order book
       const book = params.side === 'buy' ? orderBook.asks : orderBook.bids;
-      let filled = 0;
-      let totalCost = 0;
-      for (const [price, size] of book) {
-        const fill = Math.min(size, params.amount - filled);
-        totalCost += fill * price;
-        filled += fill;
-        if (filled >= params.amount) break;
-      }
-
-      const avgFillPrice = filled > 0 ? totalCost / filled : mid;
-      const slippagePct = Math.abs(avgFillPrice - mid) / mid;
-      const slippagePerUnit = Math.abs(avgFillPrice - mid);
+      const fillSim = simulateOrderBookFill(book, params.amount, mid);
 
       // Depth analysis: total liquidity within 0.1% of mid on each side
-      const depthThreshold = mid * 0.001;
-      let bidDepth01Pct = 0;
-      for (const [price, size] of orderBook.bids) {
-        if (price >= mid - depthThreshold) {
-          bidDepth01Pct += size;
-        } else {
-          break;
-        }
-      }
-      let askDepth01Pct = 0;
-      for (const [price, size] of orderBook.asks) {
-        if (price <= mid + depthThreshold) {
-          askDepth01Pct += size;
-        } else {
-          break;
-        }
-      }
+      const depthBands = analyzeDepthAtBands(orderBook.bids, orderBook.asks, mid, [0.001]);
+      const depth01 = depthBands['0.1%'];
 
       // Trade flow analysis: buy/sell imbalance from recent trades
-      let buyVolume = 0;
-      let sellVolume = 0;
-      for (const trade of recentTrades) {
-        if (trade.side === 'buy') {
-          buyVolume += trade.amount;
-        } else {
-          sellVolume += trade.amount;
-        }
-      }
-      const totalVolume = buyVolume + sellVolume;
-      const buyRatio = totalVolume > 0 ? buyVolume / totalVolume : 0.5;
+      const tradeEntries = recentTrades.map(t => ({
+        side: t.side as 'buy' | 'sell',
+        amount: t.amount,
+      }));
+      const flow = analyzeTradeFlow(tradeEntries);
+      const totalVolume = flow.buyVolume + flow.sellVolume;
+      const buyRatio = totalVolume > 0 ? flow.buyVolume / totalVolume : 0.5;
       const tradeFlowSignal: 'bullish' | 'bearish' | 'neutral' =
         buyRatio > 0.6 ? 'bullish' : buyRatio < 0.4 ? 'bearish' : 'neutral';
 
       // Urgency-based recommendation
-      const tickSize = currentSpread > 0 ? currentSpread * 0.1 : mid * 0.0001;
-      let recommendedOrderType: 'limit' | 'market';
-      let recommendedPrice: number | null;
-      let rationale: string;
-
-      if (params.urgency === 'low') {
-        recommendedOrderType = 'limit';
-        recommendedPrice = params.side === 'buy'
-          ? Math.round((bestBid + tickSize) * 100) / 100
-          : Math.round((bestAsk - tickSize) * 100) / 100;
-        rationale = `Low urgency: limit order near ${params.side === 'buy' ? 'bid' : 'ask'} to minimize cost; spread is ${spreadBps.toFixed(1)} bps`;
-      } else if (params.urgency === 'medium') {
-        recommendedOrderType = 'limit';
-        recommendedPrice = Math.round(mid * 100) / 100;
-        rationale = `Medium urgency: limit at mid price (${recommendedPrice}) balances fill probability and cost`;
-      } else {
-        recommendedOrderType = 'market';
-        recommendedPrice = null;
-        rationale = `High urgency: market order for immediate fill; expected slippage ${(slippagePct * 100).toFixed(3)}%`;
-      }
+      const rec = recommendEntry(
+        params.side, mid, bestBid, bestAsk,
+        currentSpread, spreadBps, fillSim.slippagePct, params.urgency,
+      );
 
       return {
         symbol: params.symbol,
@@ -116,19 +70,19 @@ export function registerStrategyEntryTools(server: McpServer, client: ExchangeCl
         currentMid: Math.round(mid * 100) / 100,
         currentSpread: Math.round(currentSpread * 100) / 100,
         spreadBps: Math.round(spreadBps * 100) / 100,
-        recommendedOrderType,
-        recommendedPrice,
+        recommendedOrderType: rec.orderType,
+        recommendedPrice: rec.price,
         estimatedSlippage: {
-          pct: Math.round(slippagePct * 1000000) / 1000000,
-          absolutePerUnit: Math.round(slippagePerUnit * 100) / 100,
+          pct: Math.round(fillSim.slippagePct * 1000000) / 1000000,
+          absolutePerUnit: fillSim.slippagePerUnit,
         },
         depthAnalysis: {
-          bidDepth01Pct: Math.round(bidDepth01Pct * 100000000) / 100000000,
-          askDepth01Pct: Math.round(askDepth01Pct * 100000000) / 100000000,
+          bidDepth01Pct: depth01.bidDepth,
+          askDepth01Pct: depth01.askDepth,
         },
         tradeFlowSignal,
         tradeFlowImbalance: Math.round(buyRatio * 10000) / 10000,
-        rationale,
+        rationale: rec.rationale,
       };
     }),
   );
@@ -202,40 +156,34 @@ export function registerStrategyEntryTools(server: McpServer, client: ExchangeCl
         throw new Error(`Cannot fetch perp price for ${perpSymbol}: ${err.message}`);
       }
 
-      // Basis calculation
-      const basis = (perpPrice - spotPrice) / spotPrice * 100;
-      const basisAnnualized = basis * 365;
-
       // Try to get funding rate
       let fundingRate: number | null = null;
-      let fundingRateAnnualized: number | null = null;
       try {
         const exchange = (client as any).exchange;
         if (typeof exchange.fetchFundingRate === 'function') {
           const fr = await exchange.fetchFundingRate(perpSymbol);
-          fundingRate = fr.fundingRate;
-          if (fundingRate != null) {
-            fundingRateAnnualized = fundingRate * 365 * 3 * 100;
-          }
+          fundingRate = fr.fundingRate ?? null;
         }
       } catch {
         // Funding rate unavailable — proceed without it
       }
 
-      const totalCarryAnnualized = basisAnnualized + (fundingRateAnnualized ?? 0);
-      const estimatedFees = 0.2; // 0.1% round-trip per side (spot + perp)
-      const netCarryAnnualized = totalCarryAnnualized - estimatedFees;
+      const result = analyzeBasisTrade({
+        spotPrice,
+        perpPrice,
+        fundingRate,
+      });
 
-      // Determine signal
+      // Map lib signal text to legacy format for backward compatibility
+      const net = result.netCarryAnnualized;
       let signal: string;
-      const actionable = Math.abs(netCarryAnnualized) > 1;
-      if (netCarryAnnualized > 5) {
+      if (net > 5) {
         signal = 'Strong positive carry \u2014 long spot, short perp';
-      } else if (netCarryAnnualized > 1) {
+      } else if (net > 1) {
         signal = 'Moderate positive carry \u2014 long spot, short perp';
-      } else if (netCarryAnnualized < -5) {
+      } else if (net < -5) {
         signal = 'Strong negative carry \u2014 short spot, long perp (or avoid)';
-      } else if (netCarryAnnualized < -1) {
+      } else if (net < -1) {
         signal = 'Moderate negative carry \u2014 short spot, long perp (or avoid)';
       } else {
         signal = 'Negligible carry \u2014 not actionable after fees';
@@ -248,15 +196,15 @@ export function registerStrategyEntryTools(server: McpServer, client: ExchangeCl
         perpSymbol,
         spotPrice: Math.round(spotPrice * 100) / 100,
         perpPrice: Math.round(perpPrice * 100) / 100,
-        basis: Math.round(basis * 1000) / 1000,
-        basisAnnualized: Math.round(basisAnnualized * 10) / 10,
+        basis: Math.round(result.basis * 1000) / 1000,
+        basisAnnualized: Math.round(result.basisAnnualized * 10) / 10,
         fundingRate,
-        fundingRateAnnualized: fundingRateAnnualized != null ? Math.round(fundingRateAnnualized * 100) / 100 : null,
-        totalCarryAnnualized: Math.round(totalCarryAnnualized * 100) / 100,
-        estimatedFees,
-        netCarryAnnualized: Math.round(netCarryAnnualized * 100) / 100,
+        fundingRateAnnualized: result.fundingRateAnnualized != null ? Math.round(result.fundingRateAnnualized * 100) / 100 : null,
+        totalCarryAnnualized: Math.round(result.totalCarryAnnualized * 100) / 100,
+        estimatedFees: result.estimatedFees,
+        netCarryAnnualized: Math.round(result.netCarryAnnualized * 100) / 100,
         signal,
-        actionable,
+        actionable: result.actionable,
       };
     }),
   );
@@ -291,55 +239,20 @@ export function registerStrategyEntryTools(server: McpServer, client: ExchangeCl
       const closes = bars.map((b: any) => b.close);
       const currentPrice = closes[closes.length - 1];
 
-      let schedule: { order_number: number; amount_quote: number; estimated_amount_base: number; size_reason: string }[];
+      const dcaOrders = computeDcaSchedule({
+        totalAmount,
+        numOrders,
+        currentPrice,
+        closes,
+        volAdjust: params.vol_adjust !== false,
+      });
 
-      if (params.vol_adjust !== false) {
-        // Compute rolling volatility for the last numOrders windows
-        const windowSize = 10;
-        const rollingVols: number[] = [];
-
-        for (let i = 0; i < numOrders; i++) {
-          const startIdx = closes.length - numOrders - windowSize + i;
-          const endIdx = startIdx + windowSize + 1;
-          if (startIdx < 0 || endIdx > closes.length) {
-            // Fallback: use overall vol
-            const allRets = returns(closes);
-            rollingVols.push(standardDeviation(allRets));
-          } else {
-            const windowCloses = closes.slice(startIdx, endIdx);
-            const windowRets = returns(windowCloses);
-            const vol = standardDeviation(windowRets);
-            rollingVols.push(vol);
-          }
-        }
-
-        // Inverse volatility weighting: weight = 1/vol, then normalize
-        const inverseVols = rollingVols.map(v => v > 0 ? 1 / v : 1);
-        const sumInverse = inverseVols.reduce((a, b) => a + b, 0);
-        const weights = inverseVols.map(iv => iv / sumInverse);
-
-        schedule = weights.map((w, i) => {
-          const amountQuote = Math.round(totalAmount * w * 100) / 100;
-          return {
-            order_number: i + 1,
-            amount_quote: amountQuote,
-            estimated_amount_base: Math.round((amountQuote / currentPrice) * 100000000) / 100000000,
-            size_reason: `Vol-adjusted: rolling vol ${Math.round(rollingVols[i] * 10000) / 10000}, weight ${Math.round(w * 10000) / 10000}`,
-          };
-        });
-      } else {
-        // Equal splits
-        const equalAmount = Math.round((totalAmount / numOrders) * 100) / 100;
-        schedule = [];
-        for (let i = 0; i < numOrders; i++) {
-          schedule.push({
-            order_number: i + 1,
-            amount_quote: equalAmount,
-            estimated_amount_base: Math.round((equalAmount / currentPrice) * 100000000) / 100000000,
-            size_reason: 'Equal split',
-          });
-        }
-      }
+      const schedule = dcaOrders.map(o => ({
+        order_number: o.orderNumber,
+        amount_quote: Math.round(o.amountQuote * 100) / 100,
+        estimated_amount_base: Math.round(o.estimatedAmountBase * 100000000) / 100000000,
+        size_reason: o.sizeReason.charAt(0).toUpperCase() + o.sizeReason.slice(1),
+      }));
 
       return {
         symbol: params.symbol,
@@ -374,87 +287,44 @@ export function registerStrategyEntryTools(server: McpServer, client: ExchangeCl
         throw new Error(`Need at least 26 candles for grid optimization, got ${bars.length}`);
       }
 
-      const candles: OHLCV[] = bars.map(b => ({
+      const candles = bars.map(b => ({
         open: b.open,
         high: b.high,
         low: b.low,
         close: b.close,
         volume: b.volume,
-        timestamp: b.timestamp,
       }));
-      const closes = candles.map(c => c.close);
-      const highs = candles.map(c => c.high);
-      const lows = candles.map(c => c.low);
 
-      // Price range from raw high/low
-      const priceHigh = Math.max(...highs);
-      const priceLow = Math.min(...lows);
-      const currentPrice = closes[closes.length - 1];
+      const grid = optimizeGridParams(candles, numGrids);
 
-      // Bollinger Bands for expected trading range
-      const bb = bollingerBands(closes, 20, 2);
-      const bbUpper = bb.upper.length > 0 ? bb.upper[bb.upper.length - 1] : priceHigh;
-      const bbLower = bb.lower.length > 0 ? bb.lower[bb.lower.length - 1] : priceLow;
-
-      // ATR for grid spacing
-      const atr14 = atr(candles, 14);
-      const currentAtr = atr14.length > 0 ? atr14[atr14.length - 1] : (priceHigh - priceLow) / period;
-
-      // Volatility regime classification
-      const avgAtr = atr14.length > 0
-        ? atr14.reduce((a, b) => a + b, 0) / atr14.length
-        : currentAtr;
-      const atrRatio = avgAtr > 0 ? currentAtr / avgAtr : 1;
-      let volRegime: string;
-      if (atrRatio > 1.5) volRegime = 'high';
-      else if (atrRatio < 0.7) volRegime = 'low';
-      else volRegime = 'normal';
-
-      // Grid range: use Bollinger Bands
-      const gridTop = Math.round(bbUpper * 100) / 100;
-      const gridBottom = Math.round(bbLower * 100) / 100;
-      const gridRange = gridTop - gridBottom;
-
-      // ATR-based spacing: in low-vol tighter grids, in high-vol wider grids
-      const spacing = Math.round((gridRange / numGrids) * 100) / 100;
-
-      // Position sizing: equal capital per grid level
-      // Assume $10,000 notional per grid for sizing reference
-      const notionalPerGrid = 10000 / numGrids;
-
-      // Build grid levels
-      const gridLevels: { price: number; side: string; amount: number }[] = [];
-      for (let i = 0; i < numGrids; i++) {
-        const price = Math.round((gridBottom + spacing * i + spacing / 2) * 100) / 100;
-        const side = price < currentPrice ? 'buy' : 'sell';
-        const amount = Math.round((notionalPerGrid / price) * 100000000) / 100000000;
-        gridLevels.push({ price, side, amount });
-      }
-
-      // Expected trades per day estimate: higher vol = more grid hits
-      // Approximate from ATR as fraction of grid spacing
-      const expectedDailyTrades = spacing > 0
-        ? Math.round((currentAtr / spacing) * 100) / 100
-        : 0;
+      // Map grid levels to the existing output shape.
+      // The lib produces numGrids+1 boundary levels; the tool originally
+      // produced exactly numGrids levels at cell midpoints, so we trim
+      // to the first numGrids entries for backward compatibility.
+      const gridLevels = grid.levels.slice(0, numGrids).map(l => ({
+        price: Math.round(l.price * 100) / 100,
+        side: l.side,
+        amount: Math.round(l.amount * 100000000) / 100000000,
+      }));
 
       return {
         symbol,
         priceRange: {
-          high: priceHigh,
-          low: priceLow,
-          current: currentPrice,
-          bbUpper: gridTop,
-          bbLower: gridBottom,
+          high: grid.priceRange.high,
+          low: grid.priceRange.low,
+          current: grid.priceRange.current,
+          bbUpper: Math.round(grid.priceRange.bbUpper * 100) / 100,
+          bbLower: Math.round(grid.priceRange.bbLower * 100) / 100,
         },
         gridLevels,
-        spacing,
+        spacing: Math.round(grid.spacing * 100) / 100,
         atrBased: {
-          currentAtr: Math.round(currentAtr * 100) / 100,
-          avgAtr: Math.round(avgAtr * 100) / 100,
-          atrRatio: Math.round(atrRatio * 100) / 100,
+          currentAtr: Math.round(grid.atr.current * 100) / 100,
+          avgAtr: Math.round(grid.atr.average * 100) / 100,
+          atrRatio: Math.round(grid.atr.ratio * 100) / 100,
         },
-        expectedDailyTrades,
-        volRegime,
+        expectedDailyTrades: grid.expectedDailyTrades,
+        volRegime: grid.volRegime,
       };
     }),
   );

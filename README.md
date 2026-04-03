@@ -2,7 +2,7 @@
 
 ### Hire your AI trading desk. Fire the ones that miss KPIs.
 
-> 42 AI trading agents. 20 named personas (Arthur Hayes, Jim Simons, George Soros, Jesse Livermore…). 100+ exchanges via plugins. Paper trading by default. MIT licensed. Runs on [Claude Code](https://claude.ai/code).
+> 44 AI trading agents. 21 named personas (Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Warren Buffett…). 148 MCP tools. 16 shared analysis libraries. 100+ exchanges via plugins. Paper trading by default. MIT licensed. Runs on [Claude Code](https://claude.ai/code).
 
 <!-- GitHub Topics (set these in repo Settings > Topics):
 ai-trading, crypto-trading-bot, hedge-fund, ai-hedge-fund, trading-agents, mcp, claude-code, algorithmic-trading, market-making, arbitrage, quantitative-trading, risk-management, multi-exchange, defi, bitcoin, ethereum, crypto-fund -->
@@ -10,7 +10,7 @@ ai-trading, crypto-trading-bot, hedge-fund, ai-hedge-fund, trading-agents, mcp, 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/built%20for-Claude%20Code-blueviolet)](https://claude.ai/code)
 [![Exchanges](https://img.shields.io/badge/exchanges-100%2B%20supported-green)](connectors/README.md)
-[![Agents](https://img.shields.io/badge/agents-42%20hedge%20fund%20roles-orange)](#42-ai-trading-agents--the-full-roster)
+[![Agents](https://img.shields.io/badge/agents-44%20hedge%20fund%20roles-orange)](#44-ai-trading-agents--the-full-roster)
 
 <p align="center">
   <img src="docs/architecture-light.svg" alt="How AI Fund works — You talk to Claude Code, which orchestrates 42 trading agents across cube.exchange, Binance, Coinbase, Kraken, OKX, and 100+ exchanges via MCP connectors" width="100%">
@@ -31,9 +31,9 @@ ai-trading, crypto-trading-bot, hedge-fund, ai-hedge-fund, trading-agents, mcp, 
 
 ## What Is ai-fund?
 
-42 autonomous trading agents inside Claude Code.
+44 autonomous trading agents inside Claude Code. 148 MCP tools across 3 built-in connectors. 16 shared analysis libraries with 120+ pure functions.
 
-20 are named personas — Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Stanley Druckenmiller. The other 22 are role-based: scalpers, market makers, risk managers, quants, arbitrageurs.
+21 are named personas — Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Stanley Druckenmiller, Warren Buffett. The other 23 are role-based: scalpers, market makers, risk managers, quants, arbitrageurs.
 
 No config files. No YAML. You hire agents that fit your thesis and fire the ones that don't deliver. Each one carries its own personality, philosophy, and KPIs.
 
@@ -193,11 +193,11 @@ See [connectors/README.md](connectors/README.md) for setup details.
 
 ---
 
-## 42 AI Trading Agents — The Full Roster
+## 44 AI Trading Agents — The Full Roster
 
 ### Named Personas
 
-20 agents modeled after real traders. The philosophy isn't just flavor text — it changes how they read markets and size positions.
+21 agents modeled after real traders. The philosophy isn't just flavor text — it changes how they read markets and size positions.
 
 | Persona | Philosophy | Style |
 |---------|-----------|-------|
@@ -220,6 +220,7 @@ See [connectors/README.md](connectors/README.md) for setup details.
 | **[Ansem](/skills/ansem)** | Early discovery. Momentum alpha. Degen with discipline. | Micro-cap momentum |
 | **[Hsaka](/skills/hsaka)** | Chart structure. S/R levels. Only A+ setups. Patience. | Technical swing trading |
 | **[Tetranode](/skills/tetranode)** | DeFi yield. Real yield vs emissions. Governance power. | Yield optimization |
+| **[Warren Buffett](/skills/warren-buffett)** | Value investing. Margin of safety. Competitive moats. Long-term compounding. | Fundamental value |
 | **[Gwyneth Chen](/skills/gwyneth-chen)** | Pro market maker. Spread capture. Adverse selection. Avellaneda-Stoikov. | Institutional MM |
 
 ```
@@ -235,7 +236,7 @@ See [connectors/README.md](connectors/README.md) for setup details.
 
 ### Role-Based Agents
 
-22 agents organized by function. These don't have celebrity personas — they just do their job.
+23 agents organized by function. These don't have celebrity personas — they just do their job.
 
 #### Active Traders
 
@@ -271,6 +272,7 @@ See [connectors/README.md](connectors/README.md) for setup details.
 | Agent | Role | Multi-Exchange |
 |-------|------|---------------|
 | Risk Manager | VaR, Kelly, drawdown caps | Aggregate all venues |
+| Equity Risk Manager | Equity-specific risk: beta, sector, factor | Cross-exchange |
 | Portfolio Manager | Allocation, rebalancing | Cross-exchange |
 | Performance | Post-trade analysis | Per-venue comparison |
 
@@ -333,9 +335,9 @@ What ships with each agent:
 | | ai-fund | ai-hedge-fund | Freqtrade | Hummingbot |
 |---|---|---|---|---|
 | **LLM-native** | ✅ Claude | ✅ Multi-LLM | ❌ | ❌ |
-| **Agents** | 42 | 18 | User-defined | ~12 |
+| **Agents** | 44 | 18 | User-defined | ~12 |
 | **Hire/fire** | ✅ | ❌ | ❌ | ❌ |
-| **Personas** | 20 | ✅ | ❌ | ❌ |
+| **Personas** | 21 | ✅ | ❌ | ❌ |
 | **Exchanges** | 100+ | Stocks only | 30+ | 20+ |
 | **Cross-arb** | ✅ | ❌ | ❌ | ❌ |
 | **SOR** | ✅ | ❌ | ❌ | ❌ |
@@ -377,13 +379,22 @@ What ships with each agent:
 
 ```
 ai-fund/
-├── connectors/              # Exchange connections
-│   ├── cube/                # Built-in: cube.exchange
-│   │   └── mcp-server/     # MCP server (Osmium WebSocket + Iridium REST)
-│   ├── README.md            # How to add Binance, Coinbase, Kraken, OKX, etc.
-│   └── community/           # Links to community connectors
-├── skills/                  # 42 agent personas (exchange-agnostic)
-├── lib/                     # Shared: indicators, financial math, formatting
+├── connectors/              # Exchange connections (3 built-in, 100+ via CCXT)
+│   ├── cube/                # Built-in: cube.exchange (32 tools)
+│   ├── ccxt/                # Built-in: Coinbase, Binance, 100+ (92 tools)
+│   ├── alpaca/              # Built-in: stocks, ETFs, crypto (24 tools)
+│   └── README.md            # How to add more exchanges
+├── skills/                  # 44 agent personas (exchange-agnostic)
+├── lib/                     # 16 shared libraries, 120+ pure functions
+│   ├── indicators.ts        # SMA, EMA, RSI, MACD, BB, ATR, ADX, OBV, Stochastic
+│   ├── math.ts              # Kelly, VaR, Sharpe, Sortino, correlation, drawdown
+│   ├── execution-planner.ts # TWAP, VWAP, iceberg, market impact (Almgren-Chriss)
+│   ├── execution-analytics.ts # Order book analysis, slippage, fill simulation
+│   ├── portfolio-analytics.ts # Portfolio exposure, stress test, rebalancing
+│   ├── confluence-detector.ts # Multi-TF confluence, BB squeeze, mean reversion
+│   ├── grid-trading.ts      # DCA scheduling, grid optimization, basis trade
+│   ├── volume-profile.ts    # Volume profile, value area, correlation regime
+│   └── ...                  # Backtester, regime detector, signal generator, etc.
 ├── examples/                # Pre-built desk configurations
 ├── scripts/                 # npx installer
 └── .claude/commands/        # Slash commands (/setup, /desk, /hire, etc.)
@@ -391,9 +402,9 @@ ai-fund/
 
 | Layer | Role |
 |-------|------|
-| `skills/` | Agent personality, strategy, KPIs |
-| `connectors/` | Exchange APIs via MCP |
-| `lib/` | Indicators, financial math |
+| `skills/` | 44 agent personalities, strategies, KPIs |
+| `connectors/` | 3 built-in exchange MCP servers (148 tools total) |
+| `lib/` | 16 shared libraries — indicators, risk, execution, portfolio |
 | `.claude/commands/` | Slash commands |
 
 Add an exchange — no agent files change. Write an agent — no exchange code involved.
@@ -403,10 +414,10 @@ Add an exchange — no agent files change. Write an agent — no exchange code i
 ## FAQ
 
 ### What is ai-fund?
-An open-source AI crypto trading framework with 42 agents running inside Claude Code. You hire the ones that match your strategy, fire the ones that miss KPIs. Think of it as a trading desk, not a bot.
+An open-source AI crypto trading framework with 44 agents and 148 MCP tools running inside Claude Code. You hire the ones that match your strategy, fire the ones that miss KPIs. Think of it as a trading desk, not a bot.
 
 ### How many trading agents does ai-fund have?
-42. 20 named personas (Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Michael Saylor, and 15 more) plus 22 role-based agents across six desks.
+44. 21 named personas (Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Warren Buffett, and 16 more) plus 23 role-based agents across six desks. They share 16 analysis libraries with 120+ pure functions for indicators, risk, execution, and portfolio analytics.
 
 ### What exchanges work with ai-fund?
 100+ exchanges via plugin connectors. Cube ships built-in. Binance, Coinbase, Kraken, OKX, and many more work via CCXT or dedicated MCP servers.
@@ -418,7 +429,7 @@ MIT-licensed, fully open source. You need Claude Pro or Team ($20/month) for the
 Yes. The Arbitrageur scans for price gaps. The Execution Trader routes to the best venue. The Market Maker quotes across venues at once. It's one of the main reasons to use this.
 
 ### How is ai-fund different from virattt's ai-hedge-fund?
-virattt's project does stocks with investor personas (Buffett, etc.). ai-fund is crypto, works with any exchange, has 42 agents, and fires them when they underperform. [Comparison table.](#ai-fund-vs-other-ai-trading-bots)
+virattt's project does stocks with investor personas (Buffett, etc.). ai-fund is crypto, works with any exchange, has 44 agents with 134 tools and 16 shared analysis libraries, and fires them when they underperform. [Comparison table.](#ai-fund-vs-other-ai-trading-bots)
 
 ### Can ai-fund trade live?
 Yes. Everything starts in paper/testnet. The Risk Manager reviews all trades. You have to explicitly confirm before anything goes live.
@@ -455,7 +466,7 @@ Create a folder in `skills/` with a `SKILL.md` file. Use `skills/_template/SKILL
 
 **CI/CD**: GitHub Actions runs typecheck + vitest on every push and PR (`.github/workflows/test.yml`). PRs that fail CI will not be merged.
 
-**Testing**: `cd connectors/cube/mcp-server && npm test` — 12 vitest suites covering auth, signing, indicators, math, format, REST orders, WebSocket, credential store, device auth, defi helpers, asset registry, and integration.
+**Testing**: 1,000+ tests across 3 connectors. Cube: `cd connectors/cube/mcp-server && npm test` (361 tests). CCXT: `cd connectors/ccxt/mcp-server && npx vitest run` (672 tests). Covers indicators, math, strategy, risk, execution, error paths, and integration flows.
 
 **Auth**: Agents authenticate via Device Authorization (RFC 8628) — no API keys needed. See [`docs/agent-auth-brief.md`](docs/agent-auth-brief.md).
 

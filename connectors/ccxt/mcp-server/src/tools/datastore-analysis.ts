@@ -3,9 +3,10 @@ import { z } from 'zod';
 import type { ExchangeClient } from '../client/exchange';
 import { handler } from './handler';
 import {
-  correlation, correlationMatrix, returns, mean, standardDeviation,
+  correlationMatrix, returns, mean, standardDeviation,
   sharpeRatio, sortinoRatio, maxDrawdown,
 } from '@ai-fund/lib/math';
+import { computeVolumeProfile, detectCorrelationRegime } from '@ai-fund/lib/volume-profile';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -110,67 +111,16 @@ export function registerDatastoreAnalysisTools(server: McpServer, client: Exchan
         throw new Error(`Insufficient cached data (${candles.length} candles). Run ingest_history first.`);
       }
 
-      // Find price range
-      const highs = candles.map(c => c.high);
-      const lows = candles.map(c => c.low);
-      const priceMin = Math.min(...lows);
-      const priceMax = Math.max(...highs);
-      const binSize = (priceMax - priceMin) / params.bins;
-
-      // Build volume profile
-      const profile: { priceLevel: number; volume: number; pct: number }[] = [];
-      let totalVolume = 0;
-
-      for (let i = 0; i < params.bins; i++) {
-        const lo = priceMin + i * binSize;
-        const hi = lo + binSize;
-        let binVolume = 0;
-        for (const c of candles) {
-          // Proportional volume allocation based on overlap
-          const overlap = Math.max(0,
-            Math.min(c.high, hi) - Math.max(c.low, lo)
-          );
-          const range = c.high - c.low || 1;
-          binVolume += c.volume * (overlap / range);
-        }
-        totalVolume += binVolume;
-        profile.push({
-          priceLevel: Math.round(((lo + hi) / 2) * 100) / 100,
-          volume: Math.round(binVolume * 100) / 100,
-          pct: 0,
-        });
-      }
-
-      // Calculate percentages
-      for (const bin of profile) {
-        bin.pct = Math.round((bin.volume / totalVolume) * 10000) / 100;
-      }
-
-      // Point of control (highest volume bin)
-      const poc = profile.reduce((max, b) => b.volume > max.volume ? b : max, profile[0]);
-
-      // Value area (70% of volume around POC)
-      const sorted = [...profile].sort((a, b) => b.volume - a.volume);
-      let vaVolume = 0;
-      const vaTarget = totalVolume * 0.7;
-      const vaBins: number[] = [];
-      for (const bin of sorted) {
-        if (vaVolume >= vaTarget) break;
-        vaVolume += bin.volume;
-        vaBins.push(bin.priceLevel);
-      }
+      const vp = computeVolumeProfile(candles, params.bins);
 
       return {
         symbol: params.symbol,
         timeframe: params.timeframe,
         candles: candles.length,
-        priceRange: { min: Math.round(priceMin * 100) / 100, max: Math.round(priceMax * 100) / 100 },
-        pointOfControl: poc.priceLevel,
-        valueArea: {
-          high: Math.round(Math.max(...vaBins) * 100) / 100,
-          low: Math.round(Math.min(...vaBins) * 100) / 100,
-        },
-        profile,
+        priceRange: vp.priceRange,
+        pointOfControl: vp.pointOfControl,
+        valueArea: vp.valueArea,
+        profile: vp.profile,
       };
     }),
   );
@@ -279,69 +229,19 @@ export function registerDatastoreAnalysisTools(server: McpServer, client: Exchan
       const closesA = candlesA.map((c: any) => c.close);
       const closesB = candlesB.map((c: any) => c.close);
 
-      // Align to same length
-      const minLen = Math.min(closesA.length, closesB.length);
-      const alignedA = closesA.slice(closesA.length - minLen);
-      const alignedB = closesB.slice(closesB.length - minLen);
-
-      const returnsA = returns(alignedA);
-      const returnsB = returns(alignedB);
-
-      // Compute rolling correlation
-      const rollingCorr: { index: number; correlation: number }[] = [];
-      for (let i = window - 1; i < returnsA.length; i++) {
-        const sliceA = returnsA.slice(i - window + 1, i + 1);
-        const sliceB = returnsB.slice(i - window + 1, i + 1);
-        const corr = correlation(sliceA, sliceB);
-        rollingCorr.push({ index: i, correlation: Math.round(corr * 1000) / 1000 });
-      }
-
-      // Detect regime transitions: zero crossings and sign flips
-      const transitions: { index: number; from: number; to: number; type: string }[] = [];
-      for (let i = 1; i < rollingCorr.length; i++) {
-        const prev = rollingCorr[i - 1].correlation;
-        const curr = rollingCorr[i].correlation;
-        if ((prev >= 0 && curr < 0) || (prev < 0 && curr >= 0)) {
-          transitions.push({
-            index: rollingCorr[i].index,
-            from: prev,
-            to: curr,
-            type: prev >= 0 && curr < 0 ? 'decorrelation' : 'recorrelation',
-          });
-        }
-      }
-
-      // Classify current regime
-      const currentCorr = rollingCorr.length > 0
-        ? rollingCorr[rollingCorr.length - 1].correlation
-        : 0;
-
-      let currentRegime: string;
-      if (currentCorr > 0.7) currentRegime = 'highly_correlated';
-      else if (currentCorr > 0.3) currentRegime = 'moderately_correlated';
-      else if (currentCorr >= -0.3) currentRegime = 'uncorrelated';
-      else currentRegime = 'inversely_correlated';
-
-      // Average correlation
-      const avgCorr = rollingCorr.length > 0
-        ? Math.round(mean(rollingCorr.map(r => r.correlation)) * 1000) / 1000
-        : 0;
-
-      // Sample the rolling series to avoid huge payloads (max ~50 points)
-      const step = Math.max(1, Math.floor(rollingCorr.length / 50));
-      const sampled = rollingCorr.filter((_, i) => i % step === 0 || i === rollingCorr.length - 1);
+      const regime = detectCorrelationRegime(closesA, closesB, window);
 
       return {
         symbolA: params.symbol_a,
         symbolB: params.symbol_b,
         timeframe: params.timeframe,
         window,
-        dataPoints: rollingCorr.length,
-        currentCorrelation: currentCorr,
-        currentRegime,
-        averageCorrelation: avgCorr,
-        transitions,
-        rollingSeries: sampled,
+        dataPoints: regime.dataPoints,
+        currentCorrelation: regime.currentCorrelation,
+        currentRegime: regime.currentRegime,
+        averageCorrelation: regime.averageCorrelation,
+        transitions: regime.transitions,
+        rollingSeries: regime.rollingSeries,
       };
     }),
   );

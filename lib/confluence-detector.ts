@@ -381,3 +381,18 @@ export function computeVolTermStructure(
 
   return { structure, ratios, classification };
 }
+
+// ── Volatility regime classification ────────────────────
+
+/**
+ * Classify volatility regime based on ATR ratio (current vs average).
+ */
+export function classifyVolRegime(
+  currentAtr: number,
+  avgAtr: number,
+): 'high' | 'normal' | 'low' {
+  const ratio = avgAtr > 0 ? currentAtr / avgAtr : 1;
+  if (ratio > 1.5) return 'high';
+  if (ratio < 0.7) return 'low';
+  return 'normal';
+}

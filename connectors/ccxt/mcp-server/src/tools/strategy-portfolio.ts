@@ -1,3 +1,11 @@
+/**
+ * Strategy portfolio tools — position sizing, portfolio risk, rebalancing, liquidation heatmap.
+ *
+ * Thin wrappers around @ai-fund/lib/portfolio-analytics — all pure computation
+ * is delegated to the shared library. This file handles MCP registration,
+ * exchange data fetching, precision rounding, and response shaping.
+ */
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
@@ -5,9 +13,11 @@ import type { ExchangeClient } from '../client/exchange';
 import { handler } from './handler';
 import {
   kelly, fixedFractionalSize,
-  valueAtRisk, maxDrawdown, sharpeRatio, sortinoRatio,
-  annualizedVolatility, returns, correlationMatrix, mean,
 } from '@ai-fund/lib/math';
+import {
+  assessPortfolioRisk,
+  calculateRebalanceTrades,
+} from '@ai-fund/lib/portfolio-analytics';
 
 export function registerStrategyPortfolioTools(server: McpServer, client: ExchangeClient) {
   server.tool(
@@ -33,89 +43,17 @@ export function registerStrategyPortfolioTools(server: McpServer, client: Exchan
         throw new Error(`Weights sum to ${weightSum.toFixed(4)}, must sum to ~1.0 (tolerance ±0.05)`);
       }
 
-      // Fetch bars and compute returns for each symbol
-      const allReturns: number[][] = [];
-      const perSymbol: Record<string, unknown>[] = [];
-
-      for (let i = 0; i < symbolList.length; i++) {
-        const symbol = symbolList[i];
+      // Fetch bars for each symbol and extract closes
+      const symbolData: Record<string, number[]> = {};
+      for (const symbol of symbolList) {
         const bars = await client.getBars(symbol, '1d', undefined, params.period);
         if (bars.length < 2) {
           throw new Error(`Insufficient data for ${symbol}: got ${bars.length} bars, need at least 2`);
         }
-
-        const closes = bars.map((b: any) => b.close);
-        const symReturns = returns(closes);
-        allReturns.push(symReturns);
-
-        // Build cumulative values for maxDrawdown
-        const cumValues = [1.0];
-        for (const r of symReturns) {
-          cumValues.push(cumValues[cumValues.length - 1] * (1 + r));
-        }
-
-        const vol = annualizedVolatility(symReturns);
-        const mdd = maxDrawdown(cumValues);
-        const sharpe = sharpeRatio(symReturns);
-        const sortino = sortinoRatio(symReturns);
-
-        perSymbol.push({
-          symbol,
-          weight: weightList[i],
-          annualizedVolatility: Math.round(vol * 10000) / 10000,
-          maxDrawdown: Math.round(mdd.maxDrawdown * 10000) / 10000,
-          sharpeRatio: Math.round(sharpe * 100) / 100,
-          sortinoRatio: Number.isFinite(sortino) ? Math.round(sortino * 100) / 100 : null,
-          dataPoints: symReturns.length,
-        });
+        symbolData[symbol] = bars.map((b: any) => b.close);
       }
 
-      // Compute portfolio returns as weighted sum
-      const minLen = Math.min(...allReturns.map(r => r.length));
-      const portfolioReturns: number[] = [];
-      for (let t = 0; t < minLen; t++) {
-        let wr = 0;
-        for (let i = 0; i < allReturns.length; i++) {
-          wr += weightList[i] * allReturns[i][t];
-        }
-        portfolioReturns.push(wr);
-      }
-
-      // Portfolio-level cumulative values
-      const portfValues = [1.0];
-      for (const r of portfolioReturns) {
-        portfValues.push(portfValues[portfValues.length - 1] * (1 + r));
-      }
-
-      const portfVol = annualizedVolatility(portfolioReturns);
-      const portfMdd = maxDrawdown(portfValues);
-      const portfSharpe = sharpeRatio(portfolioReturns);
-      const var_ = valueAtRisk(params.portfolio_value, portfolioReturns, params.confidence);
-
-      // Correlation matrix
-      const corrMatrix = correlationMatrix(
-        allReturns.map(r => r.slice(0, minLen)),
-        symbolList,
-      );
-      // Round matrix values
-      corrMatrix.matrix = corrMatrix.matrix.map(row =>
-        row.map(v => Math.round(v * 10000) / 10000),
-      );
-
-      return {
-        portfolio: {
-          value: params.portfolio_value,
-          confidence: params.confidence,
-          valueAtRisk: Math.round(var_ * 100) / 100,
-          annualizedVolatility: Math.round(portfVol * 10000) / 10000,
-          maxDrawdown: Math.round(portfMdd.maxDrawdown * 10000) / 10000,
-          sharpeRatio: Math.round(portfSharpe * 100) / 100,
-          meanDailyReturn: Math.round(mean(portfolioReturns) * 1000000) / 1000000,
-          dataPoints: portfolioReturns.length,
-        },
-        perSymbol,
-        correlations: corrMatrix,
-      };
+      return assessPortfolioRisk(symbolData, weightList, params.portfolio_value, params.confidence);
     }),
   );
 
@@ -200,25 +138,17 @@ export function registerStrategyPortfolioTools(server: McpServer, client: Exchan
       const holdingsArr: { symbol: string; amount: number; price: number }[] = JSON.parse(params.holdings);
       const targetWeights: Record<string, number> = JSON.parse(params.targets);
 
-      // Compute current portfolio value
-      const portfolioValue = params.total_value ??
-        holdingsArr.reduce((sum, h) => sum + h.amount * h.price, 0);
-
-      if (portfolioValue <= 0) {
+      // Early check: portfolio value must be positive
+      const portfolioVal = params.total_value ??
+        holdingsArr.reduce((sum: number, h: { amount: number; price: number }) => sum + h.amount * h.price, 0);
+      if (portfolioVal <= 0) {
         throw new Error('Portfolio value must be positive');
       }
 
-      // Build current values and weights
-      const currentValues: Record<string, number> = {};
+      // Build prices lookup from holdings
       const prices: Record<string, number> = {};
       for (const h of holdingsArr) {
-        currentValues[h.symbol] = h.amount * h.price;
         prices[h.symbol] = h.price;
-      }
-
-      const currentWeights: Record<string, number> = {};
-      for (const [sym, val] of Object.entries(currentValues)) {
-        currentWeights[sym] = Math.round((val / portfolioValue) * 10000) / 10000;
       }
 
       // Fetch prices for symbols in targets but not in holdings
@@ -230,77 +160,22 @@ export function registerStrategyPortfolioTools(server: McpServer, client: Exchan
             throw new Error(`Cannot determine price for ${sym}`);
           }
           prices[sym] = tickerPrice;
-          currentValues[sym] = 0;
-          currentWeights[sym] = 0;
         }
       }
 
-      // Compute trades
-      interface Trade {
-        symbol: string;
-        side: 'buy' | 'sell';
-        amount: number;
-        notional: number;
-        reason: string;
-      }
+      const result = calculateRebalanceTrades(holdingsArr, targetWeights, prices, params.total_value);
 
-      const trades: Trade[] = [];
-      let totalTurnover = 0;
-
-      // All symbols involved (union of holdings and targets)
-      const allSymbols = new Set([...Object.keys(currentValues), ...Object.keys(targetWeights)]);
-
-      for (const sym of allSymbols) {
-        const currentVal = currentValues[sym] ?? 0;
-        const targetWeight = targetWeights[sym] ?? 0;
-        const targetVal = portfolioValue * targetWeight;
-        const delta = targetVal - currentVal;
-
-        if (Math.abs(delta) < 1) continue; // skip negligible trades
-
-        const curWeightPct = ((currentVal / portfolioValue) * 100).toFixed(1);
-        const tgtWeightPct = (targetWeight * 100).toFixed(1);
-
-        const side: 'buy' | 'sell' = delta > 0 ? 'buy' : 'sell';
-        const absDelta = Math.abs(delta);
-        const price = prices[sym];
-        let amount = absDelta / price;
-
-        // Round to exchange precision if markets are loaded
+      // Round amounts to exchange precision
+      for (const trade of result.trades) {
         try {
           await client.ensureMarkets();
-          amount = client.roundAmount(sym, amount);
+          trade.amount = client.roundAmount(trade.symbol, trade.amount);
         } catch {
           // Markets not loaded — use raw amount
         }
-
-        const reason = currentVal === 0
-          ? `New position at ${tgtWeightPct}%`
-          : side === 'buy'
-            ? `Increase from ${curWeightPct}% to ${tgtWeightPct}%`
-            : `Decrease from ${curWeightPct}% to ${tgtWeightPct}%`;
-
-        trades.push({
-          symbol: sym,
-          side,
-          amount,
-          notional: Math.round(absDelta * 100) / 100,
-          reason,
-        });
-        totalTurnover += absDelta;
       }
 
-      // Sort by absolute notional descending
-      trades.sort((a, b) => b.notional - a.notional);
-
-      return {
-        portfolioValue: Math.round(portfolioValue * 100) / 100,
-        currentWeights,
-        targetWeights,
-        trades,
-        totalTurnover: Math.round(totalTurnover * 100) / 100,
-        turnoverPct: Math.round((totalTurnover / portfolioValue) * 1000) / 10,
-      };
+      return result;
     }),
   );
 
@@ -327,6 +202,8 @@ export function registerStrategyPortfolioTools(server: McpServer, client: Exchan
         .map((l: string) => parseFloat(l.trim()))
         .filter((l: number) => l > 0 && isFinite(l));
 
+      const tolerance = mid * 0.005;
+
       const levels: {
         leverage: number;
         longLiquidation: number;
@@ -335,14 +212,10 @@ export function registerStrategyPortfolioTools(server: McpServer, client: Exchan
         nearbyAskVolume: number;
       }[] = [];
 
-      // Tolerance: 0.5% of mid for "nearby" volume matching
-      const tolerance = mid * 0.005;
-
       for (const leverage of leverageLevels) {
         const longLiq = mid * (1 - 1 / leverage);
         const shortLiq = mid * (1 + 1 / leverage);
 
-        // Walk bids to find volume near long liquidation price
         let nearbyBidVolume = 0;
         for (const [price, size] of orderBook.bids) {
           if (Math.abs(price - longLiq) <= tolerance) {
@@ -350,7 +223,6 @@ export function registerStrategyPortfolioTools(server: McpServer, client: Exchan
           }
         }
 
-        // Walk asks to find volume near short liquidation price
         let nearbyAskVolume = 0;
         for (const [price, size] of orderBook.asks) {
           if (Math.abs(price - shortLiq) <= tolerance) {
@@ -367,7 +239,7 @@ export function registerStrategyPortfolioTools(server: McpServer, client: Exchan
         });
       }
 
-      // Identify cluster zones: group nearby liquidation prices and sum volumes
+      // Identify cluster zones
       const clusterZones: {
         priceRange: [number, number];
         estimatedLiquidationVolume: number;

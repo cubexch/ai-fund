@@ -12,6 +12,7 @@ import { registerAccountTools } from './tools/account';
 import { registerMarketDataTools } from './tools/market-data';
 import { registerOrderTools } from './tools/orders';
 import { registerRiskTools } from './tools/risk';
+import { registerAnalysisTools } from './tools/analysis';
 import { registerTradingTools } from './tools/defi';
 
 const server = new McpServer({
@@ -64,6 +65,9 @@ registerAccountTools(server, iridium);
 
 // Risk: REST via Iridium (requires auth for positions)
 registerRiskTools(server, iridium);
+
+// Analysis: confluence, squeeze, portfolio risk, stress test, execution planning, microstructure
+registerAnalysisTools(server, iridium);
 
 // DeFi: REST via Iridium + WebSocket via Osmium wallet (requires auth)
 registerTradingTools(server, iridium, osmium);

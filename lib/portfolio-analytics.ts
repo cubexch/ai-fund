@@ -4,7 +4,7 @@
  * No exchange clients, no MCP, no zod.
  */
 
-import { valueAtRisk, maxDrawdown, sharpeRatio, sortinoRatio, annualizedVolatility, returns, correlationMatrix, mean } from './math.js';
+import { valueAtRisk, maxDrawdown, sharpeRatio, sortinoRatio, annualizedVolatility, returns, correlationMatrix, correlation, mean } from './math.js';
 
 // ── Types ────────────────────────────────────────────────
 
@@ -471,5 +471,209 @@ export function calculateRebalanceTrades(
     trades,
     totalTurnover: Math.round(totalTurnover * 100) / 100,
     turnoverPct: Math.round((totalTurnover / portfolioValue) * 1000) / 10,
+  };
+}
+
+// ── Correlation clustering ───────────────────────────────
+
+export interface CorrelationPair {
+  pair: [string, string];
+  correlation: number;
+}
+
+export interface CorrelationClusterResult {
+  numHoldings: number;
+  threshold: number;
+  avgCorrelation: number;
+  highCorrelations: CorrelationPair[];
+  numHighlyCorrelated: number;
+  riskScore: number;
+  status: 'HIGH_RISK' | 'MODERATE' | 'DIVERSIFIED';
+}
+
+/**
+ * Detect dangerous correlations between holdings.
+ * @param returnsSeries - aligned return series per symbol
+ * @param symbols - symbol labels (same order as returnsSeries)
+ * @param threshold - correlation threshold to flag (default 0.8)
+ */
+export function detectCorrelationClusters(
+  returnsSeries: number[][],
+  symbols: string[],
+  threshold: number = 0.8,
+): CorrelationClusterResult {
+  const minLen = Math.min(...returnsSeries.map(r => r.length));
+  const aligned = returnsSeries.map(r => r.slice(0, minLen));
+
+  const corrResult = correlationMatrix(aligned);
+  const matrix = corrResult.matrix;
+
+  const highCorrelations: CorrelationPair[] = [];
+  for (let i = 0; i < symbols.length; i++) {
+    for (let j = i + 1; j < symbols.length; j++) {
+      const corr = matrix[i][j];
+      if (Math.abs(corr) >= threshold) {
+        highCorrelations.push({
+          pair: [symbols[i], symbols[j]],
+          correlation: Math.round(corr * 1000) / 1000,
+        });
+      }
+    }
+  }
+
+  const avgCorrelation = matrix.length > 1
+    ? matrix.reduce((sum, row, i) =>
+        sum + row.reduce((s, v, j) => i !== j ? s + v : s, 0), 0)
+      / (matrix.length * (matrix.length - 1))
+    : 0;
+
+  const totalPairs = Math.max(1, symbols.length * (symbols.length - 1) / 2);
+  const riskScore = Math.min(100, (highCorrelations.length / totalPairs) * 100);
+
+  return {
+    numHoldings: symbols.length,
+    threshold,
+    avgCorrelation: Math.round(avgCorrelation * 1000) / 1000,
+    highCorrelations,
+    numHighlyCorrelated: highCorrelations.length,
+    riskScore: Math.round(riskScore),
+    status: riskScore > 60 ? 'HIGH_RISK' : riskScore > 30 ? 'MODERATE' : 'DIVERSIFIED',
+  };
+}
+
+// ── Drawdown monitoring ──────────────────────────────────
+
+export interface DrawdownMonitorResult {
+  currentEquity: number;
+  estimatedPeak: number;
+  drawdownPct: number;
+  recoveryNeeded: number;
+  status: 'OK' | 'WARNING' | 'CRITICAL';
+  circuitBreaker: boolean;
+}
+
+/**
+ * Monitor drawdown from peak equity.
+ * @param currentEquity - current portfolio value
+ * @param maxDrawdownPct - maximum allowed drawdown percentage
+ * @param peakEstimate - optional known peak (defaults to 5% above current as conservative estimate)
+ */
+export function monitorDrawdown(
+  currentEquity: number,
+  maxDrawdownPct: number,
+  peakEstimate?: number,
+): DrawdownMonitorResult {
+  const peak = peakEstimate ?? currentEquity * 1.05;
+  const drawdownPct = ((peak - currentEquity) / peak) * 100;
+  const recoveryNeeded = ((peak / currentEquity) - 1) * 100;
+
+  const status: DrawdownMonitorResult['status'] = drawdownPct > maxDrawdownPct ? 'CRITICAL'
+    : drawdownPct > maxDrawdownPct * 0.7 ? 'WARNING' : 'OK';
+
+  return {
+    currentEquity,
+    estimatedPeak: peak,
+    drawdownPct,
+    recoveryNeeded,
+    status,
+    circuitBreaker: drawdownPct > maxDrawdownPct,
+  };
+}
+
+// ── Margin health ────────────────────────────────────────
+
+export interface MarginHealthResult {
+  totalEquity: number;
+  usedMargin: number;
+  freeMargin: number;
+  marginRatio: number;
+  healthScore: number;
+  status: 'HEALTHY' | 'CAUTION' | 'DANGER';
+}
+
+/**
+ * Check margin account health from stablecoin balances.
+ */
+export function computeMarginHealth(
+  balances: BalanceEntry[],
+  stablecoins: string[] = ['USDT', 'USD', 'USDC'],
+): MarginHealthResult {
+  let totalEquity = 0;
+  let totalUsed = 0;
+  for (const bal of balances) {
+    if (stablecoins.includes(bal.currency)) {
+      totalEquity += bal.total;
+      totalUsed += bal.used;
+    }
+  }
+
+  const freeMargin = totalEquity - totalUsed;
+  const marginRatio = totalEquity > 0 ? (totalUsed / totalEquity) * 100 : 0;
+  const healthScore = Math.max(0, 100 - marginRatio);
+
+  return {
+    totalEquity,
+    usedMargin: totalUsed,
+    freeMargin,
+    marginRatio,
+    healthScore,
+    status: healthScore > 70 ? 'HEALTHY' : healthScore > 40 ? 'CAUTION' : 'DANGER',
+  };
+}
+
+// ── Risk dashboard ───────────────────────────────────────
+
+export interface RiskDashboardHolding {
+  currency: string;
+  value: number;
+  pct: number;
+}
+
+export interface RiskDashboardResult {
+  portfolioValue: number;
+  numPositions: number;
+  holdings: RiskDashboardHolding[];
+  topConcentration: number;
+  concentrationStatus: 'red' | 'yellow' | 'green';
+  diversificationStatus: 'red' | 'yellow' | 'green';
+}
+
+/**
+ * Compute risk dashboard metrics from balances and tickers.
+ */
+export function computeRiskDashboard(
+  balances: BalanceEntry[],
+  tickers: TickerEntry[],
+  maxConcentrationPct: number = 40,
+): RiskDashboardResult {
+  let totalValue = 0;
+  const holdings: RiskDashboardHolding[] = [];
+
+  for (const bal of balances) {
+    if (bal.total === 0) continue;
+    const price = resolvePrice(bal.currency, tickers);
+    const value = bal.total * price;
+    totalValue += Math.abs(value);
+    if (Math.abs(value) > 1) {
+      holdings.push({ currency: bal.currency, value, pct: 0 });
+    }
+  }
+
+  holdings.forEach(h => {
+    h.pct = totalValue > 0 ? (Math.abs(h.value) / totalValue) * 100 : 0;
+  });
+  holdings.sort((a, b) => b.pct - a.pct);
+
+  const topConcentration = holdings.length > 0 ? holdings[0].pct : 0;
+
+  return {
+    portfolioValue: totalValue,
+    numPositions: holdings.length,
+    holdings: holdings.slice(0, 10),
+    topConcentration,
+    concentrationStatus: topConcentration > maxConcentrationPct ? 'red'
+      : topConcentration > maxConcentrationPct * 0.7 ? 'yellow' : 'green',
+    diversificationStatus: holdings.length >= 5 ? 'green'
+      : holdings.length >= 3 ? 'yellow' : 'red',
   };
 }

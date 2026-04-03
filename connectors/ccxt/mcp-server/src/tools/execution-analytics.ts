@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { ExchangeClient } from '../client/exchange';
 import { handler, authHandler } from './handler';
+import { analyzeTradeFlow, computeExecutionQuality } from '@ai-fund/lib/execution-analytics';
 
 // Cast schemas to any to avoid TS2589 "excessively deep type instantiation" with zod + MCP SDK
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -29,28 +30,20 @@ export function registerExecutionAnalyticsTools(server: McpServer, client: Excha
         return { symbol, totalFills: 0, message: 'No recent fills found for this symbol.' };
       }
 
-      let totalVolume = 0;
-      let totalCost = 0;
-      let makerCount = 0;
-      let takerCount = 0;
+      // Map trades to FillEntry for the lib function
+      const fills = trades.map(t => ({
+        price: t.price,
+        amount: t.amount,
+        cost: t.cost,
+        takerOrMaker: (t as any).takerOrMaker as string | undefined,
+      }));
 
-      for (const t of trades) {
-        totalVolume += t.amount;
-        totalCost += t.cost ?? t.price * t.amount;
-        // takerOrMaker may be present on raw trades
-        const tom = (t as any).takerOrMaker;
-        if (tom === 'maker') makerCount++;
-        else if (tom === 'taker') takerCount++;
-      }
-
-      const vwap = totalCost / totalVolume;
-      const avgFillPrice = trades.reduce((sum, t) => sum + t.price, 0) / trades.length;
-
-      // Slippage vs current mid price
       const mid = quote.mid;
-      const slippageBps = mid != null && mid > 0
-        ? Math.round(((vwap - mid) / mid) * 10000 * 100) / 100
-        : undefined;
+      const eq = computeExecutionQuality(fills, mid ?? undefined);
+
+      // Compute total volume/cost for fill rate calculation
+      const totalVolume = trades.reduce((sum, t) => sum + t.amount, 0);
+      const totalCost = trades.reduce((sum, t) => sum + (t.cost ?? t.price * t.amount), 0);
 
       // Fill rate from open orders
       const openOrders = await client.getOpenOrders(symbol);
@@ -59,20 +52,20 @@ export function registerExecutionAnalyticsTools(server: McpServer, client: Excha
         ? Math.round((totalVolume / totalRequested) * 10000) / 100
         : 100;
 
-      const hasMakerTaker = makerCount + takerCount > 0;
+      const hasMakerTaker = eq.makerCount + eq.takerCount > 0;
 
       return {
         symbol,
         totalFills: trades.length,
         totalVolume,
         totalCost: Math.round(totalCost * 100) / 100,
-        vwap: Math.round(vwap * 100) / 100,
-        avgFillPrice: Math.round(avgFillPrice * 100) / 100,
+        vwap: eq.vwap,
+        avgFillPrice: eq.avgFillPrice,
         currentMid: mid,
-        slippageBps,
+        slippageBps: eq.slippageBps,
         fillRatePct: fillRate,
         makerTaker: hasMakerTaker
-          ? { maker: makerCount, taker: takerCount, makerPct: Math.round((makerCount / trades.length) * 10000) / 100 }
+          ? { maker: eq.makerCount, taker: eq.takerCount, makerPct: Math.round((eq.makerCount / trades.length) * 10000) / 100 }
           : undefined,
       };
     }),
@@ -135,62 +128,36 @@ export function registerExecutionAnalyticsTools(server: McpServer, client: Excha
         return { symbol, totalTrades: 0, message: 'No recent trades found.' };
       }
 
-      let buyVolume = 0;
-      let sellVolume = 0;
-      let buyCount = 0;
-      let sellCount = 0;
-      let totalSize = 0;
+      // Map exchange trades to TradeEntry for the lib function
+      const tradeEntries = trades.map(t => ({
+        side: t.side as 'buy' | 'sell',
+        amount: t.amount,
+        price: t.price,
+        timestamp: t.timestamp,
+      }));
 
-      for (const t of trades) {
-        totalSize += t.amount;
-        if (t.side === 'buy') {
-          buyVolume += t.amount;
-          buyCount++;
-        } else {
-          sellVolume += t.amount;
-          sellCount++;
-        }
-      }
-
-      const totalVolume = buyVolume + sellVolume;
-      const avgSize = totalSize / trades.length;
-      const largeTrades = trades.filter(t => t.amount > avgSize * 2);
-
-      const buySellRatio = sellVolume > 0
-        ? Math.round((buyVolume / sellVolume) * 100) / 100
-        : buyVolume > 0 ? null : 0;
-
-      const imbalancePct = totalVolume > 0
-        ? Math.round(((buyVolume - sellVolume) / totalVolume) * 10000) / 100
-        : 0;
-
-      let signal: string;
-      if (imbalancePct > 20) signal = 'strong_buy_pressure';
-      else if (imbalancePct > 5) signal = 'moderate_buy_pressure';
-      else if (imbalancePct < -20) signal = 'strong_sell_pressure';
-      else if (imbalancePct < -5) signal = 'moderate_sell_pressure';
-      else signal = 'neutral';
+      const flow = analyzeTradeFlow(tradeEntries);
 
       return {
         symbol,
         totalTrades: trades.length,
-        buyVolume: Math.round(buyVolume * 10000) / 10000,
-        sellVolume: Math.round(sellVolume * 10000) / 10000,
-        buyCount,
-        sellCount,
-        buySellRatio,
-        imbalancePct,
+        buyVolume: flow.buyVolume,
+        sellVolume: flow.sellVolume,
+        buyCount: flow.buyCount,
+        sellCount: flow.sellCount,
+        buySellRatio: flow.buySellRatio,
+        imbalancePct: flow.imbalancePct,
         largeTrades: {
-          count: largeTrades.length,
-          threshold: Math.round(avgSize * 2 * 10000) / 10000,
-          trades: largeTrades.map(t => ({
+          count: flow.largeTrades.count,
+          threshold: flow.largeTrades.threshold,
+          trades: flow.largeTrades.trades.map(t => ({
             side: t.side,
             price: t.price,
             amount: t.amount,
             timestamp: t.timestamp,
           })),
         },
-        signal,
+        signal: flow.signal,
       };
     }),
   );
