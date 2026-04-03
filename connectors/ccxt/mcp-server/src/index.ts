@@ -9,6 +9,7 @@ import { registerOrderTools } from './tools/orders.js';
 import { registerMarketDataTools } from './tools/market-data.js';
 import { registerStrategyTools } from './tools/strategy.js';
 import { registerDatastoreTools } from './tools/datastore.js';
+import { registerExecutionTools } from './tools/execution.js';
 import { MarketDataStore } from '../../../../lib/datastore.js';
 
 // ── Parse CLI args + resolve credentials ──────────────────────
@@ -58,6 +59,7 @@ registerOrderTools(server, client);
 registerAccountTools(server, client);
 registerStrategyTools(server, client);
 registerDatastoreTools(server, client);
+registerExecutionTools(server, client);
 
 // ── Start server ───────────────────────────────────────────
 

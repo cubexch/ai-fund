@@ -8,6 +8,8 @@ import {
 } from '../../../../../lib/indicators.js';
 import {
   kelly, fixedFractionalSize,
+  valueAtRisk, maxDrawdown, sharpeRatio, sortinoRatio,
+  annualizedVolatility, returns, correlationMatrix, mean,
 } from '../../../../../lib/math.js';
 
 // Cast schemas to any to avoid TS2589 "excessively deep type instantiation" with zod + MCP SDK
@@ -201,6 +203,115 @@ export function registerStrategyTools(server: McpServer, client: ExchangeClient)
     } as any,
     handler(async (params: any) => {
       return client.getMarketInfo(params.symbol);
+    }),
+  );
+
+  server.tool(
+    'assess_portfolio_risk',
+    `Portfolio-level risk assessment using cached market data and VaR. Computes per-symbol volatility, drawdown, Sharpe, Sortino, plus portfolio VaR and correlation matrix.`,
+    {
+      symbols: z.string().describe('Comma-separated trading pairs (e.g., BTC/USDT,ETH/USDT)'),
+      weights: z.string().describe('Comma-separated portfolio weights — must sum to ~1.0 (e.g., 0.6,0.4)'),
+      portfolio_value: z.number().describe('Total portfolio value in quote currency'),
+      confidence: z.number().default(0.95).describe('VaR confidence level (0.95 or 0.99)'),
+      period: z.number().default(90).describe('Number of historical daily candles to use'),
+    } as any,
+    handler(async (params: any) => {
+      const symbolList = params.symbols.split(',').map((s: string) => s.trim());
+      const weightList = params.weights.split(',').map((w: string) => parseFloat(w.trim()));
+
+      if (symbolList.length !== weightList.length) {
+        throw new Error(`Mismatched symbols (${symbolList.length}) and weights (${weightList.length}) — must be same length`);
+      }
+
+      const weightSum = weightList.reduce((a: number, b: number) => a + b, 0);
+      if (Math.abs(weightSum - 1.0) > 0.05) {
+        throw new Error(`Weights sum to ${weightSum.toFixed(4)}, must sum to ~1.0 (tolerance ±0.05)`);
+      }
+
+      // Fetch bars and compute returns for each symbol
+      const allReturns: number[][] = [];
+      const perSymbol: Record<string, unknown>[] = [];
+
+      for (let i = 0; i < symbolList.length; i++) {
+        const symbol = symbolList[i];
+        const bars = await client.getBars(symbol, '1d', undefined, params.period);
+        if (bars.length < 2) {
+          throw new Error(`Insufficient data for ${symbol}: got ${bars.length} bars, need at least 2`);
+        }
+
+        const closes = bars.map((b: any) => b.close);
+        const symReturns = returns(closes);
+        allReturns.push(symReturns);
+
+        // Build cumulative values for maxDrawdown
+        const cumValues = [1.0];
+        for (const r of symReturns) {
+          cumValues.push(cumValues[cumValues.length - 1] * (1 + r));
+        }
+
+        const vol = annualizedVolatility(symReturns);
+        const mdd = maxDrawdown(cumValues);
+        const sharpe = sharpeRatio(symReturns);
+        const sortino = sortinoRatio(symReturns);
+
+        perSymbol.push({
+          symbol,
+          weight: weightList[i],
+          annualizedVolatility: Math.round(vol * 10000) / 10000,
+          maxDrawdown: Math.round(mdd.maxDrawdown * 10000) / 10000,
+          sharpeRatio: Math.round(sharpe * 100) / 100,
+          sortinoRatio: sortino === Infinity ? 'Infinity' : Math.round(sortino * 100) / 100,
+          dataPoints: symReturns.length,
+        });
+      }
+
+      // Compute portfolio returns as weighted sum
+      const minLen = Math.min(...allReturns.map(r => r.length));
+      const portfolioReturns: number[] = [];
+      for (let t = 0; t < minLen; t++) {
+        let wr = 0;
+        for (let i = 0; i < allReturns.length; i++) {
+          wr += weightList[i] * allReturns[i][t];
+        }
+        portfolioReturns.push(wr);
+      }
+
+      // Portfolio-level cumulative values
+      const portfValues = [1.0];
+      for (const r of portfolioReturns) {
+        portfValues.push(portfValues[portfValues.length - 1] * (1 + r));
+      }
+
+      const portfVol = annualizedVolatility(portfolioReturns);
+      const portfMdd = maxDrawdown(portfValues);
+      const portfSharpe = sharpeRatio(portfolioReturns);
+      const var_ = valueAtRisk(params.portfolio_value, portfolioReturns, params.confidence);
+
+      // Correlation matrix
+      const corrMatrix = correlationMatrix(
+        allReturns.map(r => r.slice(0, minLen)),
+        symbolList,
+      );
+      // Round matrix values
+      corrMatrix.matrix = corrMatrix.matrix.map(row =>
+        row.map(v => Math.round(v * 10000) / 10000),
+      );
+
+      return {
+        portfolio: {
+          value: params.portfolio_value,
+          confidence: params.confidence,
+          valueAtRisk: Math.round(var_ * 100) / 100,
+          annualizedVolatility: Math.round(portfVol * 10000) / 10000,
+          maxDrawdown: Math.round(portfMdd.maxDrawdown * 10000) / 10000,
+          sharpeRatio: Math.round(portfSharpe * 100) / 100,
+          meanDailyReturn: Math.round(mean(portfolioReturns) * 1000000) / 1000000,
+          dataPoints: portfolioReturns.length,
+        },
+        perSymbol,
+        correlations: corrMatrix,
+      };
     }),
   );
 }

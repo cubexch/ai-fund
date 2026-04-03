@@ -257,3 +257,98 @@ describe('get_market_info tool', () => {
     expect(data.taker).toBe(0.002);
   });
 });
+
+// ── assess_portfolio_risk ────────────────────────────────
+
+describe('assess_portfolio_risk tool', () => {
+  it('returns VaR as a positive number', async () => {
+    const { server } = setup();
+    const result = await server.callTool('assess_portfolio_risk', {
+      symbols: 'BTC/USDT,ETH/USDT',
+      weights: '0.6,0.4',
+      portfolio_value: 100000,
+      confidence: 0.95,
+      period: 90,
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.portfolio.valueAtRisk).toBeGreaterThan(0);
+    expect(data.portfolio.value).toBe(100000);
+    expect(data.portfolio.confidence).toBe(0.95);
+  });
+
+  it('returns per-symbol stats with sharpe, volatility, maxDrawdown', async () => {
+    const { server } = setup();
+    const result = await server.callTool('assess_portfolio_risk', {
+      symbols: 'BTC/USDT,ETH/USDT',
+      weights: '0.6,0.4',
+      portfolio_value: 100000,
+      confidence: 0.95,
+      period: 90,
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.perSymbol).toHaveLength(2);
+    for (const sym of data.perSymbol) {
+      expect(sym.annualizedVolatility).toBeTypeOf('number');
+      expect(sym.annualizedVolatility).toBeGreaterThan(0);
+      expect(sym.maxDrawdown).toBeTypeOf('number');
+      expect(sym.maxDrawdown).toBeGreaterThanOrEqual(0);
+      expect(sym.sharpeRatio).toBeTypeOf('number');
+      expect(sym.weight).toBeTypeOf('number');
+    }
+    expect(data.perSymbol[0].symbol).toBe('BTC/USDT');
+    expect(data.perSymbol[1].symbol).toBe('ETH/USDT');
+  });
+
+  it('returns correlations matrix', async () => {
+    const { server } = setup();
+    const result = await server.callTool('assess_portfolio_risk', {
+      symbols: 'BTC/USDT,ETH/USDT',
+      weights: '0.6,0.4',
+      portfolio_value: 100000,
+      confidence: 0.95,
+      period: 90,
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.correlations).toBeDefined();
+    expect(data.correlations.matrix).toHaveLength(2);
+    expect(data.correlations.matrix[0]).toHaveLength(2);
+    expect(data.correlations.labels).toEqual(['BTC/USDT', 'ETH/USDT']);
+    // Diagonal should be 1
+    expect(data.correlations.matrix[0][0]).toBe(1);
+    expect(data.correlations.matrix[1][1]).toBe(1);
+    // Off-diagonal should be between -1 and 1
+    expect(data.correlations.matrix[0][1]).toBeGreaterThanOrEqual(-1);
+    expect(data.correlations.matrix[0][1]).toBeLessThanOrEqual(1);
+  });
+
+  it('rejects mismatched symbols/weights length', async () => {
+    const { server } = setup();
+    const result = await server.callTool('assess_portfolio_risk', {
+      symbols: 'BTC/USDT,ETH/USDT,SOL/USDT',
+      weights: '0.6,0.4',
+      portfolio_value: 100000,
+      confidence: 0.95,
+      period: 90,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Mismatched');
+  });
+
+  it('rejects weights that do not sum to ~1.0', async () => {
+    const { server } = setup();
+    const result = await server.callTool('assess_portfolio_risk', {
+      symbols: 'BTC/USDT,ETH/USDT',
+      weights: '0.5,0.3',
+      portfolio_value: 100000,
+      confidence: 0.95,
+      period: 90,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('sum to');
+  });
+});

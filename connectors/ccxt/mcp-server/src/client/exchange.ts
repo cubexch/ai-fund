@@ -9,6 +9,7 @@
 
 import ccxt, { type Exchange, type Ticker, type Order } from 'ccxt';
 import { MarketDataStore, type OHLCVRow } from '../../../../../lib/datastore.js';
+import { RateLimiter } from './rate-limiter.js';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -21,6 +22,8 @@ export interface ExchangeClientOpts {
   exchangeInstance?: Exchange;
   /** Optional DuckDB store for read-through caching of OHLCV data. */
   store?: MarketDataStore;
+  /** Max requests per second for rate limiting. */
+  rateLimit?: number;
 }
 
 export interface TickerResult {
@@ -187,6 +190,7 @@ function formatTrade(t: any): TradeResult {
 export class ExchangeClient {
   private exchange: Exchange;
   private _sandbox: boolean;
+  private limiter: RateLimiter | null;
   readonly exchangeId: string;
   /** DuckDB store for read-through caching. Null when not configured. */
   store: MarketDataStore | null;
@@ -195,6 +199,7 @@ export class ExchangeClient {
     this.exchangeId = opts.exchangeId;
     this._sandbox = opts.sandbox ?? false;
     this.store = opts.store ?? null;
+    this.limiter = opts.rateLimit ? new RateLimiter(opts.rateLimit) : null;
 
     if (opts.exchangeInstance) {
       this.exchange = opts.exchangeInstance;
@@ -260,6 +265,10 @@ export class ExchangeClient {
     }
   }
 
+  private async throttle(): Promise<void> {
+    if (this.limiter) await this.limiter.acquire();
+  }
+
   // ── Public: Market Data ──────────────────────────────────
 
   async loadMarkets(): Promise<MarketResult[]> {
@@ -270,16 +279,19 @@ export class ExchangeClient {
   }
 
   async getTicker(symbol: string): Promise<TickerResult> {
+    await this.throttle();
     const t = await this.exchange.fetchTicker(symbol);
     return this.formatTicker(t);
   }
 
   async getTickers(symbols?: string[]): Promise<TickerResult[]> {
+    await this.throttle();
     const tickers = await this.exchange.fetchTickers(symbols);
     return Object.values(tickers).map(t => this.formatTicker(t));
   }
 
   async getBars(symbol: string, timeframe: string, since?: number, limit?: number): Promise<BarResult[]> {
+    await this.throttle();
     // Read-through cache: check DuckDB first, fetch delta from exchange, merge
     if (this.store) {
       const cached = await this.store.query({
@@ -350,6 +362,7 @@ export class ExchangeClient {
   }
 
   async getOrderBook(symbol: string, limit?: number): Promise<OrderBookResult> {
+    await this.throttle();
     const ob = await this.exchange.fetchOrderBook(symbol, limit);
     const bids = ob.bids as [number, number][];
     const asks = ob.asks as [number, number][];
@@ -374,6 +387,7 @@ export class ExchangeClient {
   }
 
   async getTrades(symbol: string, since?: number, limit?: number): Promise<TradeResult[]> {
+    await this.throttle();
     const trades = await this.exchange.fetchTrades(symbol, since, limit);
     return trades.map(formatTrade);
   }
@@ -454,6 +468,7 @@ export class ExchangeClient {
     if (amount <= 0) {
       throw new Error('Order amount must be positive');
     }
+    await this.throttle();
     await this.ensureMarkets();
     const roundedAmount = this.roundAmount(symbol, amount);
     const roundedPrice = price !== undefined ? this.roundPrice(symbol, price) : undefined;
@@ -474,6 +489,7 @@ export class ExchangeClient {
     price?: number,
   ): Promise<OrderResult> {
     await this.ensureMarkets();
+    await this.throttle();
     const roundedAmount = amount !== undefined ? this.roundAmount(symbol, amount) : undefined;
     const roundedPrice = price !== undefined ? this.roundPrice(symbol, price) : undefined;
     if (typeof this.exchange.editOrder === 'function') {
@@ -524,6 +540,7 @@ export class ExchangeClient {
   // ── Public: Quoting & Fees ────────────────────────────────
 
   async getQuote(symbol: string): Promise<QuoteResult> {
+    await this.throttle();
     const t = await this.exchange.fetchTicker(symbol);
     const bid = t.bid;
     const ask = t.ask;
