@@ -20,6 +20,7 @@
     "./execution-planner": "./execution-planner.ts",
     "./grid-trading": "./grid-trading.ts",
     "./options": "./options.ts",
+    "./monte-carlo": "./monte-carlo.ts",
     "./portfolio-analytics": "./portfolio-analytics.ts",
     "./funding": "./funding.ts",
     "./ingest/exchange": "./ingest/exchange.ts",
