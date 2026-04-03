@@ -262,7 +262,7 @@ export function registerStrategyTools(server: McpServer, client: ExchangeClient)
           annualizedVolatility: Math.round(vol * 10000) / 10000,
           maxDrawdown: Math.round(mdd.maxDrawdown * 10000) / 10000,
           sharpeRatio: Math.round(sharpe * 100) / 100,
-          sortinoRatio: sortino === Infinity ? 'Infinity' : Math.round(sortino * 100) / 100,
+          sortinoRatio: Number.isFinite(sortino) ? Math.round(sortino * 100) / 100 : null,
           dataPoints: symReturns.length,
         });
       }
@@ -1189,15 +1189,15 @@ export function registerStrategyTools(server: McpServer, client: ExchangeClient)
       }
 
       // Compute volatility ratios between adjacent timeframes
-      const ratios: { from: string; to: string; ratio: number }[] = [];
+      const ratios: { from: string; to: string; ratio: number | null }[] = [];
       for (let i = 0; i < structure.length - 1; i++) {
         const ratio = structure[i + 1].annualizedVolatility !== 0
           ? structure[i].annualizedVolatility / structure[i + 1].annualizedVolatility
-          : Infinity;
+          : null;
         ratios.push({
           from: structure[i].timeframe,
           to: structure[i + 1].timeframe,
-          ratio: ratio === Infinity ? Infinity : Math.round(ratio * 10000) / 10000,
+          ratio: ratio != null ? Math.round(ratio * 10000) / 10000 : null,
         });
       }
 

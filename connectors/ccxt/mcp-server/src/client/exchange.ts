@@ -191,14 +191,14 @@ function formatTrade(t: any): TradeResult {
 // ── Client ──────────────────────────────────────────────────
 
 export class ExchangeClient {
-  private exchange: Exchange;
-  private _sandbox: boolean;
-  private limiter: RateLimiter | null;
+  private readonly exchange: Exchange;
+  private readonly _sandbox: boolean;
+  private readonly limiter: RateLimiter | null;
   readonly exchangeId: string;
   /** DuckDB store for read-through caching. Null when not configured. */
-  store: MarketDataStore | null;
+  readonly store: MarketDataStore | null;
   /** Trade journal for auto-recording executions. */
-  journal: any;  // TradeJournal | null
+  readonly journal: any;  // TradeJournal | null
   /** Per-method API latency tracker for performance monitoring. */
   readonly latency = new LatencyTracker();
 
@@ -514,7 +514,7 @@ export class ExchangeClient {
         timestamp: result.timestamp ?? Date.now(),
         orderId: result.id,
         strategy: null,
-      }).catch(() => {}); // best-effort, don't block order flow
+      }).catch((err: any) => { process.stderr.write(`[ccxt] journal write error: ${err?.message ?? err}\n`); });
     }
     return result;
   }
@@ -563,7 +563,7 @@ export class ExchangeClient {
         timestamp: result.timestamp ?? Date.now(),
         orderId: result.id,
         strategy: null,
-      }).catch(() => {}); // best-effort, don't block order flow
+      }).catch((err: any) => { process.stderr.write(`[ccxt] journal write error: ${err?.message ?? err}\n`); });
     }
     return result;
   }

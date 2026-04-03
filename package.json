@@ -28,6 +28,11 @@
     "duckdb": "^1.2.0",
     "yahoo-finance2": "^2.14.0"
   },
+  "overrides": {
+    "tar": "^7.5.11",
+    "cacache": "^19.0.1",
+    "@tootallnate/once": "^3.0.1"
+  },
   "workspaces": [
     "lib",
     "connectors/cube/mcp-server",

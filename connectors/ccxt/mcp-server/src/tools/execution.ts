@@ -103,8 +103,8 @@ export function registerExecutionTools(server: McpServer, client: ExchangeClient
 
       // Sort by spreadBps ascending (tightest first), errors at the end
       const sorted = quotes.sort((a, b) => {
-        const aSpread = (a as any).spreadBps ?? Infinity;
-        const bSpread = (b as any).spreadBps ?? Infinity;
+        const aSpread = (a as any).spreadBps ?? Number.MAX_SAFE_INTEGER;
+        const bSpread = (b as any).spreadBps ?? Number.MAX_SAFE_INTEGER;
         return aSpread - bSpread;
       });
 
@@ -160,7 +160,7 @@ export function registerExecutionTools(server: McpServer, client: ExchangeClient
 
       const buySellRatio = sellVolume > 0
         ? Math.round((buyVolume / sellVolume) * 100) / 100
-        : buyVolume > 0 ? Infinity : 0;
+        : buyVolume > 0 ? null : 0;
 
       const imbalancePct = totalVolume > 0
         ? Math.round(((buyVolume - sellVolume) / totalVolume) * 10000) / 100
@@ -502,8 +502,8 @@ export function registerExecutionTools(server: McpServer, client: ExchangeClient
 
       // Sort by momentum score descending (strongest first), errors at end
       results.sort((a, b) => {
-        const aScore = a.momentumScore ?? -Infinity;
-        const bScore = b.momentumScore ?? -Infinity;
+        const aScore = a.momentumScore ?? -Number.MAX_SAFE_INTEGER;
+        const bScore = b.momentumScore ?? -Number.MAX_SAFE_INTEGER;
         return bScore - aScore;
       });
 
