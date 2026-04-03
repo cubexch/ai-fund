@@ -1,15 +1,13 @@
 /**
- * Statistical arbitrage and pairs trading analytics.
- * Cointegration tests, hedge ratio estimation, spread analysis,
- * Kalman filter, and pair scoring.
- * Pure functions only — no async, no exchange clients, no MCP.
+ * Statistical arbitrage and pairs trading utilities.
+ * Cointegration tests, spread analysis, Kalman filtering, and pair scoring.
  */
 
-import { correlation, mean, standardDeviation, zScore } from './math.js';
+import { correlation, mean, standardDeviation, zScore as mathZScore } from './math.js';
 
-// ── Types ────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────
 
-export interface AdfTestResult {
+export interface AdfResult {
   statistic: number;
   pValue: number;
   stationary: boolean;
@@ -54,7 +52,7 @@ export interface PairScore {
   score: number;
 }
 
-export interface KalmanHedgeResult {
+export interface KalmanHedgeRatioResult {
   ratios: number[];
   currentRatio: number;
   confidence: number;
@@ -75,96 +73,106 @@ export interface RollingSpreadStatsResult {
   timestamps: number[];
 }
 
-// ── Internal Helpers ─────────────────────────────────────
+// ── OLS Helpers ───────────────────────────────────────────
 
-/**
- * Simple OLS regression: y = a + b*x.
- * Returns { slope, intercept, rSquared, residuals }.
- */
-function olsSimple(y: number[], x: number[]): {
-  slope: number;
-  intercept: number;
-  rSquared: number;
-  residuals: number[];
-} {
+function olsRegression(y: number[], x: number[]): { slope: number; intercept: number; residuals: number[]; rSquared: number } {
   const n = Math.min(y.length, x.length);
-  if (n < 2) return { slope: 0, intercept: 0, rSquared: 0, residuals: [] };
+  if (n < 2) return { slope: 0, intercept: 0, residuals: [], rSquared: 0 };
 
-  const xm = mean(x.slice(0, n));
-  const ym = mean(y.slice(0, n));
+  const xSlice = x.slice(0, n);
+  const ySlice = y.slice(0, n);
+  const xMean = mean(xSlice);
+  const yMean = mean(ySlice);
 
   let sumXY = 0;
   let sumX2 = 0;
 
   for (let i = 0; i < n; i++) {
-    const dx = x[i] - xm;
-    sumXY += dx * (y[i] - ym);
+    const dx = xSlice[i] - xMean;
+    sumXY += dx * (ySlice[i] - yMean);
     sumX2 += dx * dx;
   }
 
   const slope = sumX2 === 0 ? 0 : sumXY / sumX2;
-  const intercept = ym - slope * xm;
+  const intercept = yMean - slope * xMean;
 
   const residuals: number[] = [];
   let ssRes = 0;
   let ssTot = 0;
 
   for (let i = 0; i < n; i++) {
-    const r = y[i] - (intercept + slope * x[i]);
-    residuals.push(r);
-    ssRes += r * r;
-    ssTot += (y[i] - ym) ** 2;
+    const predicted = slope * xSlice[i] + intercept;
+    const resid = ySlice[i] - predicted;
+    residuals.push(resid);
+    ssRes += resid * resid;
+    ssTot += (ySlice[i] - yMean) ** 2;
   }
 
-  const rSquared = ssTot === 0 ? 0 : Math.max(0, 1 - ssRes / ssTot);
+  const rSquared = ssTot === 0 ? 0 : 1 - ssRes / ssTot;
 
-  return { slope, intercept, rSquared, residuals };
+  return { slope, intercept, residuals, rSquared };
 }
 
+// ── MacKinnon Critical Values ─────────────────────────────
+
 /**
- * MacKinnon critical values for ADF test (no trend, constant only).
- * Approximated for finite samples.
+ * Approximate MacKinnon critical values for the ADF test (no trend, constant only).
+ * These are interpolated from standard tables for common sample sizes.
  */
-function adfCriticalValues(n: number): { '1%': number; '5%': number; '10%': number } {
-  // Asymptotic values with finite-sample corrections
-  return {
-    '1%': -3.43 - 6.0 / n,
-    '5%': -2.86 - 2.74 / n,
-    '10%': -2.57 - 1.67 / n,
+function mackinnonCriticalValues(n: number): { '1%': number; '5%': number; '10%': number } {
+  // MacKinnon (1994) response surface coefficients for tau (no trend, constant)
+  // cv = tau_inf + tau_1/T + tau_2/T^2
+  const coeffs = {
+    '1%':  { inf: -3.4336, c1: -5.999, c2: -29.25 },
+    '5%':  { inf: -2.8621, c1: -2.738, c2: -8.36 },
+    '10%': { inf: -2.5671, c1: -1.438, c2: -4.48 },
   };
+
+  const cv = (k: '1%' | '5%' | '10%'): number => {
+    const c = coeffs[k];
+    return c.inf + c.c1 / n + c.c2 / (n * n);
+  };
+
+  return { '1%': cv('1%'), '5%': cv('5%'), '10%': cv('10%') };
 }
 
 /**
- * Approximate p-value from ADF statistic using interpolation.
+ * Approximate p-value from ADF statistic using MacKinnon interpolation.
  */
 function adfPValue(stat: number, n: number): number {
-  const cv = adfCriticalValues(n);
+  const cv = mackinnonCriticalValues(n);
+  // Linear interpolation between critical values
   if (stat <= cv['1%']) return 0.005;
-  if (stat <= cv['5%']) return 0.03;
-  if (stat <= cv['10%']) return 0.07;
-  // Linear interpolation beyond 10%
-  const diff = stat - cv['10%'];
-  return Math.min(1, 0.1 + diff * 0.15);
+  if (stat <= cv['5%']) {
+    const frac = (stat - cv['1%']) / (cv['5%'] - cv['1%']);
+    return 0.01 + frac * 0.04;
+  }
+  if (stat <= cv['10%']) {
+    const frac = (stat - cv['5%']) / (cv['10%'] - cv['5%']);
+    return 0.05 + frac * 0.05;
+  }
+  // Beyond 10% — extrapolate toward 1.0
+  const dist = stat - cv['10%'];
+  const range = cv['10%'] - cv['1%'];
+  const extrapolated = 0.10 + (dist / Math.abs(range)) * 0.45;
+  return Math.min(1.0, extrapolated);
 }
 
-// ── Public Functions ─────────────────────────────────────
+// ── ADF Test ──────────────────────────────────────────────
 
 /**
  * Augmented Dickey-Fuller unit root test.
  * Tests H0: series has a unit root (non-stationary).
+ * Rejects when statistic < critical value (more negative).
  */
-export function adfTest(series: number[]): AdfTestResult {
+export function adfTest(series: number[]): AdfResult {
   const n = series.length;
-  if (n < 4) {
-    return {
-      statistic: 0,
-      pValue: 1,
-      stationary: false,
-      criticalValues: { '1%': -3.43, '5%': -2.86, '10%': -2.57 },
-    };
+  if (n < 10) {
+    const cv = mackinnonCriticalValues(n);
+    return { statistic: 0, pValue: 1, stationary: false, criticalValues: cv };
   }
 
-  // First differences
+  // First differences: dy[t] = y[t] - y[t-1]
   const dy: number[] = [];
   const yLag: number[] = [];
   for (let i = 1; i < n; i++) {
@@ -172,31 +180,29 @@ export function adfTest(series: number[]): AdfTestResult {
     yLag.push(series[i - 1]);
   }
 
-  // Regress dy on y_{t-1} (with augmented lags for serial correlation)
-  const maxLag = Math.min(Math.floor(Math.sqrt(n)), 10);
-  const usedN = dy.length - maxLag;
-  if (usedN < 3) {
-    return {
-      statistic: 0,
-      pValue: 1,
-      stationary: false,
-      criticalValues: adfCriticalValues(n),
-    };
+  // OLS: dy = alpha + gamma * y_lag + e
+  // The t-statistic on gamma is the ADF statistic
+  const reg = olsRegression(dy, yLag);
+  const gamma = reg.slope;
+
+  // Standard error of gamma
+  const m = dy.length;
+  let ssRes = 0;
+  for (const r of reg.residuals) {
+    ssRes += r * r;
+  }
+  const sigmaSquared = ssRes / (m - 2);
+
+  const yLagMean = mean(yLag);
+  let sumYLagDev = 0;
+  for (const y of yLag) {
+    sumYLagDev += (y - yLagMean) ** 2;
   }
 
-  // Build regression: dy_t = alpha + gamma * y_{t-1} + sum(beta_i * dy_{t-i}) + e
-  // Simplified: just use the basic DF test (dy on y_lag)
-  const reg = olsSimple(dy, yLag);
+  const seGamma = sumYLagDev === 0 ? Infinity : Math.sqrt(sigmaSquared / sumYLagDev);
+  const tStat = seGamma === Infinity ? 0 : gamma / seGamma;
 
-  // t-statistic for gamma (slope)
-  const ssRes = reg.residuals.reduce((s, r) => s + r * r, 0);
-  const mse = ssRes / (dy.length - 2);
-  const xm = mean(yLag);
-  const sumX2 = yLag.reduce((s, x) => s + (x - xm) ** 2, 0);
-  const seSlope = sumX2 === 0 ? Infinity : Math.sqrt(mse / sumX2);
-  const tStat = seSlope === Infinity ? 0 : reg.slope / seSlope;
-
-  const criticalValues = adfCriticalValues(n);
+  const criticalValues = mackinnonCriticalValues(n);
   const pValue = adfPValue(tStat, n);
 
   return {
@@ -207,77 +213,84 @@ export function adfTest(series: number[]): AdfTestResult {
   };
 }
 
+// ── Engle-Granger Cointegration ───────────────────────────
+
 /**
  * Engle-Granger two-step cointegration test.
  * Step 1: OLS regression of seriesA on seriesB to get residuals.
- * Step 2: ADF test on residuals.
+ * Step 2: ADF test on residuals — if stationary, the series are cointegrated.
  */
 export function engleGranger(seriesA: number[], seriesB: number[]): EngleGrangerResult {
   const n = Math.min(seriesA.length, seriesB.length);
-  if (n < 5) {
+  if (n < 10) {
+    const cv = mackinnonCriticalValues(n);
     return {
       cointegrated: false,
       pValue: 1,
       hedgeRatio: 0,
       residuals: [],
       adfStat: 0,
-      criticalValues: { '1%': -3.43, '5%': -2.86, '10%': -2.57 },
+      criticalValues: cv,
     };
   }
 
   const a = seriesA.slice(0, n);
   const b = seriesB.slice(0, n);
 
-  // Step 1: OLS regression A = alpha + beta * B + residuals
-  const reg = olsSimple(a, b);
+  // Step 1: OLS regression A = beta * B + alpha + epsilon
+  const reg = olsRegression(a, b);
 
   // Step 2: ADF test on residuals
   const adf = adfTest(reg.residuals);
 
-  // Use stricter critical values for cointegration (Engle-Granger)
-  // Roughly 0.5 more negative than standard ADF
-  const criticalValues = {
-    '1%': adf.criticalValues['1%'] - 0.5,
-    '5%': adf.criticalValues['5%'] - 0.3,
-    '10%': adf.criticalValues['10%'] - 0.2,
+  // For cointegration residuals, use slightly more conservative critical values
+  // (Engle-Granger CVs are more negative than standard ADF)
+  const egCriticalValues = {
+    '1%': adf.criticalValues['1%'] - 0.30,
+    '5%': adf.criticalValues['5%'] - 0.25,
+    '10%': adf.criticalValues['10%'] - 0.20,
   };
 
   return {
-    cointegrated: adf.statistic < criticalValues['5%'],
+    cointegrated: adf.statistic < egCriticalValues['5%'],
     pValue: adf.pValue,
     hedgeRatio: reg.slope,
     residuals: reg.residuals,
     adfStat: adf.statistic,
-    criticalValues,
+    criticalValues: egCriticalValues,
   };
 }
 
+// ── Half-Life ─────────────────────────────────────────────
+
 /**
- * Half-life of mean reversion via AR(1) on residuals.
- * halfLife = -log(2) / log(lambda) where lambda is AR(1) coefficient.
+ * Half-life of mean reversion via Ornstein-Uhlenbeck process.
+ * Fits OLS: delta_y = lambda * y_lag + epsilon
+ * Half-life = -ln(2) / lambda
  */
 export function halfLife(residuals: number[]): number {
-  const n = residuals.length;
-  if (n < 3) return Infinity;
+  if (residuals.length < 3) return Infinity;
 
-  const y: number[] = [];
-  const x: number[] = [];
-  for (let i = 1; i < n; i++) {
-    y.push(residuals[i] - residuals[i - 1]);
-    x.push(residuals[i - 1]);
+  const dy: number[] = [];
+  const yLag: number[] = [];
+
+  for (let i = 1; i < residuals.length; i++) {
+    dy.push(residuals[i] - residuals[i - 1]);
+    yLag.push(residuals[i - 1]);
   }
 
-  const reg = olsSimple(y, x);
+  const reg = olsRegression(dy, yLag);
   const lambda = reg.slope;
 
-  // lambda should be negative for mean-reverting series
-  if (lambda >= 0) return Infinity;
-
+  if (lambda >= 0) return Infinity; // No mean reversion
   return -Math.log(2) / Math.log(1 + lambda);
 }
 
+// ── Hedge Ratio ───────────────────────────────────────────
+
 /**
- * Hedge ratio estimation via OLS or Total Least Squares.
+ * Compute hedge ratio between two price series.
+ * @param method - 'ols' (default) or 'tls' (Total Least Squares / Deming regression)
  */
 export function hedgeRatio(
   seriesA: number[],
@@ -291,70 +304,91 @@ export function hedgeRatio(
   const b = seriesB.slice(0, n);
 
   if (method === 'ols') {
-    const reg = olsSimple(a, b);
+    const reg = olsRegression(a, b);
     return { ratio: reg.slope, intercept: reg.intercept, rSquared: reg.rSquared };
   }
 
-  // Total Least Squares (orthogonal regression)
-  const am = mean(a);
-  const bm = mean(b);
+  // Total Least Squares (orthogonal regression / Deming regression with delta=1)
+  const aMean = mean(a);
+  const bMean = mean(b);
 
-  let sAA = 0, sBB = 0, sAB = 0;
+  let sxx = 0, syy = 0, sxy = 0;
   for (let i = 0; i < n; i++) {
-    const da = a[i] - am;
-    const db = b[i] - bm;
-    sAA += da * da;
-    sBB += db * db;
-    sAB += da * db;
+    const dx = b[i] - bMean;
+    const dy = a[i] - aMean;
+    sxx += dx * dx;
+    syy += dy * dy;
+    sxy += dx * dy;
   }
 
-  // TLS slope via eigenvalue of 2x2 covariance matrix
-  const diff = sBB - sAA;
-  const ratio = (diff + Math.sqrt(diff * diff + 4 * sAB * sAB)) / (2 * sAB || 1);
-  const intercept = am - ratio * bm;
+  // TLS slope: (syy - sxx + sqrt((syy - sxx)^2 + 4*sxy^2)) / (2*sxy)
+  const diff = syy - sxx;
+  const denom = 2 * sxy;
+  const ratio = denom === 0 ? 0 : (diff + Math.sqrt(diff * diff + 4 * sxy * sxy)) / denom;
+  const intercept = aMean - ratio * bMean;
 
-  // Approximate R² from correlation
-  const corr = correlation(a, b);
-  const rSquared = corr * corr;
+  // R-squared approximation
+  let ssRes = 0, ssTot = 0;
+  for (let i = 0; i < n; i++) {
+    const predicted = ratio * b[i] + intercept;
+    ssRes += (a[i] - predicted) ** 2;
+    ssTot += (a[i] - aMean) ** 2;
+  }
+  const rSquared = ssTot === 0 ? 0 : 1 - ssRes / ssTot;
 
   return { ratio, intercept, rSquared };
 }
 
+// ── Spread Z-Score ────────────────────────────────────────
+
 /**
- * Current z-score of the spread between two series.
+ * Compute the z-score of the current spread between two series.
+ * spread = seriesA - hedgeRatio * seriesB
  */
 export function spreadZScore(
   seriesA: number[],
   seriesB: number[],
-  ratio: number,
+  hr: number,
   lookback?: number
 ): SpreadZScoreResult {
   const n = Math.min(seriesA.length, seriesB.length);
   if (n < 2) return { zScore: 0, spread: 0, mean: 0, std: 0, percentile: 50 };
 
-  // Compute spread
+  const a = seriesA.slice(0, n);
+  const b = seriesB.slice(0, n);
+
+  // Compute spread series
   const spreads: number[] = [];
   for (let i = 0; i < n; i++) {
-    spreads.push(seriesA[i] - ratio * seriesB[i]);
+    spreads.push(a[i] - hr * b[i]);
   }
 
-  const window = lookback ? Math.min(lookback, n) : n;
-  const recent = spreads.slice(n - window);
-  const currentSpread = spreads[n - 1];
-  const m = mean(recent);
-  const s = standardDeviation(recent);
+  // Use lookback window if specified
+  const window = lookback && lookback > 0 ? Math.min(lookback, n) : n;
+  const windowSpreads = spreads.slice(-window);
+  const currentSpread = spreads[spreads.length - 1];
 
-  const z = s === 0 ? 0 : (currentSpread - m) / s;
+  const spreadMean = mean(windowSpreads);
+  const spreadStd = standardDeviation(windowSpreads);
+  const z = spreadStd === 0 ? 0 : (currentSpread - spreadMean) / spreadStd;
 
-  // Percentile: count how many values are below current
-  const below = recent.filter(v => v <= currentSpread).length;
-  const percentile = (below / recent.length) * 100;
+  // Percentile: percentage of window spreads at or below current (0-100)
+  const below = windowSpreads.filter(s => s <= currentSpread).length;
+  const percentile = windowSpreads.length === 0 ? 50 : (below / windowSpreads.length) * 100;
 
-  return { zScore: z, spread: currentSpread, mean: m, std: s, percentile };
+  return {
+    zScore: z,
+    spread: currentSpread,
+    mean: spreadMean,
+    std: spreadStd,
+    percentile,
+  };
 }
 
+// ── Pair Signal ───────────────────────────────────────────
+
 /**
- * Generate trading signal from z-score.
+ * Generate a pairs trading signal from the current z-score.
  */
 export function pairSignal(params: {
   zScore: number;
@@ -362,39 +396,50 @@ export function pairSignal(params: {
   exitThreshold?: number;
   stopLoss?: number;
 }): PairSignalResult {
-  const entry = params.entryThreshold ?? 2.0;
-  const exit = params.exitThreshold ?? 0.5;
-  const stop = params.stopLoss ?? 4.0;
-  const z = params.zScore;
+  const {
+    zScore: z,
+    entryThreshold = 2.0,
+    exitThreshold = 0.5,
+    stopLoss = 4.0,
+  } = params;
+
   const absZ = Math.abs(z);
 
-  if (absZ >= stop) {
-    return { signal: 'stop', strength: Math.min(1, absZ / stop) };
+  // Stop loss — spread has blown out
+  if (absZ >= stopLoss) {
+    return { signal: 'stop', strength: Math.min(1, absZ / stopLoss) };
   }
 
-  if (absZ >= entry) {
-    const signal = z > 0 ? 'short_spread' : 'long_spread';
-    const strength = Math.min(1, (absZ - entry) / (stop - entry));
-    return { signal, strength };
+  // Entry signals
+  if (z >= entryThreshold) {
+    // Spread is wide positive — short the spread (short A, long B)
+    const strength = Math.min(1, (absZ - entryThreshold) / (stopLoss - entryThreshold) + 0.5);
+    return { signal: 'short_spread', strength };
   }
 
-  if (absZ <= exit) {
-    return { signal: 'exit', strength: 1 - absZ / exit };
+  if (z <= -entryThreshold) {
+    // Spread is wide negative — long the spread (long A, short B)
+    const strength = Math.min(1, (absZ - entryThreshold) / (stopLoss - entryThreshold) + 0.5);
+    return { signal: 'long_spread', strength };
   }
 
+  // Exit signal — spread has reverted
+  if (absZ <= exitThreshold) {
+    return { signal: 'exit', strength: 1 - absZ / exitThreshold };
+  }
+
+  // Between exit and entry thresholds — neutral
   return { signal: 'neutral', strength: 0 };
 }
 
+// ── Score Pairs ───────────────────────────────────────────
+
 /**
- * Score and rank pair candidates by cointegration, half-life, and correlation.
+ * Rank candidate pairs by cointegration strength, half-life, and correlation.
+ * Returns sorted array (best first).
  */
 export function scorePairs(
-  candidates: Array<{
-    symbolA: string;
-    symbolB: string;
-    pricesA: number[];
-    pricesB: number[];
-  }>
+  candidates: Array<{ symbolA: string; symbolB: string; pricesA: number[]; pricesB: number[] }>
 ): PairScore[] {
   const results: PairScore[] = [];
 
@@ -442,145 +487,201 @@ export function scorePairs(
   return results.sort((a, b) => b.score - a.score);
 }
 
+// ── Kalman Filter Hedge Ratio ─────────────────────────────
+
 /**
- * Kalman filter for time-varying hedge ratio.
+ * Time-varying hedge ratio via Kalman filter.
+ * Models: seriesA[t] = beta[t] * seriesB[t] + epsilon[t]
+ * where beta[t] evolves as a random walk.
  */
 export function kalmanHedgeRatio(
   seriesA: number[],
   seriesB: number[],
   params?: { processNoise?: number; measurementNoise?: number }
-): KalmanHedgeResult {
+): KalmanHedgeRatioResult {
   const n = Math.min(seriesA.length, seriesB.length);
   if (n < 2) return { ratios: [], currentRatio: 0, confidence: 0 };
 
-  const Q = params?.processNoise ?? 1e-5;  // Process noise (state evolution)
-  const R = params?.measurementNoise ?? 1e-3;  // Measurement noise
+  const a = seriesA.slice(0, n);
+  const b = seriesB.slice(0, n);
 
-  // State: hedge ratio (beta)
-  // Observation: seriesA[t] = beta * seriesB[t] + noise
-  let beta = 0;
-  let P = 1;  // State covariance
+  const Q = params?.processNoise ?? 1e-5;   // Process noise (state transition)
+  const R = params?.measurementNoise ?? 1e-3; // Measurement noise
 
-  // Initialize with OLS on first 10 points
-  const initN = Math.min(10, n);
-  const initReg = olsSimple(seriesA.slice(0, initN), seriesB.slice(0, initN));
-  beta = initReg.slope;
+  // Initialize state with OLS estimate
+  const initReg = olsRegression(a.slice(0, Math.min(20, n)), b.slice(0, Math.min(20, n)));
+  let betaHat = initReg.slope;
+  let P = 1.0; // Error covariance
 
   const ratios: number[] = [];
 
-  for (let t = 0; t < n; t++) {
+  for (let i = 0; i < n; i++) {
     // Prediction step
-    const betaPred = beta;
-    const PPred = P + Q;
+    // beta_hat stays the same (random walk)
+    P = P + Q;
 
     // Update step
-    const y = seriesA[t];  // observation
-    const H = seriesB[t];  // observation matrix (scalar)
-    const innovation = y - H * betaPred;
-    const S = H * PPred * H + R;  // Innovation covariance
-    const K = S === 0 ? 0 : PPred * H / S;  // Kalman gain
+    const H = b[i]; // Observation matrix element
+    const innovation = a[i] - betaHat * H;
+    const S = H * P * H + R; // Innovation covariance
+    const K = S === 0 ? 0 : (P * H) / S; // Kalman gain
 
-    beta = betaPred + K * innovation;
-    P = (1 - K * H) * PPred;
+    betaHat = betaHat + K * innovation;
+    P = (1 - K * H) * P;
 
-    ratios.push(beta);
+    ratios.push(betaHat);
   }
 
-  // Confidence from final state covariance
+  // Confidence from final error covariance — lower P = higher confidence
   const confidence = Math.max(0, Math.min(1, 1 - Math.sqrt(P)));
 
   return {
     ratios,
-    currentRatio: beta,
+    currentRatio: ratios[ratios.length - 1],
     confidence,
   };
 }
 
+// ── Johansen Trace Test (Simplified) ──────────────────────
+
 /**
  * Simplified Johansen trace test for cointegration rank among multiple series.
+ * Uses eigenvalue decomposition of the concentrated product moment matrices.
+ *
+ * This is a simplified implementation that computes trace statistics from
+ * the canonical correlations between first differences and lagged levels.
  */
 export function johansen(series: number[][], maxLag: number = 1): JohansenResult {
-  const p = series.length;  // number of series
-  if (p < 2) return { rank: 0, eigenvalues: [], traceStats: [], criticalValues: [] };
+  const k = series.length; // Number of series
+  if (k < 2) return { rank: 0, eigenvalues: [], traceStats: [], criticalValues: [] };
 
   const n = Math.min(...series.map(s => s.length));
-  if (n < p + 3) return { rank: 0, eigenvalues: [], traceStats: [], criticalValues: [] };
+  if (n < k + maxLag + 10) {
+    return { rank: 0, eigenvalues: Array(k).fill(0), traceStats: Array(k).fill(0), criticalValues: Array(k).fill(0) };
+  }
 
-  // Compute first differences and levels
-  const diffs: number[][] = series.map(s => {
-    const d: number[] = [];
-    for (let i = 1; i < n; i++) d.push(s[i] - s[i - 1]);
-    return d;
-  });
+  // Compute first differences and lagged levels
+  const T = n - maxLag;
+  const dY: number[][] = Array.from({ length: k }, () => []);
+  const yLag: number[][] = Array.from({ length: k }, () => []);
 
-  const T = diffs[0].length;
-
-  // Build cross-product matrices for reduced rank regression
-  // Simplified: use eigenvalues of the correlation matrix of levels
-  // as a proxy for cointegration rank
-  const levels = series.map(s => s.slice(0, n));
-
-  // Compute correlation matrix of levels
-  const corrMatrix: number[][] = Array.from({ length: p }, () => Array(p).fill(0));
-  for (let i = 0; i < p; i++) {
-    for (let j = i; j < p; j++) {
-      const c = correlation(levels[i], levels[j]);
-      corrMatrix[i][j] = c;
-      corrMatrix[j][i] = c;
+  for (let t = maxLag; t < n; t++) {
+    for (let j = 0; j < k; j++) {
+      dY[j].push(series[j][t] - series[j][t - 1]);
+      yLag[j].push(series[j][t - 1]);
     }
   }
 
-  // Power iteration for eigenvalues (simplified)
-  const eigenvalues: number[] = [];
-  let mat = corrMatrix.map(r => [...r]);
+  // Compute S00, S01, S10, S11 matrices (k x k)
+  // S00 = (1/T) * dY' * dY (after demeaning)
+  // S11 = (1/T) * yLag' * yLag (after demeaning)
+  // S01 = (1/T) * dY' * yLag (after demeaning)
 
-  for (let f = 0; f < p; f++) {
-    let v = Array(p).fill(1 / Math.sqrt(p));
-    let eigenvalue = 0;
+  const dYMeans = dY.map(d => mean(d));
+  const yLagMeans = yLag.map(y => mean(y));
 
-    for (let iter = 0; iter < 100; iter++) {
-      const mv = mat.map(row => row.reduce((s, val, j) => s + val * v[j], 0));
-      eigenvalue = Math.sqrt(mv.reduce((s, x) => s + x * x, 0));
-      if (eigenvalue < 1e-12) break;
-      v = mv.map(x => x / eigenvalue);
-    }
-
-    eigenvalues.push(eigenvalue);
-
-    // Deflate
-    for (let i = 0; i < p; i++) {
-      for (let j = 0; j < p; j++) {
-        mat[i][j] -= eigenvalue * v[i] * v[j];
+  const computeMatrix = (a: number[][], aMeans: number[], b: number[][], bMeans: number[]): number[][] => {
+    const m: number[][] = Array.from({ length: k }, () => Array(k).fill(0));
+    for (let i = 0; i < k; i++) {
+      for (let j = 0; j < k; j++) {
+        let s = 0;
+        for (let t = 0; t < T; t++) {
+          s += (a[i][t] - aMeans[i]) * (b[j][t] - bMeans[j]);
+        }
+        m[i][j] = s / T;
       }
     }
-  }
+    return m;
+  };
 
-  eigenvalues.sort((a, b) => b - a);
+  const S00 = computeMatrix(dY, dYMeans, dY, dYMeans);
+  const S11 = computeMatrix(yLag, yLagMeans, yLag, yLagMeans);
+  const S01 = computeMatrix(dY, dYMeans, yLag, yLagMeans);
+  const S10 = computeMatrix(yLag, yLagMeans, dY, dYMeans);
 
-  // Trace statistics: -T * sum(log(1 - lambda_i)) for i = r+1..p
-  const traceStats: number[] = [];
-  for (let r = 0; r < p; r++) {
-    let trace = 0;
-    for (let i = r; i < p; i++) {
-      const lambda = Math.max(0, Math.min(1 - 1e-10, eigenvalues[i] / (eigenvalues[0] + 1)));
-      trace += -T * Math.log(1 - lambda);
+  // For a simplified approach, compute eigenvalues of S11^{-1} * S10 * S00^{-1} * S01
+  // For 2x2, we can compute analytically; for larger, use power iteration approximation
+  const eigenvalues: number[] = [];
+
+  if (k === 2) {
+    // 2x2 case: analytical eigenvalue computation
+    // Compute S11^{-1} * S10 * S00^{-1} * S01
+    const detS00 = S00[0][0] * S00[1][1] - S00[0][1] * S00[1][0];
+    const detS11 = S11[0][0] * S11[1][1] - S11[0][1] * S11[1][0];
+
+    if (Math.abs(detS00) < 1e-15 || Math.abs(detS11) < 1e-15) {
+      return { rank: 0, eigenvalues: [0, 0], traceStats: [0, 0], criticalValues: [15.41, 3.76] };
     }
-    traceStats.push(trace);
+
+    // S00^{-1}
+    const s00Inv: number[][] = [
+      [S00[1][1] / detS00, -S00[0][1] / detS00],
+      [-S00[1][0] / detS00, S00[0][0] / detS00],
+    ];
+
+    // S11^{-1}
+    const s11Inv: number[][] = [
+      [S11[1][1] / detS11, -S11[0][1] / detS11],
+      [-S11[1][0] / detS11, S11[0][0] / detS11],
+    ];
+
+    // M = S11^{-1} * S10 * S00^{-1} * S01
+    const matMul = (A: number[][], B: number[][]): number[][] => {
+      const r: number[][] = [[0, 0], [0, 0]];
+      for (let i = 0; i < 2; i++)
+        for (let j = 0; j < 2; j++)
+          for (let p = 0; p < 2; p++)
+            r[i][j] += A[i][p] * B[p][j];
+      return r;
+    };
+
+    const temp1 = matMul(s11Inv, S10);
+    const temp2 = matMul(s00Inv, S01);
+    const M = matMul(temp1, temp2);
+
+    // Eigenvalues of 2x2 matrix
+    const trace = M[0][0] + M[1][1];
+    const det = M[0][0] * M[1][1] - M[0][1] * M[1][0];
+    const disc = trace * trace - 4 * det;
+    const sqrtDisc = Math.sqrt(Math.max(0, disc));
+
+    const e1 = Math.max(0, Math.min(1, (trace + sqrtDisc) / 2));
+    const e2 = Math.max(0, Math.min(1, (trace - sqrtDisc) / 2));
+    eigenvalues.push(e1, e2);
+  } else {
+    // General case: approximate eigenvalues via squared canonical correlations
+    // Use correlation between each pair of dY and yLag as rough proxy
+    for (let j = 0; j < k; j++) {
+      const corr = correlation(dY[j], yLag[j]);
+      eigenvalues.push(Math.max(0, Math.min(1, corr * corr)));
+    }
+    eigenvalues.sort((a, b) => b - a);
   }
 
-  // Critical values for trace test (approximate, from Osterwald-Lenum tables)
-  const critTable: Record<number, number[]> = {
+  // Trace statistics: -T * sum_{i=r+1}^{k} ln(1 - lambda_i)
+  const traceStats: number[] = [];
+  for (let r = 0; r < k; r++) {
+    let stat = 0;
+    for (let i = r; i < k; i++) {
+      stat += Math.log(1 - Math.min(0.9999, eigenvalues[i]));
+    }
+    traceStats.push(-T * stat);
+  }
+
+  // Critical values (Osterwald-Lenum 95% tables, commonly used values)
+  // For k variables: trace test critical values at 5%
+  const traceCV: Record<number, number[]> = {
     2: [15.41, 3.76],
     3: [29.68, 15.41, 3.76],
     4: [47.21, 29.68, 15.41, 3.76],
     5: [68.52, 47.21, 29.68, 15.41, 3.76],
   };
-  const criticalValues = critTable[p] ?? Array(p).fill(15.41);
+  const criticalValues = traceCV[k] ?? Array.from({ length: k }, (_, i) => 3.76 + (k - i - 1) * 15);
 
-  // Determine rank
+  // Determine rank: number of trace stats exceeding critical values
   let rank = 0;
-  for (let r = 0; r < p; r++) {
-    if (r < traceStats.length && r < criticalValues.length && traceStats[r] > criticalValues[r]) {
+  for (let r = 0; r < k; r++) {
+    if (traceStats[r] > criticalValues[r]) {
       rank = r + 1;
     } else {
       break;
@@ -590,13 +691,16 @@ export function johansen(series: number[][], maxLag: number = 1): JohansenResult
   return { rank, eigenvalues, traceStats, criticalValues };
 }
 
+// ── Rolling Spread Stats ──────────────────────────────────
+
 /**
- * Rolling spread statistics: mean, std, z-score, and half-life over rolling windows.
+ * Compute rolling statistics of the spread between two series.
+ * Returns arrays of rolling mean, std, z-score, and half-life.
  */
 export function rollingSpreadStats(
   seriesA: number[],
   seriesB: number[],
-  ratio: number,
+  hr: number,
   window: number
 ): RollingSpreadStatsResult {
   const n = Math.min(seriesA.length, seriesB.length);
@@ -604,9 +708,13 @@ export function rollingSpreadStats(
     return { means: [], stds: [], zScores: [], halfLives: [], timestamps: [] };
   }
 
+  const a = seriesA.slice(0, n);
+  const b = seriesB.slice(0, n);
+
+  // Compute full spread series
   const spreads: number[] = [];
   for (let i = 0; i < n; i++) {
-    spreads.push(seriesA[i] - ratio * seriesB[i]);
+    spreads.push(a[i] - hr * b[i]);
   }
 
   const means: number[] = [];
