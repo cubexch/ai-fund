@@ -1367,3 +1367,99 @@ describe('calculate_dca_schedule tool', () => {
     }
   });
 });
+
+// ── optimize_grid_params ────────────────────────────────
+
+describe('optimize_grid_params tool', () => {
+  it('returns grid levels with correct structure', async () => {
+    const { server } = setup();
+    const result = await server.callTool('optimize_grid_params', {
+      symbol: 'BTC/USDT',
+      timeframe: '4h',
+      period: 100,
+      num_grids: 10,
+    });
+
+    expect(result.isError).toBeUndefined();
+    const data = JSON.parse(result.content[0].text);
+
+    expect(data.symbol).toBe('BTC/USDT');
+    expect(data.priceRange).toBeDefined();
+    expect(data.priceRange.high).toBeTypeOf('number');
+    expect(data.priceRange.low).toBeTypeOf('number');
+    expect(data.priceRange.current).toBeTypeOf('number');
+    expect(data.priceRange.bbUpper).toBeTypeOf('number');
+    expect(data.priceRange.bbLower).toBeTypeOf('number');
+    expect(data.priceRange.bbUpper).toBeGreaterThan(data.priceRange.bbLower);
+
+    expect(data.gridLevels).toHaveLength(10);
+    for (const level of data.gridLevels) {
+      expect(level.price).toBeTypeOf('number');
+      expect(level.price).toBeGreaterThan(0);
+      expect(['buy', 'sell']).toContain(level.side);
+      expect(level.amount).toBeTypeOf('number');
+      expect(level.amount).toBeGreaterThan(0);
+    }
+
+    expect(data.spacing).toBeTypeOf('number');
+    expect(data.spacing).toBeGreaterThan(0);
+
+    expect(data.atrBased).toBeDefined();
+    expect(data.atrBased.currentAtr).toBeTypeOf('number');
+    expect(data.atrBased.avgAtr).toBeTypeOf('number');
+    expect(data.atrBased.atrRatio).toBeTypeOf('number');
+
+    expect(data.expectedDailyTrades).toBeTypeOf('number');
+    expect(['low', 'normal', 'high']).toContain(data.volRegime);
+  });
+
+  it('rejects insufficient candle data', async () => {
+    const { server } = setup({
+      getBars: async () => [
+        { timestamp: 1, open: 1, high: 2, low: 0.5, close: 1.5, volume: 100 },
+      ],
+    });
+    const result = await server.callTool('optimize_grid_params', {
+      symbol: 'BTC/USDT',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('at least 26 candles');
+  });
+
+  it('respects num_grids parameter', async () => {
+    const { server } = setup();
+    const result = await server.callTool('optimize_grid_params', {
+      symbol: 'BTC/USDT',
+      num_grids: 5,
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.gridLevels).toHaveLength(5);
+  });
+
+  it('grid levels are sorted by price ascending', async () => {
+    const { server } = setup();
+    const result = await server.callTool('optimize_grid_params', {
+      symbol: 'BTC/USDT',
+      num_grids: 10,
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    for (let i = 1; i < data.gridLevels.length; i++) {
+      expect(data.gridLevels[i].price).toBeGreaterThan(data.gridLevels[i - 1].price);
+    }
+  });
+
+  it('defaults timeframe and period when not provided', async () => {
+    const { server, client } = setup();
+    await server.callTool('optimize_grid_params', {
+      symbol: 'BTC/USDT',
+    });
+
+    const call = client.calls.find(c => c.method === 'getBars');
+    expect(call).toBeDefined();
+    expect(call!.args[0]).toBe('BTC/USDT');
+    expect(call!.args[1]).toBe('4h');
+    expect(call!.args[3]).toBe(100);
+  });
+});
