@@ -1,6 +1,6 @@
 # AI Fund
 
-An AI trading desk with 42 hedge fund agent personas (including 20 named personas like Arthur Hayes, Jim Simons, George Soros, and Jesse Livermore) for Claude Code. Trade on any exchange — Cube, OKX, Kraken, Binance, Coinbase, and 100+ more via CCXT.
+An AI trading desk with 42 hedge fund agent personas (including 20 named personas like Arthur Hayes, Jim Simons, George Soros, and Jesse Livermore). Works with Claude Code, OpenClaw, Codex, or any AI coding agent. Trade on any exchange — Cube, OKX, Kraken, Binance, Coinbase, and 100+ more via CCXT.
 
 ## Project Structure
 
@@ -16,10 +16,13 @@ ai-fund/
 │       ├── src/tools/       # market-data, orders, account, defi, risk
 │       ├── src/resources/   # markets, portfolio
 │       └── tests/           # vitest test suites
-├── lib/                 # Shared TS: indicators, math, format
-├── bin/desk-state       # CLI for .desk/ state management
+├── lib/                 # Shared TS: indicators, math, format, exec
+│   └── exec.ts          # Runtime-agnostic execution layer
+├── bin/exec             # CLI for desk operations (any runtime)
+├── bin/desk-state       # Low-level .desk/ state management
 ├── scripts/install.js   # npx ai-fund install|list
-├── .claude/commands/    # Slash commands (hire, fire, desk, review, setup, backtest)
+├── AGENTS.md            # Instructions for OpenClaw, Codex, any AI agent
+├── .claude/commands/    # Slash commands (Claude Code only)
 ├── docs/                # Architecture diagram, auth brief
 ├── examples/            # Preset desk configurations (JSON)
 └── .desk/               # Runtime state (gitignored, per-user)
@@ -27,9 +30,11 @@ ai-fund/
 
 ## Architecture
 
+- **Execution Layer** (`lib/exec.ts`, `bin/exec`): Runtime-agnostic functions for hire/fire/desk/list. Outputs structured JSON. Works from Claude Code, OpenClaw, Codex, or plain shell.
 - **Skills** (`skills/`): Each skill is a complete hedge fund persona with personality, philosophy, KPIs, and self-evaluation. Skills are exchange-agnostic — they work with any connected exchange.
-- **Connectors** (`connectors/`): Exchange MCP servers that bridge Claude to exchange APIs. Cube ships built-in. Others install via npm.
+- **Connectors** (`connectors/`): Exchange MCP servers that bridge any AI runtime to exchange APIs. Cube ships built-in. Others install via npm.
 - **Shared Libs** (`lib/`): Technical indicators, financial math, formatting utilities.
+- **Instructions** (`AGENTS.md`): Universal instructions for any AI coding agent. Claude Code also reads `CLAUDE.md` and `.claude/commands/`.
 
 ## Development Workflow
 

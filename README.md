@@ -1,14 +1,16 @@
-# AI Fund — Open-Source AI Hedge Fund for Claude Code
+# AI Fund — Open-Source AI Hedge Fund
 
 ### Hire your AI trading desk. Fire the ones that miss KPIs.
 
-> 42 AI trading agents. 20 named personas (Arthur Hayes, Jim Simons, George Soros, Jesse Livermore…). 100+ exchanges via plugins. Paper trading by default. MIT licensed. Runs on [Claude Code](https://claude.ai/code).
+> 42 AI trading agents. 20 named personas (Arthur Hayes, Jim Simons, George Soros, Jesse Livermore…). 100+ exchanges via plugins. Paper trading by default. MIT licensed. Works with [Claude Code](https://claude.ai/code), [OpenClaw](https://github.com/open-claw/open-claw), [Codex](https://github.com/openai/codex), and any AI coding agent.
 
 <!-- GitHub Topics (set these in repo Settings > Topics):
-ai-trading, crypto-trading-bot, hedge-fund, ai-hedge-fund, trading-agents, mcp, claude-code, algorithmic-trading, market-making, arbitrage, quantitative-trading, risk-management, multi-exchange, defi, bitcoin, ethereum, crypto-fund -->
+ai-trading, crypto-trading-bot, hedge-fund, ai-hedge-fund, trading-agents, mcp, claude-code, open-claw, codex, algorithmic-trading, market-making, arbitrage, quantitative-trading, risk-management, multi-exchange, defi, bitcoin, ethereum, crypto-fund -->
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Claude Code](https://img.shields.io/badge/built%20for-Claude%20Code-blueviolet)](https://claude.ai/code)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-blueviolet)](https://claude.ai/code)
+[![OpenClaw](https://img.shields.io/badge/OpenClaw-compatible-brightgreen)](https://github.com/open-claw/open-claw)
+[![Codex](https://img.shields.io/badge/Codex-compatible-blue)](https://github.com/openai/codex)
 [![Exchanges](https://img.shields.io/badge/exchanges-100%2B%20supported-green)](connectors/README.md)
 [![Agents](https://img.shields.io/badge/agents-42%20hedge%20fund%20roles-orange)](#42-ai-trading-agents--the-full-roster)
 
@@ -31,11 +33,13 @@ ai-trading, crypto-trading-bot, hedge-fund, ai-hedge-fund, trading-agents, mcp, 
 
 ## What Is ai-fund?
 
-42 autonomous trading agents inside Claude Code.
+42 autonomous trading agents that work with any AI coding tool.
 
 20 are named personas — Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Stanley Druckenmiller. The other 22 are role-based: scalpers, market makers, risk managers, quants, arbitrageurs.
 
 No config files. No YAML. You hire agents that fit your thesis and fire the ones that don't deliver. Each one carries its own personality, philosophy, and KPIs.
+
+Works with Claude Code, OpenClaw (free models like Llama, Gemma, Mistral), OpenAI Codex, or any LLM-powered coding agent. The execution layer is a simple CLI that outputs structured JSON — any runtime can drive it.
 
 ### How is this different from a grid bot?
 
@@ -73,16 +77,18 @@ Paper trading is on by default. You have to opt in to live.
 ```
 YOU (trader)
   │
-  ├── /hire risk-manager          ← activate agents
-  ├── /hire arbitrageur
-  ├── /hire market-maker
+  ├── node bin/exec hire risk-manager    ← activate agents
+  ├── node bin/exec hire arbitrageur
+  ├── node bin/exec hire market-maker
   │
   ▼
-CLAUDE CODE (AI runtime)
+ANY AI RUNTIME (Claude Code, OpenClaw, Codex, shell)
   │
-  ├── Skills (42 SKILL.md files)  ← agent personas, strategies, KPIs
+  ├── Execution Layer (lib/exec.ts)  ← runtime-agnostic, testable
   │
-  ├── Exchange Connectors (MCP)   ← connect any exchange
+  ├── Skills (42 SKILL.md files)     ← agent personas, strategies, KPIs
+  │
+  ├── Exchange Connectors (MCP)      ← connect any exchange
   │   ├── Cube (built-in)
   │   ├── Binance, Coinbase, Kraken, OKX...
   │   └── 100+ via CCXT
@@ -95,7 +101,9 @@ Skills define what an agent thinks and does.
 
 Connectors talk to exchanges.
 
-The two layers don't know about each other. Add an exchange, don't touch agent code. Write an agent, don't touch exchange code.
+The execution layer (`lib/exec.ts`) sits between any AI runtime and the desk state. It outputs JSON that any LLM can parse — Claude, GPT, Llama, Gemma, Mistral.
+
+The three layers don't know about each other. Add an exchange, don't touch agent code. Write an agent, don't touch exchange code. Switch runtimes, don't touch anything.
 
 ---
 
@@ -118,27 +126,90 @@ cd ai-fund
 npm install
 ```
 
-Open Claude Code and connect your exchanges:
+### Pick your runtime
+
+<details>
+<summary><b>Claude Code</b></summary>
 
 ```
 claude
 > /setup
-```
-
-Hire your first agents:
-
-```
 > /hire risk-manager
 > /hire arthur-hayes
-> /hire jim-simons
-```
-
-Put them to work:
-
-```
 > @arthur-hayes what's the macro thesis? DXY is falling and the Fed paused.
-> @jim-simons scan for statistical anomalies across BTC pairs on all exchanges
-> @risk-manager size a long position given current portfolio
+```
+
+Claude Code uses `.claude/commands/` for slash commands (`/hire`, `/fire`, `/desk`, `/review`). The execution layer powers everything underneath.
+
+</details>
+
+<details>
+<summary><b>OpenClaw (free models — Llama, Gemma, Mistral)</b></summary>
+
+```bash
+openclaw                        # reads AGENTS.md automatically
+```
+
+Then in the session:
+
+```
+hire risk-manager and arthur-hayes
+```
+
+OpenClaw reads `AGENTS.md` for instructions. The execution layer works the same — `node bin/exec hire`, `node bin/exec desk`, etc. No Anthropic API key required.
+
+</details>
+
+<details>
+<summary><b>Codex (OpenAI)</b></summary>
+
+```bash
+codex                           # reads AGENTS.md automatically
+```
+
+Then in the session:
+
+```
+hire the risk manager and scan for arbitrage opportunities
+```
+
+Codex reads `AGENTS.md` for instructions and uses `node bin/exec` for all desk operations.
+
+</details>
+
+<details>
+<summary><b>Any runtime / plain shell</b></summary>
+
+The execution layer is a standalone CLI. No AI runtime required:
+
+```bash
+node bin/exec list                          # list all 42 agents
+node bin/exec hire risk-manager             # activate an agent
+node bin/exec hire arthur-hayes             # activate another
+node bin/exec desk                          # show desk state
+node bin/exec read-skill arthur-hayes       # read agent's persona
+node bin/exec fire momentum-trader "low win rate"  # fire an underperformer
+```
+
+All commands output structured JSON. Pipe to `jq`, parse in your own scripts, or feed to any LLM.
+
+</details>
+
+### Connect exchanges and start trading
+
+```bash
+# Connect Cube (built-in, no API keys needed)
+cd connectors/cube/mcp-server && npm run login
+
+# Or connect any exchange — see connectors/README.md
+```
+
+Put your agents to work:
+
+```
+@arthur-hayes what's the macro thesis? DXY is falling and the Fed paused.
+@jim-simons scan for statistical anomalies across BTC pairs on all exchanges
+@risk-manager size a long position given current portfolio
 ```
 
 ---
@@ -328,11 +399,27 @@ What ships with each agent:
 
 ---
 
+## Supported Runtimes
+
+ai-fund works with any AI coding agent. The execution layer (`lib/exec.ts` / `bin/exec`) outputs structured JSON that any LLM can parse.
+
+| Runtime | Instructions File | Cost | Models |
+|---------|------------------|------|--------|
+| **Claude Code** | `CLAUDE.md` + `.claude/commands/` | $20/mo (Pro) | Claude Opus, Sonnet |
+| **OpenClaw** | `AGENTS.md` | Free | Llama, Gemma, Mistral, any GGUF |
+| **Codex** | `AGENTS.md` | API usage | GPT-4o, o3, o4-mini |
+| **Plain shell** | `bin/exec --help` | Free | None (manual) |
+
+All runtimes use the same execution layer, same agent skills, same exchange connectors. The only difference is which instructions file the runtime reads.
+
+---
+
 ## ai-fund vs Other AI Trading Bots
 
 | | ai-fund | ai-hedge-fund | Freqtrade | Hummingbot |
 |---|---|---|---|---|
-| **LLM-native** | ✅ Claude | ✅ Multi-LLM | ❌ | ❌ |
+| **LLM-native** | ✅ Any LLM | ✅ Multi-LLM | ❌ | ❌ |
+| **Free models** | ✅ OpenClaw | ❌ | ❌ | ❌ |
 | **Agents** | 42 | 18 | User-defined | ~12 |
 | **Hire/fire** | ✅ | ❌ | ❌ | ❌ |
 | **Personas** | 20 | ✅ | ❌ | ❌ |
@@ -384,26 +471,36 @@ ai-fund/
 │   └── community/           # Links to community connectors
 ├── skills/                  # 42 agent personas (exchange-agnostic)
 ├── lib/                     # Shared: indicators, financial math, formatting
+│   └── exec.ts              # Runtime-agnostic execution layer
+├── bin/
+│   ├── exec                 # CLI for desk operations (any runtime)
+│   └── desk-state           # Low-level state management
 ├── examples/                # Pre-built desk configurations
 ├── scripts/                 # npx installer
-└── .claude/commands/        # Slash commands (/setup, /desk, /hire, etc.)
+├── AGENTS.md                # Instructions for OpenClaw, Codex, any agent
+├── CLAUDE.md                # Instructions for Claude Code
+└── .claude/commands/        # Slash commands (Claude Code only)
 ```
 
 | Layer | Role |
 |-------|------|
+| `lib/exec.ts` | Runtime-agnostic execution (hire, fire, desk, list) |
+| `bin/exec` | CLI wrapper — outputs JSON for any LLM |
 | `skills/` | Agent personality, strategy, KPIs |
 | `connectors/` | Exchange APIs via MCP |
 | `lib/` | Indicators, financial math |
-| `.claude/commands/` | Slash commands |
+| `AGENTS.md` | Instructions for OpenClaw / Codex / any agent |
+| `CLAUDE.md` | Instructions for Claude Code |
+| `.claude/commands/` | Slash commands (Claude Code only) |
 
-Add an exchange — no agent files change. Write an agent — no exchange code involved.
+Add an exchange — no agent files change. Write an agent — no exchange code involved. Switch runtimes — same execution layer, same agents, same exchanges.
 
 ---
 
 ## FAQ
 
 ### What is ai-fund?
-An open-source AI crypto trading framework with 42 agents running inside Claude Code. You hire the ones that match your strategy, fire the ones that miss KPIs. Think of it as a trading desk, not a bot.
+An open-source AI crypto trading framework with 42 agents that works with any AI coding tool — Claude Code, OpenClaw, Codex, or plain shell. You hire the ones that match your strategy, fire the ones that miss KPIs. Think of it as a trading desk, not a bot.
 
 ### How many trading agents does ai-fund have?
 42. 20 named personas (Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Michael Saylor, and 15 more) plus 22 role-based agents across six desks.
@@ -412,7 +509,7 @@ An open-source AI crypto trading framework with 42 agents running inside Claude 
 100+ exchanges via plugin connectors. Cube ships built-in. Binance, Coinbase, Kraken, OKX, and many more work via CCXT or dedicated MCP servers.
 
 ### Is ai-fund free?
-MIT-licensed, fully open source. You need Claude Pro or Team ($20/month) for the Claude Code runtime.
+MIT-licensed, fully open source. Use it with OpenClaw and free models (Llama, Gemma, Mistral) for a completely free setup. Claude Code requires Claude Pro or Team ($20/month). Codex requires an OpenAI API key.
 
 ### Does ai-fund support multi-exchange trading?
 Yes. The Arbitrageur scans for price gaps. The Execution Trader routes to the best venue. The Market Maker quotes across venues at once. It's one of the main reasons to use this.
@@ -455,7 +552,9 @@ Create a folder in `skills/` with a `SKILL.md` file. Use `skills/_template/SKILL
 
 **CI/CD**: GitHub Actions runs typecheck + vitest on every push and PR (`.github/workflows/test.yml`). PRs that fail CI will not be merged.
 
-**Testing**: `cd connectors/cube/mcp-server && npm test` — 12 vitest suites covering auth, signing, indicators, math, format, REST orders, WebSocket, credential store, device auth, defi helpers, asset registry, and integration.
+**Testing**: `cd connectors/cube/mcp-server && npm test` — vitest suites covering auth, signing, indicators, math, format, REST orders, WebSocket, credential store, device auth, defi helpers, asset registry, execution layer, and integration.
+
+**Execution layer tests**: The `exec.test.ts` suite validates hire/fire/desk/list operations in isolation using temp directories — no exchange connection needed.
 
 **Auth**: Agents authenticate via Device Authorization (RFC 8628) — no API keys needed. See [`docs/agent-auth-brief.md`](docs/agent-auth-brief.md).
 
@@ -483,10 +582,15 @@ MIT.
 
 ## Links
 
+**Runtimes**
+- [Claude Code — AI coding agent by Anthropic](https://claude.ai/code)
+- [OpenClaw — open-source AI coding agent, works with free models](https://github.com/open-claw/open-claw)
+- [Codex — AI coding agent by OpenAI](https://github.com/openai/codex)
+
+**Exchanges**
 - [cube.exchange — built-in connector](https://cube.exchange)
 - [OKX Trade Kit — 107 trading tools via MCP](https://github.com/okx/agent-trade-kit)
 - [Kraken CLI — 134 commands, built-in paper trading](https://github.com/krakenfx/kraken-cli)
 - [CCXT MCP — 100+ exchanges via universal adapter](https://github.com/lazy-dinosaur/ccxt-mcp)
 - [Coinbase AgentKit — wallet + onchain + trading](https://github.com/coinbase/agentkit)
-- [Claude Code — AI runtime that powers the desk](https://claude.ai/code)
 - [Connectors Guide — how to add any exchange](connectors/README.md)

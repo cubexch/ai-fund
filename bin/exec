@@ -1,0 +1,93 @@
+#!/usr/bin/env node
+
+/**
+ * Runtime-agnostic CLI for ai-fund desk operations.
+ *
+ * Works from any AI coding agent — Claude Code, OpenClaw, Codex, or plain shell.
+ * Outputs structured JSON so any LLM can parse the results.
+ *
+ * Usage:
+ *   exec list                     — list all available agents
+ *   exec hire <slug>              — activate an agent
+ *   exec fire <slug> [reason]     — deactivate an agent
+ *   exec desk                     — show desk state
+ *   exec read-skill <slug>        — read an agent's SKILL.md
+ *   exec read-briefing <slug>     — read an agent's briefing book
+ */
+
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { listAgents, hire, fire, desk, readSkill, readBriefing } from '../lib/exec.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PROJECT_ROOT = path.join(__dirname, '..');
+
+const [,, cmd, ...args] = process.argv;
+
+function output(result) {
+  console.log(JSON.stringify(result, null, 2));
+  process.exit(result.ok ? 0 : 1);
+}
+
+switch (cmd) {
+  case 'list':
+    output(listAgents(PROJECT_ROOT));
+    break;
+
+  case 'hire':
+    if (!args[0]) {
+      output({ ok: false, action: 'hire', data: {}, message: 'Usage: exec hire <agent-slug>' });
+    } else {
+      output(hire(args[0], PROJECT_ROOT));
+    }
+    break;
+
+  case 'fire':
+    if (!args[0]) {
+      output({ ok: false, action: 'fire', data: {}, message: 'Usage: exec fire <agent-slug> [reason]' });
+    } else {
+      output(fire(args[0], PROJECT_ROOT, args.slice(1).join(' ') || undefined));
+    }
+    break;
+
+  case 'desk':
+    output(desk(PROJECT_ROOT));
+    break;
+
+  case 'read-skill':
+    if (!args[0]) {
+      output({ ok: false, action: 'read-skill', data: {}, message: 'Usage: exec read-skill <agent-slug>' });
+    } else {
+      output(readSkill(args[0], PROJECT_ROOT));
+    }
+    break;
+
+  case 'read-briefing':
+    if (!args[0]) {
+      output({ ok: false, action: 'read-briefing', data: {}, message: 'Usage: exec read-briefing <agent-slug>' });
+    } else {
+      output(readBriefing(args[0], PROJECT_ROOT));
+    }
+    break;
+
+  default:
+    console.error(`ai-fund exec — runtime-agnostic desk operations
+
+Commands:
+  list                     List all available agents
+  hire <slug>              Activate an agent
+  fire <slug> [reason]     Deactivate an agent
+  desk                     Show desk state
+  read-skill <slug>        Read an agent's SKILL.md
+  read-briefing <slug>     Read an agent's briefing book
+
+Examples:
+  node bin/exec list
+  node bin/exec hire risk-manager
+  node bin/exec hire arthur-hayes
+  node bin/exec desk
+  node bin/exec fire momentum-trader "win rate below 50%"
+`);
+    process.exit(1);
+}
