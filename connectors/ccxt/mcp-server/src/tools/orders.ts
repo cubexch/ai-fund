@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { ExchangeClient } from '../client/exchange.js';
-import { sanitizeError } from '../client/sanitize.js';
+import { authHandler } from './handler.js';
 
 // Cast schemas to any to avoid TS2589 "excessively deep type instantiation" with zod + MCP SDK
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -17,34 +17,9 @@ export function registerOrderTools(server: McpServer, client: ExchangeClient) {
       amount: z.number().describe('Quantity to buy or sell in base currency'),
       price: z.number().optional().describe('Limit price (required for limit orders)'),
     } as any,
-    async (params: any) => {
-      try {
-        if (!client.hasCredentials) {
-          return {
-            content: [{ type: 'text' as const, text: 'Failed: No API credentials configured. Set API key and secret to trade.' }],
-            isError: true,
-          };
-        }
-        const order = await client.placeOrder(
-          params.symbol,
-          params.type,
-          params.side,
-          params.amount,
-          params.price,
-        );
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify(order, null, 2),
-          }],
-        };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${sanitizeError(error)}` }],
-          isError: true,
-        };
-      }
-    },
+    authHandler(client, async (params: any) => {
+      return client.placeOrder(params.symbol, params.type, params.side, params.amount, params.price);
+    }),
   );
 
   server.tool(
@@ -54,28 +29,10 @@ export function registerOrderTools(server: McpServer, client: ExchangeClient) {
       order_id: z.string().describe('The order ID to cancel'),
       symbol: z.string().optional().describe('Trading pair (required by some exchanges)'),
     } as any,
-    async (params: any) => {
-      try {
-        if (!client.hasCredentials) {
-          return {
-            content: [{ type: 'text' as const, text: 'Failed: No API credentials configured.' }],
-            isError: true,
-          };
-        }
-        await client.cancelOrder(params.order_id, params.symbol);
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({ status: 'cancelled', orderId: params.order_id }, null, 2),
-          }],
-        };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${sanitizeError(error)}` }],
-          isError: true,
-        };
-      }
-    },
+    authHandler(client, async (params: any) => {
+      await client.cancelOrder(params.order_id, params.symbol);
+      return { status: 'cancelled', orderId: params.order_id };
+    }),
   );
 
   server.tool(
@@ -84,28 +41,10 @@ export function registerOrderTools(server: McpServer, client: ExchangeClient) {
     {
       symbol: z.string().optional().describe('Trading pair to cancel orders for (omit for all)'),
     } as any,
-    async (params: any) => {
-      try {
-        if (!client.hasCredentials) {
-          return {
-            content: [{ type: 'text' as const, text: 'Failed: No API credentials configured.' }],
-            isError: true,
-          };
-        }
-        await client.cancelAllOrders(params.symbol);
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({ status: 'all_cancelled', symbol: params.symbol ?? 'all' }, null, 2),
-          }],
-        };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${sanitizeError(error)}` }],
-          isError: true,
-        };
-      }
-    },
+    authHandler(client, async (params: any) => {
+      await client.cancelAllOrders(params.symbol);
+      return { status: 'all_cancelled', symbol: params.symbol ?? 'all' };
+    }),
   );
 
   server.tool(
@@ -116,39 +55,19 @@ export function registerOrderTools(server: McpServer, client: ExchangeClient) {
       symbol: z.string().optional().describe('Filter by trading pair'),
       limit: z.number().default(50).describe('Maximum number of orders to return'),
     } as any,
-    async (params: any) => {
-      try {
-        if (!client.hasCredentials) {
-          return {
-            content: [{ type: 'text' as const, text: 'Failed: No API credentials configured.' }],
-            isError: true,
-          };
-        }
-        let orders;
-        if (params.status === 'open') {
-          orders = await client.getOpenOrders(params.symbol);
-        } else if (params.status === 'closed') {
-          orders = await client.getClosedOrders(params.symbol, undefined, params.limit);
-        } else {
-          const [open, closed] = await Promise.all([
-            client.getOpenOrders(params.symbol),
-            client.getClosedOrders(params.symbol, undefined, params.limit),
-          ]);
-          orders = [...open, ...closed];
-        }
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify(orders, null, 2),
-          }],
-        };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${sanitizeError(error)}` }],
-          isError: true,
-        };
+    authHandler(client, async (params: any) => {
+      if (params.status === 'open') {
+        return client.getOpenOrders(params.symbol);
       }
-    },
+      if (params.status === 'closed') {
+        return client.getClosedOrders(params.symbol, undefined, params.limit);
+      }
+      const [open, closed] = await Promise.all([
+        client.getOpenOrders(params.symbol),
+        client.getClosedOrders(params.symbol, undefined, params.limit),
+      ]);
+      return [...open, ...closed];
+    }),
   );
 
   server.tool(
@@ -158,28 +77,9 @@ export function registerOrderTools(server: McpServer, client: ExchangeClient) {
       symbol: z.string().optional().describe('Filter by trading pair'),
       limit: z.number().default(50).describe('Maximum number of orders to return'),
     } as any,
-    async (params: any) => {
-      try {
-        if (!client.hasCredentials) {
-          return {
-            content: [{ type: 'text' as const, text: 'Failed: No API credentials configured.' }],
-            isError: true,
-          };
-        }
-        const orders = await client.getClosedOrders(params.symbol, undefined, params.limit);
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify(orders, null, 2),
-          }],
-        };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${sanitizeError(error)}` }],
-          isError: true,
-        };
-      }
-    },
+    authHandler(client, async (params: any) => {
+      return client.getClosedOrders(params.symbol, undefined, params.limit);
+    }),
   );
 
   server.tool(
@@ -189,27 +89,8 @@ export function registerOrderTools(server: McpServer, client: ExchangeClient) {
       symbol: z.string().optional().describe('Filter by trading pair'),
       limit: z.number().default(50).describe('Maximum number of fills to return'),
     } as any,
-    async (params: any) => {
-      try {
-        if (!client.hasCredentials) {
-          return {
-            content: [{ type: 'text' as const, text: 'Failed: No API credentials configured.' }],
-            isError: true,
-          };
-        }
-        const trades = await client.getMyTrades(params.symbol, undefined, params.limit);
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify(trades, null, 2),
-          }],
-        };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${sanitizeError(error)}` }],
-          isError: true,
-        };
-      }
-    },
+    authHandler(client, async (params: any) => {
+      return client.getMyTrades(params.symbol, undefined, params.limit);
+    }),
   );
 }

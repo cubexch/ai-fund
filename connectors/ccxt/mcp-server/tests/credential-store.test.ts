@@ -6,20 +6,9 @@ import {
   saveCredentials,
   deleteCredentials,
   getBackendName,
-  type CredentialStore,
   type CcxtCredentials,
 } from '../src/client/credential-store.js';
-
-// ── In-memory store for testing ─────────────────────────────
-
-class MemoryStore implements CredentialStore {
-  readonly backend = 'file' as const;
-  private data = new Map<string, CcxtCredentials>();
-
-  async load(exchangeId: string) { return this.data.get(exchangeId) ?? null; }
-  async save(creds: CcxtCredentials) { this.data.set(creds.exchangeId, creds); }
-  async delete(exchangeId: string) { this.data.delete(exchangeId); }
-}
+import { MemoryStore } from './helpers.js';
 
 describe('credential store', () => {
   let store: MemoryStore;

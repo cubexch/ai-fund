@@ -16,6 +16,7 @@
 
 import { ExchangeClient } from '../client/exchange.js';
 import { saveCredentials, getBackendName } from '../client/credential-store.js';
+import { parseArgs, envPrefix } from './common.js';
 
 function prompt(question: string, hidden = false): Promise<string> {
   return new Promise(resolve => {
@@ -54,19 +55,8 @@ function prompt(question: string, hidden = false): Promise<string> {
 }
 
 async function main() {
-  const args = process.argv.slice(2);
-  let exchangeId = 'coinbase';
-  let sandbox = args.includes('--sandbox');
-
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--exchange' && args[i + 1]) {
-      exchangeId = args[i + 1];
-      i++;
-    }
-  }
-
-  exchangeId = process.env.CCXT_EXCHANGE ?? exchangeId;
-  const prefix = exchangeId.toUpperCase().replace(/-/g, '_');
+  const { exchangeId, sandbox } = parseArgs();
+  const prefix = envPrefix(exchangeId);
 
   console.error(`\nCCXT Login — ${exchangeId} (${sandbox ? 'sandbox' : 'LIVE'})\n`);
 
@@ -88,7 +78,6 @@ async function main() {
     process.exit(1);
   }
 
-  // Some exchanges need a password/passphrase (e.g., Coinbase, OKX)
   const password = process.env[`${prefix}_PASSWORD`]
     ?? process.env[`${prefix}_PASSPHRASE`]
     ?? process.env.CCXT_PASSWORD
@@ -107,7 +96,6 @@ async function main() {
   try {
     const balances = await client.getBalance();
 
-    // Save to credential store
     await saveCredentials({
       exchangeId,
       apiKey,

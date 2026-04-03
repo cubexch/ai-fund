@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { ExchangeClient } from '../client/exchange.js';
-import { sanitizeError } from '../client/sanitize.js';
+import { handler } from './handler.js';
 
 // Cast schemas to any to avoid TS2589 "excessively deep type instantiation" with zod + MCP SDK
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -13,25 +13,12 @@ export function registerMarketDataTools(server: McpServer, client: ExchangeClien
     {
       symbols: z.string().optional().describe('Comma-separated list of symbols (e.g., "BTC/USDT,ETH/USDT"). Omit for all available tickers.'),
     } as any,
-    async (params: any) => {
-      try {
-        const symbolList = params.symbols
-          ? params.symbols.split(',').map((s: string) => s.trim())
-          : undefined;
-        const tickers = await client.getTickers(symbolList);
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify(tickers, null, 2),
-          }],
-        };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${sanitizeError(error)}` }],
-          isError: true,
-        };
-      }
-    },
+    handler(async (params: any) => {
+      const symbolList = params.symbols
+        ? params.symbols.split(',').map((s: string) => s.trim())
+        : undefined;
+      return client.getTickers(symbolList);
+    }),
   );
 
   server.tool(
@@ -43,25 +30,13 @@ export function registerMarketDataTools(server: McpServer, client: ExchangeClien
       since: z.string().optional().describe('Start time as ISO 8601 string or Unix timestamp in ms'),
       limit: z.number().default(100).describe('Number of candles to return (max varies by exchange)'),
     } as any,
-    async (params: any) => {
-      try {
-        const since = params.since
-          ? (isNaN(Number(params.since)) ? new Date(params.since).getTime() : Number(params.since))
-          : undefined;
-        const bars = await client.getBars(params.symbol, params.timeframe, since, params.limit);
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({ symbol: params.symbol, timeframe: params.timeframe, bars }, null, 2),
-          }],
-        };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${sanitizeError(error)}` }],
-          isError: true,
-        };
-      }
-    },
+    handler(async (params: any) => {
+      const since = params.since
+        ? (isNaN(Number(params.since)) ? new Date(params.since).getTime() : Number(params.since))
+        : undefined;
+      const bars = await client.getBars(params.symbol, params.timeframe, since, params.limit);
+      return { symbol: params.symbol, timeframe: params.timeframe, bars };
+    }),
   );
 
   server.tool(
@@ -71,22 +46,9 @@ export function registerMarketDataTools(server: McpServer, client: ExchangeClien
       symbol: z.string().describe('Trading pair (e.g., BTC/USDT)'),
       limit: z.number().default(20).describe('Number of price levels per side'),
     } as any,
-    async (params: any) => {
-      try {
-        const ob = await client.getOrderBook(params.symbol, params.limit);
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify(ob, null, 2),
-          }],
-        };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${sanitizeError(error)}` }],
-          isError: true,
-        };
-      }
-    },
+    handler(async (params: any) => {
+      return client.getOrderBook(params.symbol, params.limit);
+    }),
   );
 
   server.tool(
@@ -96,22 +58,10 @@ export function registerMarketDataTools(server: McpServer, client: ExchangeClien
       symbol: z.string().describe('Trading pair (e.g., BTC/USDT)'),
       limit: z.number().default(50).describe('Number of trades to return'),
     } as any,
-    async (params: any) => {
-      try {
-        const trades = await client.getTrades(params.symbol, undefined, params.limit);
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({ symbol: params.symbol, trades }, null, 2),
-          }],
-        };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${sanitizeError(error)}` }],
-          isError: true,
-        };
-      }
-    },
+    handler(async (params: any) => {
+      const trades = await client.getTrades(params.symbol, undefined, params.limit);
+      return { symbol: params.symbol, trades };
+    }),
   );
 
   server.tool(
@@ -120,21 +70,8 @@ export function registerMarketDataTools(server: McpServer, client: ExchangeClien
     {
       query: z.string().describe('Search query (e.g., "BTC", "ETH/USDT", "SOL")'),
     } as any,
-    async (params: any) => {
-      try {
-        const markets = await client.searchMarkets(params.query);
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify(markets, null, 2),
-          }],
-        };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${sanitizeError(error)}` }],
-          isError: true,
-        };
-      }
-    },
+    handler(async (params: any) => {
+      return client.searchMarkets(params.query);
+    }),
   );
 }

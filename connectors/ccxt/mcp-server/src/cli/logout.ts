@@ -9,20 +9,10 @@
  */
 
 import { deleteCredentials, getBackendName } from '../client/credential-store.js';
+import { parseArgs } from './common.js';
 
 async function main() {
-  const args = process.argv.slice(2);
-  let exchangeId = 'coinbase';
-
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--exchange' && args[i + 1]) {
-      exchangeId = args[i + 1];
-      i++;
-    }
-  }
-
-  exchangeId = process.env.CCXT_EXCHANGE ?? exchangeId;
-
+  const { exchangeId } = parseArgs();
   const backend = await getBackendName();
   await deleteCredentials(exchangeId);
   console.error(`${exchangeId} credentials removed from ${backend}`);

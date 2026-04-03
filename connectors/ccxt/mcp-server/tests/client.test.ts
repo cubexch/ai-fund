@@ -147,6 +147,21 @@ describe('ExchangeClient constructor', () => {
   it('throws on unknown exchange ID', () => {
     expect(() => new ExchangeClient({ exchangeId: 'not_a_real_exchange_xyz' })).toThrow('Unknown exchange');
   });
+
+  it('tracks sandbox mode explicitly from constructor opts', () => {
+    const sandbox = new ExchangeClient({
+      exchangeId: 'test',
+      exchangeInstance: createMockCcxtExchange() as any,
+      sandbox: true,
+    });
+    expect(sandbox.isSandbox).toBe(true);
+
+    const live = new ExchangeClient({
+      exchangeId: 'test',
+      exchangeInstance: createMockCcxtExchange() as any,
+    });
+    expect(live.isSandbox).toBe(false);
+  });
 });
 
 // ── Market Data ─────────────────────────────────────────────

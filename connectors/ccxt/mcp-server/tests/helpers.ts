@@ -1,8 +1,20 @@
 /**
- * Test helpers — mock CCXT exchange and McpServer for tool testing.
+ * Test helpers — mock CCXT exchange, McpServer, and MemoryStore for tool testing.
  */
 
 import type { ExchangeClient } from '../src/client/exchange.js';
+import type { CredentialStore, CcxtCredentials } from '../src/client/credential-store.js';
+
+// ── In-memory credential store for testing ────────────────
+
+export class MemoryStore implements CredentialStore {
+  readonly backend = 'file' as const;
+  private data = new Map<string, CcxtCredentials>();
+
+  async load(exchangeId: string) { return this.data.get(exchangeId) ?? null; }
+  async save(creds: CcxtCredentials) { this.data.set(creds.exchangeId, creds); }
+  async delete(exchangeId: string) { this.data.delete(exchangeId); }
+}
 
 // ── Mock Exchange ──────────────────────────────────────────
 

@@ -85,6 +85,15 @@ export interface BalanceResult {
   total: number;
 }
 
+export interface PositionResult {
+  symbol: string;
+  side: string;
+  amount: number;
+  unrealizedPnl: number | undefined;
+  entryPrice: number | undefined;
+  currentPrice: number | undefined;
+}
+
 export interface MarketResult {
   symbol: string;
   base: string;
@@ -138,10 +147,12 @@ function formatTrade(t: any): TradeResult {
 
 export class ExchangeClient {
   private exchange: Exchange;
+  private _sandbox: boolean;
   readonly exchangeId: string;
 
   constructor(opts: ExchangeClientOpts) {
     this.exchangeId = opts.exchangeId;
+    this._sandbox = opts.sandbox ?? false;
 
     if (opts.exchangeInstance) {
       this.exchange = opts.exchangeInstance;
@@ -169,8 +180,7 @@ export class ExchangeClient {
   }
 
   get isSandbox(): boolean {
-    return !!this.exchange.urls?.api?.toString()?.includes('sandbox') ||
-           !!this.exchange.urls?.api?.toString()?.includes('testnet');
+    return this._sandbox;
   }
 
   get name(): string {
@@ -260,15 +270,23 @@ export class ExchangeClient {
     return results;
   }
 
-  async getPositions(symbols?: string[]): Promise<any[]> {
+  async getPositions(symbols?: string[]): Promise<PositionResult[]> {
     if (typeof this.exchange.fetchPositions === 'function') {
-      return this.exchange.fetchPositions(symbols);
+      const positions = await this.exchange.fetchPositions(symbols);
+      return positions.map((p: any) => ({
+        symbol: str(p.symbol),
+        side: str(p.side) || 'long',
+        amount: p.contracts ?? p.contractSize ?? 0,
+        unrealizedPnl: p.unrealizedPnl,
+        entryPrice: p.entryPrice,
+        currentPrice: p.markPrice ?? p.lastPrice,
+      }));
     }
     // Fallback: return balances as "positions" for spot exchanges
     const balances = await this.getBalance();
     return balances.map(b => ({
       symbol: b.currency,
-      side: 'long',
+      side: 'long' as const,
       amount: b.total,
       unrealizedPnl: undefined,
       entryPrice: undefined,
@@ -298,9 +316,9 @@ export class ExchangeClient {
       await this.exchange.cancelAllOrders(symbol);
     } else {
       const openOrders = await this.exchange.fetchOpenOrders(symbol);
-      for (const order of openOrders) {
-        await this.exchange.cancelOrder(order.id, order.symbol);
-      }
+      await Promise.all(
+        openOrders.map(order => this.exchange.cancelOrder(order.id, order.symbol))
+      );
     }
   }
 
