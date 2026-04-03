@@ -106,17 +106,21 @@ describe('get_technical_analysis tool', () => {
     expect(data.symbol).toBe('BTC/USDT');
     expect(data.timeframe).toBe('1d');
     expect(data.candles).toBe(100);
-    expect(data.latest.price).toBeTypeOf('number');
-    expect(data.latest.rsi).toBeTypeOf('number');
+    expect(data.latest.price).toBeGreaterThan(0);
     expect(data.latest.rsi).toBeGreaterThanOrEqual(0);
     expect(data.latest.rsi).toBeLessThanOrEqual(100);
-    expect(data.latest.macd).toBeDefined();
     expect(data.latest.macd.histogram).toBeTypeOf('number');
-    expect(data.latest.bollingerBands).toBeDefined();
-    expect(data.latest.bollingerBands.upper).toBeGreaterThan(data.latest.bollingerBands.lower);
-    expect(data.latest.atr).toBeTypeOf('number');
+    expect(data.latest.macd.signal).toBeTypeOf('number');
+    expect(data.latest.macd.macd).toBeTypeOf('number');
+    expect(data.latest.bollingerBands.upper).toBeGreaterThan(data.latest.bollingerBands.middle);
+    expect(data.latest.bollingerBands.middle).toBeGreaterThan(data.latest.bollingerBands.lower);
     expect(data.latest.atr).toBeGreaterThan(0);
-    expect(data.latest.stochastic).toBeDefined();
+    if (data.latest.stochastic !== null) {
+      expect(data.latest.stochastic.k).toBeGreaterThanOrEqual(0);
+      expect(data.latest.stochastic.k).toBeLessThanOrEqual(100);
+      expect(data.latest.stochastic.d).toBeGreaterThanOrEqual(0);
+      expect(data.latest.stochastic.d).toBeLessThanOrEqual(100);
+    }
     expect(data.signals).toBeInstanceOf(Array);
     expect(data.signals.length).toBeGreaterThan(0);
   });
@@ -177,10 +181,11 @@ describe('calculate_position_size tool', () => {
     const data = JSON.parse(result.content[0].text);
     expect(data.method).toBe('kelly');
     expect(data.halfKelly).toBe(true);
-    expect(data.kellyFraction).toBeGreaterThan(0);
-    expect(data.kellyFraction).toBeLessThan(1);
-    expect(data.capitalToRisk).toBeGreaterThan(0);
-    expect(data.positionSize).toBeGreaterThan(0);
+    // Kelly = winRate - (1-winRate)/avgWinLossRatio = 0.55 - 0.45/1.5 = 0.25
+    // Half Kelly = 0.125
+    expect(data.kellyFraction).toBeCloseTo(0.125, 3);
+    expect(data.capitalToRisk).toBeCloseTo(12500, 0); // 100000 * 0.125
+    expect(data.positionSize).toBeCloseTo(12500 / 65000, 4); // capitalToRisk / entryPrice
     expect(data.portfolioValue).toBe(100000);
   });
 
@@ -275,7 +280,6 @@ describe('get_exchange_info tool', () => {
     const data = JSON.parse(result.content[0].text);
     expect(data.id).toBe('coinbase');
     expect(data.name).toBe('Coinbase');
-    expect(data.has).toBeDefined();
     expect(data.has.fetchTicker).toBe(true);
     expect(data.timeframes).toContain('1h');
     expect(data.totalMarkets).toBe(500);
@@ -354,7 +358,6 @@ describe('assess_portfolio_risk tool', () => {
     });
 
     const data = JSON.parse(result.content[0].text);
-    expect(data.correlations).toBeDefined();
     expect(data.correlations.matrix).toHaveLength(2);
     expect(data.correlations.matrix[0]).toHaveLength(2);
     expect(data.correlations.labels).toEqual(['BTC/USDT', 'ETH/USDT']);
@@ -411,20 +414,16 @@ describe('get_optimal_entry tool', () => {
     expect(data.symbol).toBe('BTC/USDT');
     expect(data.side).toBe('buy');
     expect(data.amount).toBe(0.5);
-    expect(data.currentMid).toBeTypeOf('number');
-    expect(data.currentMid).toBeGreaterThan(0);
-    expect(data.currentSpread).toBeTypeOf('number');
-    expect(data.spreadBps).toBeTypeOf('number');
+    // Mock orderBook: bid=65000, ask=65010, mid=65005, spread=10
+    expect(data.currentMid).toBe(65005);
+    expect(data.currentSpread).toBe(10);
+    expect(data.spreadBps).toBeCloseTo(1.54, 1);
     expect(data.recommendedOrderType).toBe('limit');
-    expect(data.recommendedPrice).toBeTypeOf('number');
-    expect(data.recommendedPrice).toBe(data.currentMid);
-    expect(data.estimatedSlippage).toBeDefined();
-    expect(data.estimatedSlippage.pct).toBeTypeOf('number');
+    expect(data.recommendedPrice).toBe(65005); // mid for medium urgency
     expect(data.estimatedSlippage.pct).toBeGreaterThanOrEqual(0);
-    expect(data.estimatedSlippage.absolutePerUnit).toBeTypeOf('number');
-    expect(data.depthAnalysis).toBeDefined();
-    expect(data.depthAnalysis.bidDepth01Pct).toBeTypeOf('number');
-    expect(data.depthAnalysis.askDepth01Pct).toBeTypeOf('number');
+    expect(data.estimatedSlippage.absolutePerUnit).toBeGreaterThanOrEqual(0);
+    expect(data.depthAnalysis.bidDepth01Pct).toBeGreaterThanOrEqual(0);
+    expect(data.depthAnalysis.askDepth01Pct).toBeGreaterThanOrEqual(0);
     expect(data.tradeFlowSignal).toMatch(/^(bullish|bearish|neutral)$/);
     expect(data.tradeFlowImbalance).toBeTypeOf('number');
     expect(data.rationale).toBeTypeOf('string');

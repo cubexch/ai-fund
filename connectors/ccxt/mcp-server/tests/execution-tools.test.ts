@@ -54,9 +54,8 @@ describe('get_execution_quality tool', () => {
     expect(data.avgFillPrice).toBe(65000);
     // currentMid = 65000
     expect(data.currentMid).toBe(65000);
-    // slippageBps = ((64983.33 - 65000) / 65000) * 10000 ~ -2.56
-    expect(data.slippageBps).toBeDefined();
-    expect(typeof data.slippageBps).toBe('number');
+    // slippageBps = ((64983.33 - 65000) / 65000) * 10000 = -2.564..., rounded to -2.56
+    expect(data.slippageBps).toBeCloseTo(-2.56, 1);
     // fillRate: totalVolume=3, openOrders amount=0.5, totalRequested=3.5, fillRate=3/3.5*100=85.71
     expect(data.fillRatePct).toBeCloseTo(85.71, 0);
     // maker/taker: 1 maker, 2 taker
@@ -390,11 +389,14 @@ describe('get_market_microstructure tool', () => {
     // imbalance = (21.5 - 17) / (21.5 + 17) = 4.5 / 38.5 ≈ 0.1169
     expect(data.imbalance).toBeCloseTo(0.1169, 3);
 
-    // Depth bands
-    expect(data.depthBands).toBeDefined();
-    expect(data.depthBands['0.1%']).toBeDefined();
-    expect(data.depthBands['0.5%']).toBeDefined();
-    expect(data.depthBands['1.0%']).toBeDefined();
+    // Depth bands — each has bidDepth, askDepth, total (all >= 0)
+    for (const band of ['0.1%', '0.5%', '1.0%']) {
+      expect(data.depthBands[band]).toHaveProperty('bidDepth');
+      expect(data.depthBands[band]).toHaveProperty('askDepth');
+      expect(data.depthBands[band].total).toBeGreaterThanOrEqual(0);
+    }
+    // Wider bands should have >= depth of narrower bands
+    expect(data.depthBands['1.0%'].total).toBeGreaterThanOrEqual(data.depthBands['0.1%'].total);
 
     // 0.1% band = 65 price units from mid.
     // Bids within 64935..65000: 64990 (2.0), 64980 (1.5), 64970 (3.0) = 6.5
@@ -537,18 +539,19 @@ describe('get_momentum_scanner tool', () => {
     const data = JSON.parse(result.content[0].text);
     const btc = data.symbols[0];
 
-    expect(btc.price).toBeDefined();
-    expect(btc.change1Bar).toBeDefined();
-    expect(btc.change5Bar).toBeDefined();
-    expect(btc.change10Bar).toBeDefined();
-    expect(btc.change20Bar).toBeDefined();
-    expect(btc.volumeSurge).toBeDefined();
-    expect(btc.momentumScore).toBeDefined();
+    // All fields are numeric, not just "defined"
+    expect(typeof btc.price).toBe('number');
+    expect(btc.price).toBeGreaterThan(0);
+    expect(typeof btc.momentumScore).toBe('number');
 
-    // BTC trend = +100/bar, volume surge = 3x
+    // BTC trend = +100/bar → all change% should be positive
     expect(btc.change1Bar).toBeGreaterThan(0);
+    expect(btc.change5Bar).toBeGreaterThan(0);
+    expect(btc.change10Bar).toBeGreaterThan(0);
     expect(btc.change20Bar).toBeGreaterThan(0);
     expect(btc.volumeSurge).toBe(3);
+    // Positive changes + volume surge → positive momentum
+    expect(btc.momentumScore).toBeGreaterThan(0);
   });
 
   it('handles errors per symbol gracefully', async () => {

@@ -92,13 +92,11 @@ export function registerRiskTools(server: McpServer, client: ExchangeClient) {
         totalValue += Math.abs(value);
       }
 
-      if (totalValue === 0) totalValue = 1; // avoid division by zero
-
       for (const bal of balances) {
         if (bal.total === 0) continue;
         const price = resolvePrice(bal.currency, tickers);
         const value = bal.total * price;
-        const weight = (value / totalValue) * 100;
+        const weight = totalValue > 0 ? (value / totalValue) * 100 : 0;
         const side = value >= 0 ? 'long' : 'short';
 
         if (value > 0) grossLong += value;
