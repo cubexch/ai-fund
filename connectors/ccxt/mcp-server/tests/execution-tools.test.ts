@@ -663,3 +663,91 @@ describe('get_exchange_health tool', () => {
     expect(data.journal.configured).toBe(true);
   });
 });
+
+// ── aggregate_order_books ───────────────────────────────
+
+describe('aggregate_order_books tool', () => {
+  it('is registered as a tool', () => {
+    const { server } = setup();
+    expect(server.tools.has('aggregate_order_books')).toBe(true);
+  });
+
+  it('returns error for unknown exchanges', async () => {
+    const { server } = setup();
+    const result = await server.callTool('aggregate_order_books', {
+      symbol: 'BTC/USDT',
+      exchanges: 'fake_exchange_abc,fake_exchange_xyz',
+      depth: 10,
+    });
+
+    expect(result.isError).toBeUndefined();
+    const data = JSON.parse(result.content[0].text);
+
+    expect(data.symbol).toBe('BTC/USDT');
+    expect(data.exchanges).toEqual(['fake_exchange_abc', 'fake_exchange_xyz']);
+    expect(data.errors).toHaveLength(2);
+    expect(data.errors[0].exchange).toBe('fake_exchange_abc');
+    expect(data.errors[0].error).toBe('Unknown exchange');
+    expect(data.errors[1].exchange).toBe('fake_exchange_xyz');
+    expect(data.errors[1].error).toBe('Unknown exchange');
+    // No valid order book data
+    expect(data.aggregatedBids).toHaveLength(0);
+    expect(data.aggregatedAsks).toHaveLength(0);
+    expect(data.aggregateSpread).toBeNull();
+    expect(data.bestBuyVenue).toBeNull();
+    expect(data.bestSellVenue).toBeNull();
+  });
+
+  it('returns expected response structure fields', async () => {
+    const { server } = setup();
+    const result = await server.callTool('aggregate_order_books', {
+      symbol: 'BTC/USDT',
+      exchanges: 'not_real_1',
+      depth: 5,
+    });
+
+    const data = JSON.parse(result.content[0].text);
+
+    expect(data).toHaveProperty('symbol');
+    expect(data).toHaveProperty('exchanges');
+    expect(data).toHaveProperty('aggregatedBids');
+    expect(data).toHaveProperty('aggregatedAsks');
+    expect(data).toHaveProperty('aggregateSpread');
+    expect(data).toHaveProperty('aggregateMid');
+    expect(data).toHaveProperty('bestBuyVenue');
+    expect(data).toHaveProperty('bestSellVenue');
+    expect(data).toHaveProperty('totalBidDepth');
+    expect(data).toHaveProperty('totalAskDepth');
+    expect(Array.isArray(data.aggregatedBids)).toBe(true);
+    expect(Array.isArray(data.aggregatedAsks)).toBe(true);
+  });
+
+  it('trims whitespace from exchange IDs', async () => {
+    const { server } = setup();
+    const result = await server.callTool('aggregate_order_books', {
+      symbol: 'BTC/USDT',
+      exchanges: ' fake1 , fake2 ',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+
+    expect(data.exchanges[0]).toBe('fake1');
+    expect(data.exchanges[1]).toBe('fake2');
+  });
+
+  it('handles single unknown exchange gracefully', async () => {
+    const { server } = setup();
+    const result = await server.callTool('aggregate_order_books', {
+      symbol: 'BTC/USDT',
+      exchanges: 'unknown_only',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+
+    expect(data.errors).toHaveLength(1);
+    expect(data.aggregatedBids).toHaveLength(0);
+    expect(data.aggregatedAsks).toHaveLength(0);
+    expect(data.totalBidDepth).toBe(0);
+    expect(data.totalAskDepth).toBe(0);
+  });
+});
