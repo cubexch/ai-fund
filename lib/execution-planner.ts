@@ -277,6 +277,16 @@ export function planIceberg(input: IcebergInput): IcebergPlan {
 export function estimateMarketImpact(input: MarketImpactInput): MarketImpactResult {
   const { amount, dailyVolume, volatility, price } = input;
 
+  if (dailyVolume <= 0 || !isFinite(dailyVolume)) {
+    return {
+      participationRate: NaN,
+      temporaryImpactBps: NaN,
+      permanentImpactBps: NaN,
+      totalImpactBps: NaN,
+      estimatedCostUsd: NaN,
+    };
+  }
+
   const participation = amount / dailyVolume;
   const sigma = volatility;
 

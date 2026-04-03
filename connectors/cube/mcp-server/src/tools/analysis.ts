@@ -401,9 +401,22 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
 
         const closes = ohlcv.map(c => c.close);
         const volatility = realizedVolatility(closes);
-        const dailyVolume = ohlcv.length > 0
+
+        // Use OHLCV average daily volume; fall back to ticker 24h base volume
+        let dailyVolume = ohlcv.length > 0
           ? ohlcv.reduce((sum, c) => sum + c.volume, 0) / ohlcv.length
-          : 1;
+          : 0;
+        let volumeSource = 'ohlcv';
+        if (dailyVolume <= 0 && ticker) {
+          dailyVolume = ticker.baseVolume24h ?? 0;
+          volumeSource = 'ticker_24h';
+        }
+        if (dailyVolume <= 0) {
+          return {
+            content: [{ type: 'text' as const, text: `No volume data for ${market.symbol}. Cannot estimate market impact without volume.` }],
+            isError: true,
+          };
+        }
 
         const result = estimateMarketImpact({
           amount: params.amount,
@@ -411,6 +424,13 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
           volatility,
           price,
         });
+
+        if (isNaN(result.totalImpactBps)) {
+          return {
+            content: [{ type: 'text' as const, text: `Insufficient data to estimate impact for ${market.symbol}.` }],
+            isError: true,
+          };
+        }
 
         return {
           content: [{
@@ -422,6 +442,7 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
                 amount: params.amount,
                 price,
                 dailyVolume: dailyVolume.toFixed(2),
+                volumeSource,
                 realizedVolatility: (volatility * 100).toFixed(2) + '%',
                 ...result,
               },

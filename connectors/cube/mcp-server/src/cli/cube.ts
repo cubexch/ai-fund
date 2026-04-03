@@ -38,6 +38,7 @@ type RendererId =
   | 'tickers'
   | 'orderBook'
   | 'deposit'
+  | 'impact'
   | 'generic';
 
 interface CliOutput {
@@ -385,10 +386,10 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
   },
   {
     path: ['trade', 'impact'],
-    summary: 'Estimate market impact.',
+    summary: 'Estimate slippage cost of a large order (Almgren-Chriss model).',
     targetKind: 'tool',
     targetName: 'simulate_market_impact',
-    renderer: 'generic',
+    renderer: 'impact',
   },
 ];
 
@@ -1544,6 +1545,33 @@ function renderDeposit(data: any): string[] {
   return lines;
 }
 
+function renderImpact(data: any): string[] {
+  if (!data || typeof data !== 'object') return ['No impact data.'];
+  const lines: string[] = [];
+  const side = data.side === 'sell' ? 'Sell' : 'Buy';
+  lines.push('');
+  lines.push(`  ${c.bold}Market Impact Estimate${c.reset}  ${side} ${formatNumber(data.amount, 4)} on ${data.market ?? '?'}`);
+  lines.push('');
+  lines.push(...renderKeyValues([
+    ['Price', data.price != null ? formatCurrency(data.price, 4) : 'N/A'],
+    ['Daily volume', data.dailyVolume != null ? formatNumber(Number(data.dailyVolume), 2) : 'N/A'],
+    ['Volatility', data.realizedVolatility ?? 'N/A'],
+    ['Participation', data.participationRate != null ? `${(data.participationRate * 100).toFixed(4)}%` : 'N/A'],
+  ]));
+  lines.push('');
+  const tempBps = data.temporaryImpactBps ?? 0;
+  const permBps = data.permanentImpactBps ?? 0;
+  const totalBps = data.totalImpactBps ?? (tempBps + permBps);
+  const costUsd = data.estimatedCostUsd ?? 0;
+  const bpsColor = totalBps > 50 ? c.red : totalBps > 10 ? c.yellow : c.green;
+  lines.push(`  ${c.dim}Temporary impact${c.reset}    ${tempBps.toFixed(2)} bps`);
+  lines.push(`  ${c.dim}Permanent impact${c.reset}    ${permBps.toFixed(2)} bps`);
+  lines.push(`  ${c.dim}Total impact${c.reset}        ${bpsColor}${totalBps.toFixed(2)} bps${c.reset}`);
+  lines.push(`  ${c.dim}Estimated cost${c.reset}      ${formatCurrency(costUsd)}`);
+  lines.push('');
+  return lines;
+}
+
 function renderGeneric(data: any): string[] {
   if (data == null) return ['No data returned.'];
   if (typeof data === 'string') return [data];
@@ -1580,6 +1608,8 @@ async function renderHuman(spec: CliCommandSpec, data: any, catalog: Catalog): P
       return renderOrderBook(data);
     case 'deposit':
       return renderDeposit(data);
+    case 'impact':
+      return renderImpact(data);
     case 'generic':
     default:
       return renderGeneric(data);
