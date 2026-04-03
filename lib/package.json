@@ -15,11 +15,18 @@
     "./connector-registry": "./connector-registry.ts",
     "./valuation": "./valuation.ts",
     "./ingest/exchange": "./ingest/exchange.ts",
-    "./ingest/yahoo": "./ingest/yahoo.ts"
+    "./ingest/yahoo": "./ingest/yahoo.ts",
+    "./test-fixtures": "./test-fixtures/index.ts",
+    "./test-fixtures/market-data": "./test-fixtures/market-data.ts",
+    "./test-fixtures/mock-mcp-server": "./test-fixtures/mock-mcp-server.ts",
+    "./test-fixtures/mock-exchange": "./test-fixtures/mock-exchange.ts",
+    "./test-fixtures/mock-fetch": "./test-fixtures/mock-fetch.ts",
+    "./test-fixtures/http-replay": "./test-fixtures/http-replay.ts"
   },
   "files": [
     "*.ts",
-    "ingest/*.ts"
+    "ingest/*.ts",
+    "test-fixtures/*.ts"
   ],
   "engines": {
     "node": ">=20"

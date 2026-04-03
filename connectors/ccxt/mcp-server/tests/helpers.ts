@@ -1,12 +1,32 @@
 /**
- * Test helpers — mock CCXT exchange, McpServer, and MemoryStore for tool testing.
+ * Test helpers — re-exports shared fixtures and provides CCXT-specific helpers.
+ *
+ * Most mock utilities now live in @ai-fund/lib/test-fixtures.
+ * This file re-exports them for backwards compatibility and adds
+ * CCXT-specific wrappers (MemoryStore, typed createMockClient).
  */
 
 import type { ExchangeClient } from '../src/client/exchange';
 import type { CredentialStore, CcxtCredentials } from '../src/client/credential-store';
 import { LatencyTracker } from '../src/client/latency-tracker';
 
-// ── In-memory credential store for testing ────────────────
+// Re-export shared fixtures for existing test imports
+export {
+  MockMcpServer,
+  createMockExchangeClient,
+  type MockCall,
+} from '@ai-fund/lib/test-fixtures';
+
+export {
+  TICKERS, BALANCES, MARKETS,
+  BTC_BARS, ETH_BARS, SOL_BARS,
+  BTC_ORDER_BOOK, BTC_TRADES,
+  FILLED_ORDER, OPEN_LIMIT_ORDER,
+  generateBars, generateOrderBook, generateTrades,
+  ticker, allTickers,
+} from '@ai-fund/lib/test-fixtures/market-data';
+
+// ── CCXT-specific: In-memory credential store ────────────────
 
 export class MemoryStore implements CredentialStore {
   readonly backend = 'file' as const;
@@ -17,22 +37,17 @@ export class MemoryStore implements CredentialStore {
   async delete(exchangeId: string) { this.data.delete(exchangeId); }
 }
 
-// ── Mock Exchange ──────────────────────────────────────────
-
-export interface MockCall {
-  method: string;
-  args: unknown[];
-}
+// ── CCXT-specific: Typed mock client ─────────────────────────
 
 /**
- * Create a mock ExchangeClient that returns predefined responses.
- * Each method call is recorded in `calls` for assertion.
+ * Create a mock ExchangeClient with call recording.
+ * Thin wrapper over createMockExchangeClient with proper typing.
  */
-export function createMockClient(overrides: Partial<ExchangeClient> = {}): ExchangeClient & { calls: MockCall[] } {
-  const calls: MockCall[] = [];
+export function createMockClient(overrides: Partial<ExchangeClient> = {}): ExchangeClient & { calls: { method: string; args: unknown[] }[] } {
+  const calls: { method: string; args: unknown[] }[] = [];
   const defaultLatency = new LatencyTracker();
 
-  const proxy = new Proxy({} as ExchangeClient & { calls: MockCall[] }, {
+  const proxy = new Proxy({} as ExchangeClient & { calls: { method: string; args: unknown[] }[] }, {
     get(target, prop: string) {
       if (prop === 'calls') return calls;
       if (prop === 'exchangeId') return overrides.exchangeId ?? 'coinbase';
@@ -61,29 +76,4 @@ export function createMockClient(overrides: Partial<ExchangeClient> = {}): Excha
   });
 
   return proxy;
-}
-
-// ── Mock MCP Server ────────────────────────────────────────
-
-/**
- * Minimal McpServer mock that captures tool registrations
- * and lets tests invoke them directly.
- */
-export class MockMcpServer {
-  tools = new Map<string, {
-    name: string;
-    description: string;
-    schema: unknown;
-    handler: (params: any) => Promise<any>;
-  }>();
-
-  tool(name: string, description: string, schema: unknown, handler: (params: any) => Promise<any>) {
-    this.tools.set(name, { name, description, schema, handler });
-  }
-
-  async callTool(name: string, params: Record<string, unknown> = {}) {
-    const t = this.tools.get(name);
-    if (!t) throw new Error(`Tool "${name}" not registered`);
-    return t.handler(params);
-  }
 }
