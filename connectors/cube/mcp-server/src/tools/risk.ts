@@ -24,25 +24,23 @@ export function registerRiskTools(server: McpServer, iridium: IridiumClient) {
         const tickerMap = new Map(tickers.map(t => [t.symbol, t]));
         let totalValue = 0;
 
-        // Flatten position groups and resolve assetId → symbol via registry
-        const flatPositions: { symbol: string; assetId: number; amount: number; icon: string }[] = [];
+        const flatPositions: { symbol: string; assetId: number; amount: number; icon: string; usdRate?: number }[] = [];
         for (const [, group] of Object.entries(positionGroups)) {
           for (const entry of group.inner) {
             const amt = parseFloat(entry.amount);
             if (amt > 0) {
-              const asset = registry.getById(entry.assetId);
-              const symbol = asset?.symbol ?? `ASSET-${entry.assetId}`;
-              const icon = asset?.icon ?? '';
-              flatPositions.push({ symbol, assetId: entry.assetId, amount: amt, icon });
+              const symbol = entry.symbol ?? registry.getById(entry.assetId)?.symbol ?? `ASSET-${entry.assetId}`;
+              const icon = registry.getById(entry.assetId)?.icon ?? '';
+              flatPositions.push({ symbol, assetId: entry.assetId, amount: amt, icon, usdRate: entry.usdRate });
             }
           }
         }
 
         const enriched = flatPositions.map(position => {
-          // Stablecoins are worth $1 — no ticker lookup needed
-          const isStable = ['USDC', 'USDT'].includes(position.symbol);
-          const ticker = tickerMap.get(`${position.symbol}USDC`);
-          const price = isStable ? 1 : (ticker?.lastPrice ?? 0);
+          const isStable = ['USDC', 'USDT', 'tUSDC', 'tUSDT', 'gUSDC'].includes(position.symbol);
+          const ticker = tickerMap.get(`${position.symbol}USDC`) ?? tickerMap.get(`${position.symbol}tUSDC`);
+          const price = isStable ? 1
+            : (ticker?.lastPrice ?? (position.usdRate ? position.usdRate / 1e9 : 0));
           const value = position.amount * price;
           totalValue += value;
 

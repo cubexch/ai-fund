@@ -42,7 +42,7 @@ describe('registerAccountTools', () => {
     expect(names).toContain('get_order_history');
     expect(names).toContain('get_fills');
     expect(names).toContain('get_subaccounts');
-    expect(names).toContain('get_deposit_address');
+    expect(names).toContain('get_account_deposit');
   });
 
   describe('get_positions', () => {

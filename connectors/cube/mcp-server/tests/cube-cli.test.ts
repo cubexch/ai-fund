@@ -23,7 +23,7 @@ const expectedTools = [
   'get_order_history',
   'get_fills',
   'get_subaccounts',
-  'get_deposit_address',
+  'get_account_deposit',
   'get_portfolio',
   'calculate_position_size',
   'detect_confluence',
@@ -35,9 +35,6 @@ const expectedTools = [
   'get_market_microstructure',
   'search_assets',
   'get_trending',
-  'get_quote',
-  'compare_venues',
-  'swap',
   'execute_trade',
 ].sort();
 

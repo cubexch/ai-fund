@@ -10,10 +10,28 @@
  */
 
 import { execFile } from 'node:child_process';
-import { readFile, writeFile, mkdir, unlink } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, unlink, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir, platform } from 'node:os';
 import type { SigningCredentials } from './signing';
+
+// ── Persistent Credential Audit Log ─────────────────────────
+//
+// Traces every load / save / delete / expiry-reject to ~/.cube/credential-ops.log
+// so we can figure out what is deleting credentials.
+
+const AUDIT_LOG = join(homedir(), '.cube', 'credential-ops.log');
+
+async function auditLog(op: string, detail: string): Promise<void> {
+  const ts = new Date().toISOString();
+  const pid = process.pid;
+  const stack = new Error().stack?.split('\n').slice(2, 6).map(l => l.trim()).join(' <- ') ?? '';
+  const line = `[${ts}] pid=${pid} op=${op} ${detail} | ${stack}\n`;
+  try {
+    await mkdir(join(homedir(), '.cube'), { recursive: true });
+    await appendFile(AUDIT_LOG, line);
+  } catch { /* best-effort */ }
+}
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -61,13 +79,17 @@ class KeychainStore implements CredentialStore {
         '-s', SERVICE,
         '-w',
       ]);
-      return JSON.parse(json) as SigningCredentials;
+      const creds = JSON.parse(json) as SigningCredentials;
+      await auditLog('load', `backend=keychain keyId=${creds.verificationKeyId ?? '?'} expiresAt=${creds.expiresAt}`);
+      return creds;
     } catch {
+      await auditLog('load', 'backend=keychain result=null (not found or parse error)');
       return null;
     }
   }
 
   async save(creds: SigningCredentials): Promise<void> {
+    await auditLog('save', `backend=keychain keyId=${creds.verificationKeyId ?? '?'} expiresAt=${creds.expiresAt}`);
     const json = JSON.stringify(creds);
     // -U = update if exists, -a = account, -s = service, -w = password, -l = label
     await exec('security', [
@@ -81,6 +103,7 @@ class KeychainStore implements CredentialStore {
   }
 
   async delete(): Promise<void> {
+    await auditLog('DELETE', 'backend=keychain *** CREDENTIALS BEING DELETED ***');
     try {
       await exec('security', [
         'delete-generic-password',
@@ -105,16 +128,22 @@ class SecretToolStore implements CredentialStore {
         'service', SERVICE,
         'account', ACCOUNT,
       ]);
-      if (!json) return null;
-      return JSON.parse(json) as SigningCredentials;
+      if (!json) {
+        await auditLog('load', 'backend=secret-tool result=null (empty)');
+        return null;
+      }
+      const creds = JSON.parse(json) as SigningCredentials;
+      await auditLog('load', `backend=secret-tool keyId=${creds.verificationKeyId ?? '?'} expiresAt=${creds.expiresAt}`);
+      return creds;
     } catch {
+      await auditLog('load', 'backend=secret-tool result=null (not found or parse error)');
       return null;
     }
   }
 
   async save(creds: SigningCredentials): Promise<void> {
+    await auditLog('save', `backend=secret-tool keyId=${creds.verificationKeyId ?? '?'} expiresAt=${creds.expiresAt}`);
     const json = JSON.stringify(creds);
-    // secret-tool reads the secret from stdin
     await exec('secret-tool', [
       'store',
       '--label', LABEL,
@@ -124,6 +153,7 @@ class SecretToolStore implements CredentialStore {
   }
 
   async delete(): Promise<void> {
+    await auditLog('DELETE', 'backend=secret-tool *** CREDENTIALS BEING DELETED ***');
     try {
       await exec('secret-tool', [
         'clear',
@@ -144,18 +174,23 @@ class FileStore implements CredentialStore {
   async load(): Promise<SigningCredentials | null> {
     try {
       const data = await readFile(CREDENTIALS_FILE, 'utf-8');
-      return JSON.parse(data) as SigningCredentials;
+      const creds = JSON.parse(data) as SigningCredentials;
+      await auditLog('load', `backend=file keyId=${creds.verificationKeyId ?? '?'} expiresAt=${creds.expiresAt}`);
+      return creds;
     } catch {
+      await auditLog('load', 'backend=file result=null (not found or parse error)');
       return null;
     }
   }
 
   async save(creds: SigningCredentials): Promise<void> {
+    await auditLog('save', `backend=file keyId=${creds.verificationKeyId ?? '?'} expiresAt=${creds.expiresAt}`);
     await mkdir(CREDENTIALS_DIR, { recursive: true });
     await writeFile(CREDENTIALS_FILE, JSON.stringify(creds, null, 2), { mode: 0o600 });
   }
 
   async delete(): Promise<void> {
+    await auditLog('DELETE', 'backend=file *** CREDENTIALS BEING DELETED ***');
     try {
       await unlink(CREDENTIALS_FILE);
     } catch {
@@ -224,10 +259,15 @@ export async function loadCredentials(): Promise<SigningCredentials | null> {
   const store = await getStore();
   const creds = await store.load();
 
-  if (!creds) return null;
+  if (!creds) {
+    await auditLog('loadCredentials', 'result=null (store returned null)');
+    return null;
+  }
 
   // Check expiry with 5 min buffer
-  if (creds.expiresAt && creds.expiresAt < Math.floor(Date.now() / 1000) + 300) {
+  const now = Math.floor(Date.now() / 1000);
+  if (creds.expiresAt && creds.expiresAt < now + 300) {
+    await auditLog('EXPIRY_REJECT', `keyId=${creds.verificationKeyId ?? '?'} expiresAt=${creds.expiresAt} now=${now} delta=${creds.expiresAt - now}s *** CREDENTIALS REJECTED AS EXPIRED ***`);
     return null;
   }
 
@@ -238,6 +278,7 @@ export async function loadCredentials(): Promise<SigningCredentials | null> {
  * Save credentials to the best available store.
  */
 export async function saveCredentials(creds: SigningCredentials): Promise<void> {
+  await auditLog('saveCredentials', `keyId=${creds.verificationKeyId ?? '?'} expiresAt=${creds.expiresAt}`);
   const store = await getStore();
   await store.save(creds);
 }
@@ -246,6 +287,7 @@ export async function saveCredentials(creds: SigningCredentials): Promise<void> 
  * Delete credentials from the best available store.
  */
 export async function deleteCredentials(): Promise<void> {
+  await auditLog('deleteCredentials', '*** EXPLICIT DELETE CALLED ***');
   const store = await getStore();
   await store.delete();
 }

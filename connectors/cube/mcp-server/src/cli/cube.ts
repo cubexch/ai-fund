@@ -37,6 +37,7 @@ type RendererId =
   | 'marketList'
   | 'tickers'
   | 'orderBook'
+  | 'deposit'
   | 'generic';
 
 interface CliOutput {
@@ -202,11 +203,11 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     renderer: 'subaccounts',
   },
   {
-    path: ['account', 'deposit-address'],
-    summary: 'Get a deposit address and funding link.',
+    path: ['account', 'deposit'],
+    summary: 'Get a deposit link to fund your account.',
     targetKind: 'tool',
-    targetName: 'get_deposit_address',
-    renderer: 'generic',
+    targetName: 'get_account_deposit',
+    renderer: 'deposit',
   },
   {
     path: ['account', 'portfolio'],
@@ -368,30 +369,8 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     renderer: 'generic',
   },
   {
-    path: ['trade', 'quote'],
-    summary: 'Get a trade quote.',
-    targetKind: 'tool',
-    targetName: 'get_quote',
-    renderer: 'generic',
-  },
-  {
-    path: ['trade', 'compare'],
-    summary: 'Compare venues for an asset.',
-    targetKind: 'tool',
-    targetName: 'compare_venues',
-    renderer: 'generic',
-  },
-  {
-    path: ['trade', 'swap'],
-    summary: 'Execute an on-chain swap.',
-    targetKind: 'tool',
-    targetName: 'swap',
-    renderer: 'generic',
-    destructive: true,
-  },
-  {
     path: ['trade', 'execute'],
-    summary: 'Execute a routed live trade.',
+    summary: 'Execute a trade with smart routing (orderbook + on-chain).',
     targetKind: 'tool',
     targetName: 'execute_trade',
     renderer: 'generic',
@@ -631,7 +610,9 @@ export function parseToolParams(commandArgs: string[], schema: ZodTypeAny | unde
     }
   }
 
-  for (const key of required) {
+  // Fill required params first, then optional params, from positional args
+  const optional = Object.keys(shape).filter(key => isOptional(shape[key]));
+  for (const key of [...required, ...optional]) {
     if (params[key] === undefined && positional.length > 0) {
       params[key] = coerceValueBySchema(positional.shift(), shape[key]);
     }
@@ -797,15 +778,23 @@ function formatStatus(value: string | number | null | undefined): string {
   return `${c.yellow}${text}${c.reset}`;
 }
 
+const ICONS: Record<string, string> = {
+  BTC: '₿', ETH: 'Ξ', SOL: '◎', USDC: '💵', USDT: '₮',
+  DOGE: 'Ð', LTC: 'Ł', XRP: '✕', ADA: '₳', DOT: '●',
+  AVAX: 'Ⓐ', MATIC: '⬡', ATOM: '⚛', LINK: '⬡', UNI: '🦄',
+  AAVE: '👻', APT: '❖', SUI: '💧', TAO: 'τ', BONK: '🐕',
+  PENGU: '🐧', TRUMP: '🇺🇸', FARTCOIN: '💨', JUP: '♃', PYTH: '🔮',
+  RAY: '☀', HNT: '📡', ORCA: '🐋', DEEP: '🌊', WAL: '🐘',
+  CHZ: '⚽', MNDE: '⛏', RUNES: '᚛', JTO: '🏗', JitoSOL: '◎',
+};
+
+/** Strip staging t-prefix (tSOLt → SOL, tBTCt → BTC) and look up icon */
 function assetLabel(symbol: string): string {
-  const icons: Record<string, string> = {
-    BTC: 'BTC',
-    ETH: 'ETH',
-    SOL: 'SOL',
-    USDC: 'USDC',
-    USDT: 'USDT',
-  };
-  return icons[symbol] ? `${symbol}` : symbol;
+  let canonical = symbol;
+  if (/^t[A-Z].*t$/i.test(symbol)) canonical = symbol.slice(1, -1);
+  else if (/^t[A-Z]/i.test(symbol)) canonical = symbol.slice(1);
+  const icon = ICONS[canonical.toUpperCase()] ?? ICONS[symbol.toUpperCase()];
+  return icon ? `${icon}  ${symbol}` : symbol;
 }
 
 function renderKeyValues(entries: Array<[string, string]>): string[] {
@@ -1281,12 +1270,15 @@ async function renderPositions(data: any, catalog: Catalog): Promise<string[]> {
   for (const [, group] of groups) {
     const inner = Array.isArray((group as any)?.inner) ? (group as any).inner : [];
     for (const entry of inner) {
-      const symbol = assetContext.symbolByAssetId.get(Number(entry.assetId)) ?? `ASSET-${entry.assetId}`;
+      const symbol = entry.symbol ?? assetContext.symbolByAssetId.get(Number(entry.assetId)) ?? `ASSET-${entry.assetId}`;
       const amount = Number(entry.amount ?? 0);
       const pending = Number(entry.pendingDeposits ?? 0);
       const received = Number(entry.receivedAmount ?? 0);
-      const symbolTicker = assetContext.priceBySymbol.get(`${symbol}USDC`);
-      const price = ['USDC', 'USDT'].includes(symbol) ? 1 : (symbolTicker ?? null);
+      const isStable = ['USDC', 'USDT', 'tUSDC', 'tUSDT', 'gUSDC'].includes(symbol);
+      const symbolTicker = assetContext.priceBySymbol.get(`${symbol}USDC`)
+        ?? assetContext.priceBySymbol.get(`${symbol}tUSDC`);
+      const usdRate = entry.usdRate ? entry.usdRate / 1e9 : null;
+      const price = isStable ? 1 : (symbolTicker ?? usdRate);
       rows.push({
         asset: assetLabel(symbol),
         accountingType: String(entry.accountingType ?? (group as any)?.name ?? 'unknown'),
@@ -1328,7 +1320,7 @@ function renderAccountSummary(data: any): string[] {
   if (balances.length === 0) return ['No balances found.'];
 
   const rows = balances.map((balance: any) => [
-    balance.asset ?? balance.symbol ?? 'N/A',
+    assetLabel(balance.symbol ?? balance.asset ?? 'N/A'),
     formatNumber(Number(balance.amount ?? 0), 8),
     String(balance.usdPrice ?? 'N/A'),
     String(balance.usdValue ?? 'N/A'),
@@ -1479,7 +1471,7 @@ function renderPortfolio(data: any): string[] {
   if (positions.length === 0) return ['No portfolio holdings found.'];
 
   const rows = positions.map((position: any) => [
-    position.label ?? position.asset ?? 'N/A',
+    assetLabel(position.asset ?? position.label ?? 'N/A'),
     formatNumber(Number(position.amount), 8),
     typeof position.price === 'number' ? formatCurrency(position.price, 4) : String(position.price ?? 'N/A'),
     typeof position.value === 'number' ? formatCurrency(position.value) : String(position.value ?? 'N/A'),
@@ -1532,6 +1524,26 @@ function renderGenericTable(rows: Record<string, any>[]): string[] {
   return renderTable(keys.map(key => key.replace(/_/g, ' ')), tableRows);
 }
 
+function renderDeposit(data: any): string[] {
+  if (!data || typeof data !== 'object') return ['No deposit data.'];
+  const lines: string[] = [];
+  lines.push('');
+  lines.push(`  ${c.bold}Deposit ${data.asset ?? ''}${c.reset}`);
+  lines.push('');
+  if (data.amount) {
+    lines.push(`    ${c.dim}Amount${c.reset}       ${data.amount} ${data.asset ?? ''}`);
+  }
+  if (data.label) {
+    lines.push(`    ${c.dim}Agent${c.reset}        ${data.label}`);
+  }
+  lines.push('');
+  lines.push(`  ${c.cyan}${data.depositUrl}${c.reset}`);
+  lines.push('');
+  lines.push(`  ${c.dim}Open this link to complete your deposit.${c.reset}`);
+  lines.push('');
+  return lines;
+}
+
 function renderGeneric(data: any): string[] {
   if (data == null) return ['No data returned.'];
   if (typeof data === 'string') return [data];
@@ -1566,6 +1578,8 @@ async function renderHuman(spec: CliCommandSpec, data: any, catalog: Catalog): P
       return renderTickers(data);
     case 'orderBook':
       return renderOrderBook(data);
+    case 'deposit':
+      return renderDeposit(data);
     case 'generic':
     default:
       return renderGeneric(data);
@@ -1652,6 +1666,21 @@ async function emitResult(
 
   const lines = await renderHuman(spec, normalized, catalog);
   for (const line of lines) output.stdout.push(line);
+
+  // Auto-open deposit URL in browser
+  if (spec.renderer === 'deposit' && normalized?.depositUrl) {
+    try {
+      const open = ((await import('open' as string)) as { default: (url: string) => Promise<unknown> }).default;
+      await open(normalized.depositUrl);
+    } catch {
+      const { exec } = await import('node:child_process');
+      const cmd = process.platform === 'darwin' ? 'open'
+        : process.platform === 'win32' ? 'start'
+        : 'xdg-open';
+      exec(`${cmd} "${normalized.depositUrl}"`);
+    }
+  }
+
   return 0;
 }
 

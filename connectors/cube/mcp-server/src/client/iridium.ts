@@ -310,14 +310,36 @@ export class IridiumClient {
   }
 
   /**
-   * Get wallet assets for a subaccount.
-   * Uses /wallet/assets which supports verification key auth directly.
+   * Get wallet assets for a subaccount via single /wallet/assets call.
+   *
+   * The API returns { assets: [...metadata], positions: [...amounts] } as separate arrays
+   * (WalletAsset.amount is #[serde(skip)] — see core/iridium/src/web/wallet.rs:1561).
+   * This method joins them by assetId and converts raw amounts using decimals.
    */
   async getWalletAssets(subaccountId: number): Promise<WalletAsset[]> {
-    const data = await this.request<{ assets: WalletAsset[] }>(
+    const data = await this.request<{
+      assets: Array<{ assetId: number; sourceId: number; decimals: number; defaultDisplayDecimals: number; symbol: string; usdRate: number; address?: string }>;
+      positions: Array<{ assetId: number; amount: string }>;
+    }>(
       `/wallet/assets?subaccountId=${subaccountId}`, {}, { authenticated: 'iridium' }
     );
-    return data.assets;
+
+    // Build position lookup by assetId
+    const positionMap = new Map<number, string>();
+    for (const pos of (data.positions ?? [])) {
+      positionMap.set(pos.assetId, pos.amount);
+    }
+
+    // Merge: asset metadata + position amount (converted from raw integer to decimal)
+    return (data.assets ?? []).map(asset => {
+      const rawAmount = positionMap.get(asset.assetId) ?? '0';
+      const amount = (Number(rawAmount) / Math.pow(10, asset.decimals)).toString();
+      return {
+        ...asset,
+        amount,
+        availableAmount: amount,
+      };
+    }).filter(a => a.amount !== '0');
   }
 
   /**
@@ -325,27 +347,27 @@ export class IridiumClient {
    * Uses /wallet/assets (supports verification key auth).
    */
   async getPositions(subaccountId: number): Promise<Record<string, PositionGroup>> {
-    {
-      const assets = await this.getWalletAssets(subaccountId);
-      const groups: Record<string, PositionGroup> = {};
-      for (const asset of assets) {
-        if (!asset.amount && !asset.availableAmount) continue;
-        const amount = asset.amount ?? asset.availableAmount ?? '0';
-        if (amount === '0') continue;
-        const key = asset.symbol;
-        if (!groups[key]) {
-          groups[key] = { name: key, inner: [] };
-        }
-        groups[key].inner.push({
-          assetId: asset.assetId,
-          accountingType: 'available',
-          amount,
-          receivedAmount: amount,
-          pendingDeposits: asset.pendingAmount ?? '0',
-        });
+    const assets = await this.getWalletAssets(subaccountId);
+    const groups: Record<string, PositionGroup> = {};
+    for (const asset of assets) {
+      const amount = asset.amount ?? asset.availableAmount ?? '0';
+      if (amount === '0') continue;
+      const key = asset.symbol;
+      if (!groups[key]) {
+        groups[key] = { name: key, inner: [] };
       }
-      return groups;
+      groups[key].inner.push({
+        assetId: asset.assetId,
+        accountingType: 'available',
+        amount,
+        receivedAmount: amount,
+        pendingDeposits: asset.pendingAmount ?? '0',
+        symbol: asset.symbol,
+        usdRate: asset.usdRate,
+        decimals: asset.decimals,
+      });
     }
+    return groups;
   }
 
   // ── AUTHENTICATED: Order History (/ir/v0, requires login)
@@ -697,6 +719,9 @@ export interface PositionEntry {
   amount: string;
   receivedAmount: string;
   pendingDeposits: string;
+  symbol?: string;
+  usdRate?: number;
+  decimals?: number;
 }
 
 export interface PositionGroup {

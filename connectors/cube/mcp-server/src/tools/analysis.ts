@@ -366,27 +366,29 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
 
   server.tool(
     'simulate_market_impact',
-    'Estimate market impact of a large order using the Almgren-Chriss model. Returns temporary/permanent impact in bps and estimated cost.',
+    'Estimate market impact of a large order using the Almgren-Chriss model. Returns temporary/permanent impact in bps and estimated cost. Accepts a symbol (e.g. "SOL", "BTC") — resolves the market automatically.',
     {
-      marketId: z.number().describe('Market ID for the asset'),
-      amount: z.number().describe('Order quantity in base asset'),
+      symbol: z.string().describe('Base asset symbol (e.g. "SOL", "BTC", "ETH")'),
+      side: z.enum(['buy', 'sell']).describe('Order side'),
+      amount: z.number().describe('Order quantity in base asset units'),
       interval: z.enum(['1h', '4h', '1d']).default('1d').describe('Interval for volatility estimation'),
     },
     async params => {
       try {
-        const [tickers, ohlcv, markets] = await Promise.all([
-          iridium.getTickers(),
-          fetchOhlcv(params.marketId, params.interval, 60),
-          iridium.getMarkets(),
-        ]);
-
-        const market = markets.find(m => m.marketId === params.marketId);
+        const markets = await iridium.getMarkets();
+        const upper = params.symbol.toUpperCase();
+        const market = markets.find(m => m.symbol.toUpperCase().startsWith(upper));
         if (!market) {
           return {
-            content: [{ type: 'text' as const, text: `Unknown marketId: ${params.marketId}` }],
+            content: [{ type: 'text' as const, text: `No market found for "${params.symbol}". Use get_assets to list available markets.` }],
             isError: true,
           };
         }
+
+        const [tickers, ohlcv] = await Promise.all([
+          iridium.getTickers(),
+          fetchOhlcv(market.marketId, params.interval, 60),
+        ]);
 
         const ticker = tickers.find(t => t.symbol === market.symbol);
         const price = ticker?.lastPrice ?? 0;
@@ -416,6 +418,8 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
             text: JSON.stringify(
               {
                 market: market.symbol,
+                side: params.side,
+                amount: params.amount,
                 price,
                 dailyVolume: dailyVolume.toFixed(2),
                 realizedVolatility: (volatility * 100).toFixed(2) + '%',
