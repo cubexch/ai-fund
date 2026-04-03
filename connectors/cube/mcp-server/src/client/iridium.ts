@@ -1,4 +1,4 @@
-import { buildAuthHeaders, getEnvironment, resetAuth, fetchAccessToken, type AccessToken } from './auth';
+import { buildAuthHeaders, getEnvironment, resetAuth } from './auth';
 import { ASSET_ICONS } from '@ai-fund/lib/format';
 
 // ── Interval helpers ─────────────────────────────────────
@@ -87,12 +87,8 @@ export class AssetRegistry {
  *
  * Auth requirements:
  * - PUBLIC (no auth): markets, tickers, order book, recent trades, klines, token search
- * - AUTHENTICATED (HMAC or verification key): positions, orders, fills, fees, subaccounts
- * - AUTHENTICATED (for Osmium REST): place/cancel/modify orders
- *
- * When using verification key auth (from `npm run login`):
- * - Iridium endpoints: fetches HMAC via /users/hmac bridge, then uses HMAC
- * - Osmium endpoints: uses Ed25519 verification key headers directly
+ * - AUTHENTICATED (verification key): positions, orders, fills, fees, subaccounts
+ * - AUTHENTICATED (verification key): place/cancel/modify orders via Osmium REST
  */
 export class IridiumClient {
   private baseUrl: string;
@@ -160,14 +156,6 @@ export class IridiumClient {
     return this._subaccountPromise;
   }
 
-  /**
-   * Fetch HMAC access token for Osmium WebSocket authentication.
-   * Uses verification key → HMAC bridge when needed.
-   */
-  async getAccessToken(): Promise<AccessToken> {
-    return fetchAccessToken();
-  }
-
   private async request<T>(
     path: string,
     options: RequestInit = {},
@@ -185,11 +173,13 @@ export class IridiumClient {
 
     if (opts.authenticated) {
       const target = opts.authenticated === 'iridium' ? 'iridium' : 'osmium';
-      const authHeaders = await buildAuthHeaders(target);
+      const method = (options.method || 'GET').toUpperCase();
+      // Sign only the path (no query string) — Iridium validates against the base path
+      const pathOnly = path.split('?')[0];
+      const authHeaders = await buildAuthHeaders(target, method, pathOnly);
       if (Object.keys(authHeaders).length === 0) {
         throw new Error(
           'No credentials available. Run `npm run login` to authenticate, ' +
-          'or set CUBE_API_KEY + CUBE_SECRET_KEY, ' +
           'or set CUBE_SIGNING_KEY + CUBE_VERIFICATION_KEY_ID.'
         );
       }
@@ -319,10 +309,43 @@ export class IridiumClient {
     return data.result;
   }
 
-  async getPositions(subaccountId: number): Promise<Record<string, PositionGroup>> {
-    return this.request<Record<string, PositionGroup>>(
-      `/users/subaccount/${subaccountId}/positions`, {}, { authenticated: 'iridium' }
+  /**
+   * Get wallet assets for a subaccount.
+   * Uses /wallet/assets which supports verification key auth directly.
+   */
+  async getWalletAssets(subaccountId: number): Promise<WalletAsset[]> {
+    const data = await this.request<{ assets: WalletAsset[] }>(
+      `/wallet/assets?subaccountId=${subaccountId}`, {}, { authenticated: 'iridium' }
     );
+    return data.assets;
+  }
+
+  /**
+   * Get positions for a subaccount.
+   * Uses /wallet/assets (supports verification key auth).
+   */
+  async getPositions(subaccountId: number): Promise<Record<string, PositionGroup>> {
+    {
+      const assets = await this.getWalletAssets(subaccountId);
+      const groups: Record<string, PositionGroup> = {};
+      for (const asset of assets) {
+        if (!asset.amount && !asset.availableAmount) continue;
+        const amount = asset.amount ?? asset.availableAmount ?? '0';
+        if (amount === '0') continue;
+        const key = asset.symbol;
+        if (!groups[key]) {
+          groups[key] = { name: key, inner: [] };
+        }
+        groups[key].inner.push({
+          assetId: asset.assetId,
+          accountingType: 'available',
+          amount,
+          receivedAmount: amount,
+          pendingDeposits: asset.pendingAmount ?? '0',
+        });
+      }
+      return groups;
+    }
   }
 
   // ── AUTHENTICATED: Order History (/ir/v0, requires login)
@@ -706,6 +729,19 @@ export interface Fill {
   fee: string;
   feeAsset: string;
   timestamp: string;
+}
+
+export interface WalletAsset {
+  assetId: number;
+  sourceId: number;
+  decimals: number;
+  defaultDisplayDecimals: number;
+  symbol: string;
+  usdRate: number;
+  address?: string;
+  amount?: string;
+  availableAmount?: string;
+  pendingAmount?: string;
 }
 
 export interface FeeEstimate {

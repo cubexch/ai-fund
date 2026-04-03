@@ -1,5 +1,5 @@
 import { WebSocket } from 'ws';
-import { fetchAccessToken, getEnvironment, getSigningCredentials, getSigningKey, hasAuth } from './auth';
+import { buildWsVerificationKeyCredentials, getEnvironment, getSigningCredentials, getSigningKey, hasAuth } from './auth';
 import { signMessage } from './signing';
 import {
   CredentialsMethods,
@@ -51,12 +51,7 @@ const ORDER_TYPE_MAP: Record<string, OrderType> = {
  * Osmium WebSocket client for Cube Exchange.
  * Uses binary protobuf via @cubexch/client for correct wire format.
  *
- * Authentication:
- * - HMAC env vars (CUBE_API_KEY + CUBE_SECRET_KEY): generates HMAC directly
- * - Verification key (npm run login): fetches HMAC from Iridium /users/hmac,
- *   then uses the returned {apiKey, signature, timestamp} for WebSocket auth
- *
- * Both paths produce the same Credentials protobuf message on the wire.
+ * Authentication via Ed25519 verification key (npm run login or CUBE_SIGNING_KEY env).
  */
 export class OsmiumClient {
   private ws: WebSocket | null = null;
@@ -85,7 +80,6 @@ export class OsmiumClient {
 
   /**
    * Check if any credentials are available for WebSocket trading.
-   * Supports both HMAC env vars and verification key (from npm run login).
    */
   static async canUseWebSocket(): Promise<boolean> {
     return hasAuth();
@@ -106,10 +100,7 @@ export class OsmiumClient {
   private async _connect(): Promise<void> {
     const env = getEnvironment(process.env.CUBE_ENV);
 
-    // Fetch access token via the best available auth method:
-    // - HMAC env vars → generates signature locally
-    // - Verification key → calls Iridium /users/hmac to get HMAC credentials
-    const accessToken = await fetchAccessToken();
+    const wsCreds = await buildWsVerificationKeyCredentials();
 
     return new Promise((resolve, reject) => {
       if (this.ws) {
@@ -129,12 +120,13 @@ export class OsmiumClient {
       this.ws.binaryType = 'arraybuffer';
 
       this.ws.on('open', () => {
-        // Send protobuf-encoded Credentials using HMAC from access token
         const credMsg: Credentials = {
-          accessKeyId: accessToken.apiKey,
-          signature: accessToken.signature,
-          timestamp: BigInt(accessToken.timestamp),
-          flags: 0n,
+          accessKeyId: wsCreds.accessKeyId,
+          signature: wsCreds.signature,
+          timestamp: wsCreds.timestamp,
+          flags: wsCreds.flags,
+          verificationKey: wsCreds.verificationKey,
+          userKey: wsCreds.userKey,
         };
         const encoded = CredentialsMethods.encode(credMsg).finish();
         this.ws!.send(encoded);
@@ -327,7 +319,7 @@ export class OsmiumClient {
 
   private async _connectWallet(): Promise<void> {
     const env = getEnvironment(process.env.CUBE_ENV);
-    const accessToken = await fetchAccessToken();
+    const wsCreds = await buildWsVerificationKeyCredentials();
     const wsUrl = env.wsTradeUrl.replace('/os', '/os/wallet');
 
     return new Promise((resolve, reject) => {
@@ -349,10 +341,12 @@ export class OsmiumClient {
 
       this.walletWs.on('open', () => {
         const credMsg: Credentials = {
-          accessKeyId: accessToken.apiKey,
-          signature: accessToken.signature,
-          timestamp: BigInt(accessToken.timestamp),
-          flags: 0n,
+          accessKeyId: wsCreds.accessKeyId,
+          signature: wsCreds.signature,
+          timestamp: wsCreds.timestamp,
+          flags: wsCreds.flags,
+          verificationKey: wsCreds.verificationKey,
+          userKey: wsCreds.userKey,
         };
         const encoded = CredentialsMethods.encode(credMsg).finish();
         this.walletWs!.send(encoded);

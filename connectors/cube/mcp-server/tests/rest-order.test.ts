@@ -17,7 +17,7 @@ describe.skipIf(SKIP)('REST Order Placement (integration)', () => {
   it('reaches the order endpoint and gets a structured response', async () => {
     process.env.CUBE_ENV = 'production';
     // Auth resolved from ~/.cube/credentials.json (device login) or env vars
-    // Never hardcode real secrets — set CUBE_API_KEY + CUBE_SECRET_KEY in your shell if needed
+    // Auth resolved from credential store (npm run login) or CUBE_SIGNING_KEY env
 
     client = new IridiumClient();
 

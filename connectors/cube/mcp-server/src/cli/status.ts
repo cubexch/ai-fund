@@ -25,10 +25,9 @@ async function main() {
   const auth = await resolveAuth();
 
   const creds = await loadCredentials();
-  const hasHmacEnv = !!(process.env.CUBE_API_KEY && process.env.CUBE_SECRET_KEY);
   const hasSigningEnv = !!(process.env.CUBE_SIGNING_KEY && process.env.CUBE_VERIFICATION_KEY_ID);
 
-  if (!creds && !hasHmacEnv && !hasSigningEnv) {
+  if (!creds && !hasSigningEnv) {
     console.log('');
     console.log(`  ${c.yellow}${c.bold}Not logged in${c.reset}`);
     console.log(`  ${c.dim}Market data tools work without login.${c.reset}`);
@@ -39,9 +38,8 @@ async function main() {
 
   // Show active auth method
   console.log('');
-  const authLabel = auth?.type === 'signing' ? 'Ed25519 signing' : auth?.type === 'hmac' ? 'HMAC' : 'none';
+  const authLabel = auth ? 'Ed25519 signing' : 'none';
   const authSource = hasSigningEnv ? 'CUBE_SIGNING_KEY env'
-    : hasHmacEnv ? 'CUBE_API_KEY env'
     : creds ? 'credential store'
     : 'none';
   console.log(`  ${c.green}${c.bold}Authenticated${c.reset} ${c.dim}(${authLabel} via ${authSource})${c.reset}`);
@@ -68,12 +66,6 @@ async function main() {
     console.log(`    ${c.dim}Provider${c.reset}   ${creds.provider}`);
     console.log(`    ${c.dim}Expires${c.reset}    ${expiry}`);
     console.log(`    ${c.dim}Backend${c.reset}    ${backend === 'keychain' ? 'macOS Keychain' : backend === 'secret-tool' ? 'System keyring' : 'File (~/.cube/credentials.json)'}`);
-  }
-
-  if (hasHmacEnv) {
-    console.log('');
-    console.log(`  ${c.cyan}HMAC Key${c.reset} ${c.dim}(from env)${c.reset}`);
-    console.log(`    ${c.dim}API Key${c.reset}    ${process.env.CUBE_API_KEY!.slice(0, 8)}...`);
   }
 
   if (hasSigningEnv) {

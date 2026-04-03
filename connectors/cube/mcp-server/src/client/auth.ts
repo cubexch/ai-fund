@@ -1,10 +1,4 @@
-import { createHmac } from 'node:crypto';
-import { loadCredentials, importPrivateKey, signMessage, fromHex, type SigningCredentials } from './signing';
-
-export interface CubeCredentials {
-  apiKey: string;
-  secretKey: string;
-}
+import { loadCredentials, importPrivateKey, signMessage, fromHex, encodePublicKey, type SigningCredentials } from './signing';
 
 export type { SigningCredentials };
 
@@ -60,65 +54,20 @@ export function getEnvironment(env?: string): CubeEnvironment {
   return base;
 }
 
-/**
- * Try to get HMAC credentials from env vars.
- * Returns null if not set (instead of throwing).
- */
-export function getCredentials(): CubeCredentials | null {
-  const apiKey = process.env.CUBE_API_KEY;
-  const secretKey = process.env.CUBE_SECRET_KEY;
-
-  if (!apiKey || !secretKey) return null;
-
-  return { apiKey, secretKey };
-}
-
-/**
- * Generate HMAC-SHA256 signature for Osmium WebSocket authentication.
- * Input: UTF-8 "cube.xyz" + little-endian 8-byte timestamp
- * Secret: hex-decoded 32-byte secret key
- * Output: base-64 encoded signature
- */
-export function generateSignature(secretKey: string, timestamp: number): string {
-  const secretBytes = Buffer.from(secretKey, 'hex');
-  const payload = Buffer.alloc(16);
-  payload.write('cube.xyz', 0, 'utf-8');
-  payload.writeBigInt64LE(BigInt(timestamp), 8);
-
-  const hmac = createHmac('sha256', secretBytes);
-  hmac.update(payload);
-  return hmac.digest('base64');
-}
-
-/**
- * Generate Ed25519 signature for REST authentication.
- * Same payload format as HMAC: "cube.xyz" (8 bytes) + timestamp LE (8 bytes).
- * Output: base-64 encoded Ed25519 signature.
- */
-export async function generateEd25519Signature(privateKey: CryptoKey, timestamp: number): Promise<string> {
-  const payload = Buffer.alloc(16);
-  payload.write('cube.xyz', 0, 'utf-8');
-  payload.writeBigInt64LE(BigInt(timestamp), 8);
-  const sig = await signMessage(new Uint8Array(payload), privateKey);
-  return Buffer.from(sig).toString('base64');
-}
-
 // ── Auth Resolution ──────────────────────────────────────
 
 /**
- * Authentication methods, in priority order:
+ * Authentication via Ed25519 verification key signing.
  *
  * 1. CUBE_SIGNING_KEY env var (CI/CD) — Ed25519 hex seed + CUBE_VERIFICATION_KEY_ID
- * 2. CUBE_API_KEY + CUBE_SECRET_KEY env vars — HMAC auth (explicit override)
- * 3. Credential store (npm run login) — Ed25519 from keychain/file
+ * 2. Credential store (npm run login) — Ed25519 from keychain/file
  *
- * Env vars always win over the credential store, since setting them is
+ * Env vars win over the credential store, since setting them is
  * an intentional override (e.g., different account, testing, CI).
  */
 
 export type AuthMethod =
   | { type: 'signing'; verificationKeyId: string; privateKey: CryptoKey; publicKeyHex: string }
-  | { type: 'hmac'; apiKey: string; secretKey: string }
   | null;
 
 let _resolvedAuth: AuthMethod | undefined;
@@ -140,25 +89,12 @@ export async function resolveAuth(): Promise<AuthMethod> {
     }
     const seed = fromHex(signingKeyEnv);
     const privateKey = await importPrivateKey(seed);
-    // Derive public key from seed
-    const pkcs8 = new Uint8Array(48);
-    pkcs8.set([0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20]);
-    pkcs8.set(seed, 16);
-    const keyPair = await crypto.subtle.importKey('pkcs8', pkcs8.buffer as ArrayBuffer, 'Ed25519', true, ['sign']);
-    // We need the public key hex — get it from env or derive
     const publicKeyHex = process.env.CUBE_VERIFICATION_PUBLIC_KEY || '';
     _resolvedAuth = { type: 'signing', verificationKeyId: keyId, privateKey, publicKeyHex };
     return _resolvedAuth;
   }
 
-  // 2. CUBE_API_KEY + CUBE_SECRET_KEY env vars (explicit override)
-  const hmacCreds = getCredentials();
-  if (hmacCreds) {
-    _resolvedAuth = { type: 'hmac', ...hmacCreds };
-    return _resolvedAuth;
-  }
-
-  // 3. Credential store (npm run login)
+  // 2. Credential store (npm run login)
   const creds = await loadCredentials();
   if (creds?.ed25519PrivateKey && creds?.verificationKeyId) {
     const seed = fromHex(creds.ed25519PrivateKey);
@@ -183,14 +119,11 @@ export function resetAuth(): void {
   _resolvedAuth = undefined;
   _signingCredentials = undefined;
   _signingKey = null;
-  _accessTokenCache = null;
 }
 
 /**
  * Build authentication headers for Osmium REST API requests.
- *
- * For HMAC auth: sends x-api-key + HMAC signature
- * For Ed25519 auth: sends x-verification-key-id + Ed25519 signature
+ * Uses Ed25519 verification key signing.
  *
  * Used by: /os/v0/* endpoints (order placement, cancellation, etc.)
  */
@@ -199,162 +132,83 @@ export async function buildOsmiumAuthHeaders(): Promise<Record<string, string>> 
   if (!auth) return {};
 
   const timestamp = Math.floor(Date.now() / 1000);
+  const payload = Buffer.alloc(16);
+  payload.write('cube.xyz', 0, 'utf-8');
+  payload.writeBigInt64LE(BigInt(timestamp), 8);
+  const sig = await signMessage(new Uint8Array(payload), auth.privateKey);
 
-  if (auth.type === 'hmac') {
-    return {
-      'x-api-key': auth.apiKey,
-      'x-api-signature': generateSignature(auth.secretKey, timestamp),
-      'x-api-timestamp': String(timestamp),
-    };
-  }
-
-  // Ed25519 signing auth for Osmium REST
-  const signature = await generateEd25519Signature(auth.privateKey, timestamp);
   return {
     'x-verification-key-id': auth.verificationKeyId,
-    'x-api-signature': signature,
+    'x-api-signature': Buffer.from(sig).toString('base64'),
     'x-api-timestamp': String(timestamp),
   };
 }
 
 /**
  * Build authentication headers for Iridium REST API requests.
+ * Uses Ed25519 verification key signing.
  *
- * For HMAC auth: sends x-api-key + HMAC signature (works for all endpoints)
- * For Ed25519 auth: uses verification key → HMAC bridge (fetches HMAC from /users/hmac)
- *
- * Used by: /ir/v0/users/* endpoints (account, positions, orders, fills, etc.)
+ * @param method - HTTP method (GET, POST, etc.)
+ * @param path - Route path without base prefix (e.g. "/users/subaccounts")
  */
-export async function buildIridiumAuthHeaders(): Promise<Record<string, string>> {
+export async function buildIridiumAuthHeaders(method?: string, path?: string): Promise<Record<string, string>> {
   const auth = await resolveAuth();
   if (!auth) return {};
 
-  if (auth.type === 'hmac') {
-    const timestamp = Math.floor(Date.now() / 1000);
-    return {
-      'x-api-key': auth.apiKey,
-      'x-api-signature': generateSignature(auth.secretKey, timestamp),
-      'x-api-timestamp': String(timestamp),
-    };
-  }
-
-  // For verification key auth on Iridium, we need to fetch HMAC creds first
-  // because most Iridium endpoints only accept HMAC or session token auth.
-  // The verification key is only directly accepted on /users/check and /users/hmac.
-  const token = await fetchAccessToken();
-  return {
-    'x-api-key': token.apiKey,
-    'x-api-signature': token.signature,
-    'x-api-timestamp': String(token.timestamp),
-  };
+  return buildVerificationKeyHeaders(method ?? 'GET', path ?? '/', auth);
 }
 
 /**
  * Build authentication headers for a REST request.
- * Legacy wrapper — routes to the appropriate auth builder.
+ *
+ * @param target - 'iridium' or 'osmium'
+ * @param method - HTTP method (for iridium verification key auth)
+ * @param path - Route path without base prefix (for iridium verification key auth)
  */
-export async function buildAuthHeaders(target: 'iridium' | 'osmium' = 'osmium'): Promise<Record<string, string>> {
+export async function buildAuthHeaders(
+  target: 'iridium' | 'osmium' = 'osmium',
+  method?: string,
+  path?: string,
+): Promise<Record<string, string>> {
   if (target === 'iridium') {
-    return buildIridiumAuthHeaders();
+    return buildIridiumAuthHeaders(method, path);
   }
   return buildOsmiumAuthHeaders();
 }
 
-// ── Access Token (Verification Key → HMAC Bridge) ────────
+// ── Verification Key Auth Headers ─────────────────────────
 
 /**
- * HMAC access token obtained from Iridium /users/hmac.
- * Used to authenticate Osmium WebSocket and Iridium REST calls
- * when only verification key credentials are available.
- */
-export interface AccessToken {
-  apiKey: string;
-  signature: string;
-  timestamp: number;
-}
-
-let _accessTokenCache: { token: AccessToken; fetchedAt: number } | null = null;
-const ACCESS_TOKEN_TTL_MS = 5_000; // Tokens are time-sensitive, refresh frequently
-
-/**
- * Fetch HMAC access token for authenticating to Osmium WebSocket or Iridium REST.
+ * Build verification key auth headers for Iridium REST endpoints.
  *
- * Auth flow:
- * - If HMAC env vars set: generate HMAC signature directly (no network call)
- * - If verification key available: call Iridium POST /users/hmac with
- *   verification key headers to get server-generated HMAC credentials
+ * Format (from core/iridium verification_key.rs):
+ *   x-verification-key: protobuf PublicKey { curve25519: <32b> } in base64 no-pad
+ *   x-verification-key-signature: Ed25519 sign("{METHOD} {PATH}") in base64 no-pad
+ *   x-verification-key-timestamp: unix timestamp string
  *
- * The returned token contains {apiKey, signature, timestamp} which can be
- * used directly as Osmium WebSocket Credentials or as Iridium HMAC headers.
+ * Allowed routes: /users/check, /users/subaccounts,
+ *   /wallet/assets, /wallet/submit, /wallet/solana/swap/estimate
  */
-export async function fetchAccessToken(): Promise<AccessToken> {
-  // Check cache (tokens are short-lived so TTL is small)
-  if (_accessTokenCache && Date.now() - _accessTokenCache.fetchedAt < ACCESS_TOKEN_TTL_MS) {
-    return _accessTokenCache.token;
-  }
-
-  const auth = await resolveAuth();
-  if (!auth) {
-    throw new Error(
-      'No credentials available. Run `npm run login` to authenticate, ' +
-      'or set CUBE_API_KEY + CUBE_SECRET_KEY, ' +
-      'or set CUBE_SIGNING_KEY + CUBE_VERIFICATION_KEY_ID.'
-    );
-  }
-
-  // Direct HMAC — generate signature locally without network call
-  if (auth.type === 'hmac') {
-    const timestamp = Math.floor(Date.now() / 1000);
-    const token: AccessToken = {
-      apiKey: auth.apiKey,
-      signature: generateSignature(auth.secretKey, timestamp),
-      timestamp,
-    };
-    _accessTokenCache = { token, fetchedAt: Date.now() };
-    return token;
-  }
-
-  // Verification key auth — call Iridium /users/hmac
-  const env = getEnvironment(process.env.CUBE_ENV);
+export async function buildVerificationKeyHeaders(
+  method: string,
+  path: string,
+  auth: NonNullable<AuthMethod>,
+): Promise<Record<string, string>> {
   const timestamp = Math.floor(Date.now() / 1000);
-
-  // Sign the method+path per Iridium's verification key auth protocol:
-  // message = "{METHOD} {PATH}" (e.g. "POST /users/hmac")
-  // POST is required — the backend only allows verification key auth on POST /users/hmac
-  const message = new TextEncoder().encode('POST /users/hmac');
+  const message = new TextEncoder().encode(`${method.toUpperCase()} ${path}`);
   const sig = await signMessage(message, auth.privateKey);
-  const publicKeyBase64 = Buffer.from(auth.publicKeyHex, 'hex').toString('base64');
+  // Protobuf-encoded PublicKey in base64 no-pad
+  const publicKeyProto = encodePublicKey(fromHex(auth.publicKeyHex));
 
-  const response = await fetch(`${env.restUrl}/users/hmac`, {
-    method: 'POST',
-    headers: {
-      'x-verification-key': publicKeyBase64,
-      'x-verification-key-signature': Buffer.from(sig).toString('base64'),
-      'x-verification-key-timestamp': String(timestamp),
-    },
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Failed to fetch access token from Iridium: ${response.status} ${body}`);
-  }
-
-  const data = (await response.json()) as Record<string, unknown>;
-  const result = (data.result ?? data) as Record<string, unknown>;
-
-  const token: AccessToken = {
-    apiKey: String(result.apiKey ?? result.api_key),
-    signature: String(result.signature),
-    timestamp: Number(result.timestamp),
+  return {
+    'x-verification-key': publicKeyProto,
+    'x-verification-key-signature': Buffer.from(sig).toString('base64').replace(/=+$/, ''),
+    'x-verification-key-timestamp': String(timestamp),
   };
-
-  _accessTokenCache = { token, fetchedAt: Date.now() };
-  return token;
 }
 
 /**
  * Check if any authentication credentials are available.
- * Returns true if HMAC env vars, signing key env vars, or stored credentials exist.
  */
 export async function hasAuth(): Promise<boolean> {
   const auth = await resolveAuth();
@@ -364,9 +218,81 @@ export async function hasAuth(): Promise<boolean> {
 /**
  * Check what auth method is available.
  */
-export async function getAuthType(): Promise<'hmac' | 'signing' | null> {
+export async function getAuthType(): Promise<'signing' | null> {
   const auth = await resolveAuth();
   return auth?.type ?? null;
+}
+
+// ── WebSocket Verification Key Auth ──────────────────────
+
+/**
+ * Credentials for Osmium WebSocket verification key auth.
+ * Maps directly to the @cubexch/client Credentials protobuf.
+ */
+export interface WsVerificationKeyCredentials {
+  accessKeyId: string;       // empty for verification key auth
+  signature: string;         // Ed25519 sign("GET /os\n{userKey}\n{timestamp}")
+  timestamp: bigint;
+  flags: bigint;
+  verificationKey: string;   // protobuf PublicKey base64 no-pad
+  userKey: string;           // Cube user key UUID
+}
+
+let _userKeyCache: string | null = null;
+
+/**
+ * Get the Cube user key (UUID) via /users/check with verification key auth.
+ * Cached after first call.
+ */
+export async function getUserKey(): Promise<string> {
+  if (_userKeyCache) return _userKeyCache;
+
+  const auth = await resolveAuth();
+  if (!auth) {
+    throw new Error('No credentials available — run npm run login');
+  }
+
+  const env = getEnvironment(process.env.CUBE_ENV);
+  const headers = await buildVerificationKeyHeaders('GET', '/users/check', auth);
+  const response = await fetch(`${env.restUrl}/users/check`, { headers });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to fetch user key: ${response.status} ${body}`);
+  }
+
+  const data = (await response.json()) as Record<string, unknown>;
+  const result = (data.result ?? data) as Record<string, string>;
+  _userKeyCache = result.id;
+  return _userKeyCache;
+}
+
+/**
+ * Build Osmium WebSocket Credentials for verification key auth.
+ *
+ * Signing message format: "GET /os\n{userKey}\n{timestamp}"
+ * (from core/osmium/src/modules/auth.rs)
+ */
+export async function buildWsVerificationKeyCredentials(): Promise<WsVerificationKeyCredentials> {
+  const auth = await resolveAuth();
+  if (!auth) {
+    throw new Error('No credentials available for WebSocket auth');
+  }
+
+  const userKey = await getUserKey();
+  const timestamp = Math.floor(Date.now() / 1000);
+  const message = new TextEncoder().encode(`GET /os\n${userKey}\n${timestamp}`);
+  const sig = await signMessage(message, auth.privateKey);
+  const verificationKey = encodePublicKey(fromHex(auth.publicKeyHex));
+
+  return {
+    accessKeyId: '',
+    signature: Buffer.from(sig).toString('base64').replace(/=+$/, ''),
+    timestamp: BigInt(timestamp),
+    flags: 0n,
+    verificationKey,
+    userKey,
+  };
 }
 
 // ── Signing Credentials (Ed25519) ─────────────────────────

@@ -157,7 +157,10 @@ export interface ExchangeInfoResult {
 // automatically retry with the regional variant. Zero-config — no proxies needed.
 
 const GEO_FALLBACKS: Record<string, string[]> = {
-  'binance': ['binanceus'],
+  // All Binance variants (binanceus, binanceusdm, binancecoinm) are geo-blocked
+  // from the US. binanceus API has SSL/DNS issues (post-SEC-lawsuit degradation).
+  // No viable automatic fallback exists — user must use a different exchange.
+  'binance': [],
   'bitfinex': ['bitfinex2'],
   'huobi': ['huobijp'],
   'kucoin': ['kucoinfutures'],
@@ -172,6 +175,20 @@ function isGeoBlock(err: any): boolean {
     msg.includes('service unavailable from') ||
     msg.includes('geo') ||
     msg.includes('ip forbidden');
+}
+
+/** Wrap a geo-block error with actionable guidance when no fallback exists. */
+function geoBlockError(exchangeId: string, original: any): Error {
+  const alternatives: Record<string, string> = {
+    'binance': 'Use coinbase, kraken, or another US-accessible exchange instead.',
+    'huobi': 'Use okx, kraken, or another exchange accessible from your region.',
+  };
+  const hint = alternatives[exchangeId] ?? 'Try a different exchange accessible from your region.';
+  const err = new Error(
+    `${exchangeId} is geo-restricted from your location and no fallback is available. ${hint}`
+  );
+  err.cause = original;
+  return err;
 }
 
 // ── Helpers ────────────────────────────────────────────────
@@ -276,6 +293,33 @@ export class ExchangeClient {
     return false;
   }
 
+  /** Whether a geo-fallback has already been applied (no further retries). */
+  private get _isFallenBack(): boolean {
+    return this.exchangeId !== this.originalExchangeId;
+  }
+
+  /**
+   * Execute an async operation with automatic geo-fallback.
+   * If the call throws a geo-block error and we haven't already fallen back,
+   * swap to the regional variant and retry once.
+   */
+  private async withGeoFallback<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err: any) {
+      if (!this._isFallenBack && isGeoBlock(err)) {
+        const tried = new Set<string>([this.exchangeId]);
+        if (this.tryGeoFallback(tried)) {
+          console.error(`[geo-fallback] ${this.originalExchangeId} blocked, trying ${this.exchangeId}`);
+          await this.ensureMarkets();
+          return await fn();
+        }
+        throw geoBlockError(this.originalExchangeId, err);
+      }
+      throw err;
+    }
+  }
+
   get hasCredentials(): boolean {
     return !!(this.exchange.apiKey && this.exchange.secret);
   }
@@ -330,6 +374,19 @@ export class ExchangeClient {
       return result;
     } catch (err) {
       this.latency.recordError(method);
+      // Auto geo-fallback: if blocked and not already fallen back, retry once
+      if (!this._isFallenBack && isGeoBlock(err)) {
+        const tried = new Set<string>([this.exchangeId]);
+        if (this.tryGeoFallback(tried)) {
+          console.error(`[geo-fallback] ${this.originalExchangeId} blocked on ${method}, trying ${this.exchangeId}`);
+          await this.ensureMarkets();
+          const retryStart = performance.now();
+          const result = await fn();
+          this.latency.record(method, performance.now() - retryStart);
+          return result;
+        }
+        throw geoBlockError(this.originalExchangeId, err);
+      }
       throw err;
     }
   }
@@ -346,10 +403,13 @@ export class ExchangeClient {
           .filter((m): m is NonNullable<typeof m> => m != null)
           .map(formatMarket);
       } catch (err: any) {
-        if (isGeoBlock(err) && this.tryGeoFallback(tried)) {
-          tried.add(this.exchangeId);
-          console.error(`[geo-fallback] ${this.originalExchangeId} blocked, trying ${this.exchangeId}`);
-          continue;
+        if (isGeoBlock(err)) {
+          if (this.tryGeoFallback(tried)) {
+            tried.add(this.exchangeId);
+            console.error(`[geo-fallback] ${this.originalExchangeId} blocked, trying ${this.exchangeId}`);
+            continue;
+          }
+          throw geoBlockError(this.originalExchangeId, err);
         }
         throw err;
       }
@@ -473,7 +533,7 @@ export class ExchangeClient {
   }
 
   async searchMarkets(query: string): Promise<MarketResult[]> {
-    const markets = await this.exchange.loadMarkets();
+    const markets = await this.withGeoFallback(() => this.exchange.loadMarkets());
     const q = query.toLowerCase();
     return Object.values(markets)
       .filter((m): m is NonNullable<typeof m> => m != null)
@@ -491,7 +551,7 @@ export class ExchangeClient {
 
   async getBalance(): Promise<BalanceResult[]> {
     await this.throttle();
-    const balance = await this.exchange.fetchBalance();
+    const balance = await this.withGeoFallback(() => this.exchange.fetchBalance());
     const results: BalanceResult[] = [];
     const totals = (balance as any).total ?? {};
     const frees = (balance as any).free ?? {};
@@ -513,7 +573,7 @@ export class ExchangeClient {
   async getPositions(symbols?: string[]): Promise<PositionResult[]> {
     await this.throttle();
     if (typeof this.exchange.fetchPositions === 'function') {
-      const positions = await this.exchange.fetchPositions(symbols);
+      const positions = await this.withGeoFallback(() => this.exchange.fetchPositions(symbols));
       return positions.map((p: any) => ({
         symbol: str(p.symbol),
         side: str(p.side) || 'long',
@@ -596,13 +656,13 @@ export class ExchangeClient {
     const roundedPrice = price !== undefined ? this.roundPrice(symbol, price) : undefined;
     let raw: any;
     if (typeof this.exchange.editOrder === 'function') {
-      raw = await this.exchange.editOrder(orderId, symbol, type, side, roundedAmount, roundedPrice);
+      raw = await this.withGeoFallback(() => this.exchange.editOrder(orderId, symbol, type, side, roundedAmount, roundedPrice));
     } else {
       // Fallback: cancel + replace (each call needs its own rate-limit token)
       await this.throttle();
-      await this.exchange.cancelOrder(orderId, symbol);
+      await this.withGeoFallback(() => this.exchange.cancelOrder(orderId, symbol));
       await this.throttle();
-      raw = await this.exchange.createOrder(symbol, type, side, roundedAmount!, roundedPrice);
+      raw = await this.withGeoFallback(() => this.exchange.createOrder(symbol, type, side, roundedAmount!, roundedPrice));
     }
     const result = this.formatOrder(raw);
     // Auto-record to trade journal (fire-and-forget)
@@ -629,9 +689,9 @@ export class ExchangeClient {
   async cancelAllOrders(symbol?: string): Promise<void> {
     await this.throttle();
     if (typeof this.exchange.cancelAllOrders === 'function') {
-      await this.exchange.cancelAllOrders(symbol);
+      await this.withGeoFallback(() => this.exchange.cancelAllOrders(symbol));
     } else {
-      const openOrders = await this.exchange.fetchOpenOrders(symbol);
+      const openOrders = await this.withGeoFallback(() => this.exchange.fetchOpenOrders(symbol));
       const results = await Promise.allSettled(
         openOrders.map(order => this.exchange.cancelOrder(order.id, order.symbol))
       );
@@ -644,25 +704,25 @@ export class ExchangeClient {
 
   async getOpenOrders(symbol?: string): Promise<OrderResult[]> {
     await this.throttle();
-    const orders = await this.exchange.fetchOpenOrders(symbol);
+    const orders = await this.withGeoFallback(() => this.exchange.fetchOpenOrders(symbol));
     return orders.map(o => this.formatOrder(o));
   }
 
   async getClosedOrders(symbol?: string, since?: number, limit?: number): Promise<OrderResult[]> {
     await this.throttle();
-    const orders = await this.exchange.fetchClosedOrders(symbol, since, limit);
+    const orders = await this.withGeoFallback(() => this.exchange.fetchClosedOrders(symbol, since, limit));
     return orders.map(o => this.formatOrder(o));
   }
 
   async getOrder(orderId: string, symbol?: string): Promise<OrderResult> {
     await this.throttle();
-    const order = await this.exchange.fetchOrder(orderId, symbol);
+    const order = await this.withGeoFallback(() => this.exchange.fetchOrder(orderId, symbol));
     return this.formatOrder(order);
   }
 
   async getMyTrades(symbol?: string, since?: number, limit?: number): Promise<TradeResult[]> {
     await this.throttle();
-    const trades = await this.exchange.fetchMyTrades(symbol, since, limit);
+    const trades = await this.withGeoFallback(() => this.exchange.fetchMyTrades(symbol, since, limit));
     return trades.map(formatTrade);
   }
 

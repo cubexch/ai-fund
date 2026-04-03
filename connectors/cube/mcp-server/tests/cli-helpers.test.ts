@@ -113,11 +113,10 @@ describe('status CLI patterns', () => {
 
   it('maps auth types to labels', () => {
     function getAuthLabel(type: string | undefined): string {
-      return type === 'signing' ? 'Ed25519 signing' : type === 'hmac' ? 'HMAC' : 'none';
+      return type === 'signing' ? 'Ed25519 signing' : 'none';
     }
 
     expect(getAuthLabel('signing')).toBe('Ed25519 signing');
-    expect(getAuthLabel('hmac')).toBe('HMAC');
     expect(getAuthLabel(undefined)).toBe('none');
   });
 });

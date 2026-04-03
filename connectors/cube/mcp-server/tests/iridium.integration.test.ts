@@ -11,10 +11,8 @@ import type { Ticker, Market, Kline, ParsedOrderBook, ParsedRecentTrades } from 
 let client: IridiumClient;
 
 beforeAll(() => {
-  // Set minimal env vars — public endpoints don't need real keys
+  // Public endpoints don't need auth
   process.env.CUBE_ENV = 'production';
-  process.env.CUBE_API_KEY = 'test-key';
-  process.env.CUBE_SECRET_KEY = 'aabbccdd00112233aabbccdd00112233aabbccdd00112233aabbccdd00112233';
   client = new IridiumClient();
 });
 

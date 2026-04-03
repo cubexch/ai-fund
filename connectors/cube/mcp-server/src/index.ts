@@ -28,17 +28,15 @@ const iridium = new IridiumClient();
 // Connects on startup so market data is available immediately
 const mendelev = new MendelevClient();
 
-// Osmium: WebSocket trading — uses verification key or HMAC auth
+// Osmium: WebSocket trading — uses verification key auth
 // Connects lazily on first trade (requires auth)
 const osmium = new OsmiumClient();
 
 // ── Resolve auth and log status (never expose secrets) ─────
 
 resolveAuth().then(auth => {
-  if (auth?.type === 'signing') {
+  if (auth) {
     process.stderr.write('[cube] Auth: verification key (Ed25519)\n');
-  } else if (auth?.type === 'hmac') {
-    process.stderr.write('[cube] Auth: HMAC (API key)\n');
   } else {
     process.stderr.write('[cube] Auth: none — run `npm run login` in connectors/cube/mcp-server to authenticate\n');
   }

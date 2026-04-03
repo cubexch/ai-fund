@@ -183,6 +183,25 @@ export function decodeVerificationKeyExpiresAt(bytes: Uint8Array): number {
   return Number(result);
 }
 
+/**
+ * Encode a PublicKey protobuf for Iridium x-verification-key header.
+ *
+ * Wire format: PublicKey { curve25519 (field 2): bytes }
+ *   0x12 0x20 <32-byte-pubkey>
+ *
+ * Returns standard base64 with no padding (matches Cube's STANDARD_NO_PAD).
+ */
+export function encodePublicKey(publicKey: Uint8Array): string {
+  if (publicKey.length !== 32) {
+    throw new Error(`Expected 32-byte public key, got ${publicKey.length}`);
+  }
+  const msg = new Uint8Array(2 + 32);
+  msg[0] = 0x12; // field 2, length-delimited
+  msg[1] = 0x20; // length = 32
+  msg.set(publicKey, 2);
+  return Buffer.from(msg).toString('base64').replace(/=+$/, '');
+}
+
 // ── Credential Storage ────────────────────────────────────
 
 export interface SigningCredentials {
