@@ -992,4 +992,328 @@ export function registerStrategyTools(server: McpServer, client: ExchangeClient)
       };
     }),
   );
+
+  server.tool(
+    'get_liquidation_heatmap',
+    `Estimate liquidation levels from order book depth on ${client.name}. Shows where leveraged positions would be liquidated and the volume sitting at those levels.`,
+    {
+      symbol: z.string().describe('Trading pair (e.g., BTC/USDT)'),
+      leverage_levels: z.string().default('2,3,5,10,25,50,100').describe('Comma-separated leverage levels to analyze'),
+    } as any,
+    handler(async (params: any) => {
+      const [orderBook, quote] = await Promise.all([
+        client.getOrderBook(params.symbol, 50),
+        client.getQuote(params.symbol),
+      ]);
+
+      const mid = quote.mid ?? orderBook.mid;
+      if (mid == null || mid === 0) {
+        throw new Error(`Cannot determine mid price for ${params.symbol}`);
+      }
+
+      const leverageLevels = params.leverage_levels
+        .split(',')
+        .map((l: string) => parseFloat(l.trim()))
+        .filter((l: number) => l > 0 && isFinite(l));
+
+      const levels: {
+        leverage: number;
+        longLiquidation: number;
+        shortLiquidation: number;
+        nearbyBidVolume: number;
+        nearbyAskVolume: number;
+      }[] = [];
+
+      // Tolerance: 0.5% of mid for "nearby" volume matching
+      const tolerance = mid * 0.005;
+
+      for (const leverage of leverageLevels) {
+        const longLiq = mid * (1 - 1 / leverage);
+        const shortLiq = mid * (1 + 1 / leverage);
+
+        // Walk bids to find volume near long liquidation price
+        let nearbyBidVolume = 0;
+        for (const [price, size] of orderBook.bids) {
+          if (Math.abs(price - longLiq) <= tolerance) {
+            nearbyBidVolume += size;
+          }
+        }
+
+        // Walk asks to find volume near short liquidation price
+        let nearbyAskVolume = 0;
+        for (const [price, size] of orderBook.asks) {
+          if (Math.abs(price - shortLiq) <= tolerance) {
+            nearbyAskVolume += size;
+          }
+        }
+
+        levels.push({
+          leverage,
+          longLiquidation: Math.round(longLiq * 100) / 100,
+          shortLiquidation: Math.round(shortLiq * 100) / 100,
+          nearbyBidVolume: Math.round(nearbyBidVolume * 100000000) / 100000000,
+          nearbyAskVolume: Math.round(nearbyAskVolume * 100000000) / 100000000,
+        });
+      }
+
+      // Identify cluster zones: group nearby liquidation prices and sum volumes
+      const clusterZones: {
+        priceRange: [number, number];
+        estimatedLiquidationVolume: number;
+        type: 'long_liquidation' | 'short_liquidation';
+      }[] = [];
+
+      // Long liquidation clusters (below mid)
+      const longLiqs = levels
+        .filter(l => l.longLiquidation > 0)
+        .sort((a, b) => a.longLiquidation - b.longLiquidation);
+
+      if (longLiqs.length > 0) {
+        let clusterStart = longLiqs[0].longLiquidation;
+        let clusterEnd = longLiqs[0].longLiquidation;
+        let clusterVol = longLiqs[0].nearbyBidVolume;
+
+        for (let i = 1; i < longLiqs.length; i++) {
+          const gap = longLiqs[i].longLiquidation - clusterEnd;
+          if (gap <= mid * 0.02) {
+            clusterEnd = longLiqs[i].longLiquidation;
+            clusterVol += longLiqs[i].nearbyBidVolume;
+          } else {
+            clusterZones.push({
+              priceRange: [Math.round(clusterStart * 100) / 100, Math.round(clusterEnd * 100) / 100],
+              estimatedLiquidationVolume: Math.round(clusterVol * 100000000) / 100000000,
+              type: 'long_liquidation',
+            });
+            clusterStart = longLiqs[i].longLiquidation;
+            clusterEnd = longLiqs[i].longLiquidation;
+            clusterVol = longLiqs[i].nearbyBidVolume;
+          }
+        }
+        clusterZones.push({
+          priceRange: [Math.round(clusterStart * 100) / 100, Math.round(clusterEnd * 100) / 100],
+          estimatedLiquidationVolume: Math.round(clusterVol * 100000000) / 100000000,
+          type: 'long_liquidation',
+        });
+      }
+
+      // Short liquidation clusters (above mid)
+      const shortLiqs = levels
+        .filter(l => l.shortLiquidation > 0)
+        .sort((a, b) => a.shortLiquidation - b.shortLiquidation);
+
+      if (shortLiqs.length > 0) {
+        let clusterStart = shortLiqs[0].shortLiquidation;
+        let clusterEnd = shortLiqs[0].shortLiquidation;
+        let clusterVol = shortLiqs[0].nearbyAskVolume;
+
+        for (let i = 1; i < shortLiqs.length; i++) {
+          const gap = shortLiqs[i].shortLiquidation - clusterEnd;
+          if (gap <= mid * 0.02) {
+            clusterEnd = shortLiqs[i].shortLiquidation;
+            clusterVol += shortLiqs[i].nearbyAskVolume;
+          } else {
+            clusterZones.push({
+              priceRange: [Math.round(clusterStart * 100) / 100, Math.round(clusterEnd * 100) / 100],
+              estimatedLiquidationVolume: Math.round(clusterVol * 100000000) / 100000000,
+              type: 'short_liquidation',
+            });
+            clusterStart = shortLiqs[i].shortLiquidation;
+            clusterEnd = shortLiqs[i].shortLiquidation;
+            clusterVol = shortLiqs[i].nearbyAskVolume;
+          }
+        }
+        clusterZones.push({
+          priceRange: [Math.round(clusterStart * 100) / 100, Math.round(clusterEnd * 100) / 100],
+          estimatedLiquidationVolume: Math.round(clusterVol * 100000000) / 100000000,
+          type: 'short_liquidation',
+        });
+      }
+
+      return {
+        symbol: params.symbol,
+        currentMid: Math.round(mid * 100) / 100,
+        levels,
+        clusterZones,
+      };
+    }),
+  );
+
+  server.tool(
+    'get_volatility_term_structure',
+    `Build volatility term structure from multiple timeframes on ${client.name}. Computes annualized volatility per timeframe and classifies the term structure as normal or inverted.`,
+    {
+      symbol: z.string().describe('Trading pair (e.g., BTC/USDT)'),
+      timeframes: z.string().default('1h,4h,1d,1w').describe('Comma-separated timeframes to analyze'),
+    } as any,
+    handler(async (params: any) => {
+      const tfList = params.timeframes.split(',').map((t: string) => t.trim());
+
+      // Periods per year for annualization
+      const periodsPerYear: Record<string, number> = {
+        '1m': 525600,
+        '5m': 105120,
+        '15m': 35040,
+        '1h': 8760,
+        '4h': 2190,
+        '1d': 365,
+        '1w': 52,
+      };
+
+      const structure: {
+        timeframe: string;
+        annualizedVolatility: number;
+        sampleSize: number;
+        periodsPerYear: number;
+      }[] = [];
+
+      for (const tf of tfList) {
+        const bars = await client.getBars(params.symbol, tf, undefined, 100);
+        if (bars.length < 2) {
+          throw new Error(`Insufficient data for timeframe ${tf}: got ${bars.length} bars, need at least 2`);
+        }
+
+        const closes = bars.map((b: any) => b.close);
+        const rets = returns(closes);
+        const std = standardDeviation(rets);
+        const ppy = periodsPerYear[tf] ?? 365;
+        const annVol = std * Math.sqrt(ppy);
+
+        structure.push({
+          timeframe: tf,
+          annualizedVolatility: Math.round(annVol * 10000) / 10000,
+          sampleSize: rets.length,
+          periodsPerYear: ppy,
+        });
+      }
+
+      // Compute volatility ratios between adjacent timeframes
+      const ratios: { from: string; to: string; ratio: number }[] = [];
+      for (let i = 0; i < structure.length - 1; i++) {
+        const ratio = structure[i + 1].annualizedVolatility !== 0
+          ? structure[i].annualizedVolatility / structure[i + 1].annualizedVolatility
+          : Infinity;
+        ratios.push({
+          from: structure[i].timeframe,
+          to: structure[i + 1].timeframe,
+          ratio: ratio === Infinity ? Infinity : Math.round(ratio * 10000) / 10000,
+        });
+      }
+
+      // Classify: normal = longer timeframes have higher annualized vol;
+      // inverted = shorter timeframes have higher annualized vol
+      let increasingCount = 0;
+      let decreasingCount = 0;
+      for (let i = 0; i < structure.length - 1; i++) {
+        if (structure[i + 1].annualizedVolatility > structure[i].annualizedVolatility) {
+          increasingCount++;
+        } else {
+          decreasingCount++;
+        }
+      }
+
+      const classification: 'normal' | 'inverted' | 'mixed' =
+        structure.length <= 1 ? 'normal' :
+        increasingCount > decreasingCount ? 'normal' :
+        decreasingCount > increasingCount ? 'inverted' :
+        'mixed';
+
+      return {
+        symbol: params.symbol,
+        structure,
+        ratios,
+        classification,
+      };
+    }),
+  );
+
+  server.tool(
+    'calculate_dca_schedule',
+    `Smart DCA (dollar-cost averaging) schedule with optional volatility-adjusted sizing on ${client.name}. Allocates more when volatility is low and less when it is high.`,
+    {
+      symbol: z.string().describe('Trading pair (e.g., BTC/USDT)'),
+      total_amount: z.number().describe('Total amount to invest in quote currency'),
+      num_orders: z.number().default(10).describe('Number of DCA orders'),
+      timeframe: z.string().default('1d').describe('Timeframe for volatility calculation'),
+      vol_adjust: z.boolean().default(true).describe('Scale order sizes inversely with volatility'),
+    } as any,
+    handler(async (params: any) => {
+      const numOrders = params.num_orders ?? 10;
+      const totalAmount = params.total_amount;
+
+      if (totalAmount <= 0) {
+        throw new Error('total_amount must be positive');
+      }
+      if (numOrders < 2) {
+        throw new Error('num_orders must be at least 2');
+      }
+
+      // Fetch bars for volatility estimation
+      const bars = await client.getBars(params.symbol, params.timeframe ?? '1d', undefined, Math.max(numOrders + 20, 50));
+      if (bars.length < numOrders + 1) {
+        throw new Error(`Insufficient data: got ${bars.length} bars, need at least ${numOrders + 1}`);
+      }
+
+      const closes = bars.map((b: any) => b.close);
+      const currentPrice = closes[closes.length - 1];
+
+      let schedule: { order_number: number; amount_quote: number; estimated_amount_base: number; size_reason: string }[];
+
+      if (params.vol_adjust !== false) {
+        // Compute rolling volatility for the last numOrders windows
+        const windowSize = 10;
+        const rollingVols: number[] = [];
+
+        for (let i = 0; i < numOrders; i++) {
+          const startIdx = closes.length - numOrders - windowSize + i;
+          const endIdx = startIdx + windowSize + 1;
+          if (startIdx < 0 || endIdx > closes.length) {
+            // Fallback: use overall vol
+            const allRets = returns(closes);
+            rollingVols.push(standardDeviation(allRets));
+          } else {
+            const windowCloses = closes.slice(startIdx, endIdx);
+            const windowRets = returns(windowCloses);
+            const vol = standardDeviation(windowRets);
+            rollingVols.push(vol);
+          }
+        }
+
+        // Inverse volatility weighting: weight = 1/vol, then normalize
+        const inverseVols = rollingVols.map(v => v > 0 ? 1 / v : 1);
+        const sumInverse = inverseVols.reduce((a, b) => a + b, 0);
+        const weights = inverseVols.map(iv => iv / sumInverse);
+
+        schedule = weights.map((w, i) => {
+          const amountQuote = Math.round(totalAmount * w * 100) / 100;
+          return {
+            order_number: i + 1,
+            amount_quote: amountQuote,
+            estimated_amount_base: Math.round((amountQuote / currentPrice) * 100000000) / 100000000,
+            size_reason: `Vol-adjusted: rolling vol ${Math.round(rollingVols[i] * 10000) / 10000}, weight ${Math.round(w * 10000) / 10000}`,
+          };
+        });
+      } else {
+        // Equal splits
+        const equalAmount = Math.round((totalAmount / numOrders) * 100) / 100;
+        schedule = [];
+        for (let i = 0; i < numOrders; i++) {
+          schedule.push({
+            order_number: i + 1,
+            amount_quote: equalAmount,
+            estimated_amount_base: Math.round((equalAmount / currentPrice) * 100000000) / 100000000,
+            size_reason: 'Equal split',
+          });
+        }
+      }
+
+      return {
+        symbol: params.symbol,
+        totalAmount,
+        numOrders,
+        currentPrice: Math.round(currentPrice * 100) / 100,
+        volAdjust: params.vol_adjust !== false,
+        schedule,
+      };
+    }),
+  );
 }

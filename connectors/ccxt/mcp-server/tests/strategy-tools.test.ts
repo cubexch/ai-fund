@@ -1229,3 +1229,141 @@ describe('detect_bb_squeeze tool', () => {
     expect(result.content[0].text.length).toBeGreaterThan(0);
   });
 });
+
+// ── get_liquidation_heatmap ─────────────────────────────
+
+describe('get_liquidation_heatmap tool', () => {
+  it('returns levels and cluster zones with valid structure', async () => {
+    const { server } = setup();
+    const result = await server.callTool('get_liquidation_heatmap', {
+      symbol: 'BTC/USDT',
+      leverage_levels: '2,5,10,25',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.symbol).toBe('BTC/USDT');
+    expect(data.currentMid).toBeTypeOf('number');
+    expect(data.currentMid).toBeGreaterThan(0);
+    expect(data.levels).toBeInstanceOf(Array);
+    expect(data.levels).toHaveLength(4);
+
+    for (const level of data.levels) {
+      expect(level.leverage).toBeTypeOf('number');
+      expect(level.longLiquidation).toBeTypeOf('number');
+      expect(level.shortLiquidation).toBeTypeOf('number');
+      expect(level.longLiquidation).toBeLessThan(data.currentMid);
+      expect(level.shortLiquidation).toBeGreaterThan(data.currentMid);
+      expect(level.nearbyBidVolume).toBeTypeOf('number');
+      expect(level.nearbyAskVolume).toBeTypeOf('number');
+    }
+
+    // 10x leverage: long liq = mid * (1 - 1/10) = mid * 0.9
+    const level10 = data.levels.find((l: any) => l.leverage === 10);
+    expect(level10).toBeDefined();
+    expect(level10.longLiquidation).toBeCloseTo(data.currentMid * 0.9, 0);
+    expect(level10.shortLiquidation).toBeCloseTo(data.currentMid * 1.1, 0);
+
+    expect(data.clusterZones).toBeInstanceOf(Array);
+    for (const zone of data.clusterZones) {
+      expect(zone.priceRange).toBeInstanceOf(Array);
+      expect(zone.priceRange).toHaveLength(2);
+      expect(zone.estimatedLiquidationVolume).toBeTypeOf('number');
+      expect(zone.type).toMatch(/^(long_liquidation|short_liquidation)$/);
+    }
+  });
+});
+
+// ── get_volatility_term_structure ───────────────────────
+
+describe('get_volatility_term_structure tool', () => {
+  it('returns term structure with classification', async () => {
+    const { server } = setup();
+    const result = await server.callTool('get_volatility_term_structure', {
+      symbol: 'BTC/USDT',
+      timeframes: '1h,4h,1d',
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.symbol).toBe('BTC/USDT');
+    expect(data.structure).toBeInstanceOf(Array);
+    expect(data.structure).toHaveLength(3);
+
+    for (const entry of data.structure) {
+      expect(entry.timeframe).toBeTypeOf('string');
+      expect(entry.annualizedVolatility).toBeTypeOf('number');
+      expect(entry.annualizedVolatility).toBeGreaterThan(0);
+      expect(entry.sampleSize).toBeTypeOf('number');
+      expect(entry.sampleSize).toBeGreaterThan(0);
+      expect(entry.periodsPerYear).toBeTypeOf('number');
+    }
+
+    expect(data.ratios).toBeInstanceOf(Array);
+    expect(data.ratios).toHaveLength(2);
+    for (const ratio of data.ratios) {
+      expect(ratio.from).toBeTypeOf('string');
+      expect(ratio.to).toBeTypeOf('string');
+      expect(ratio.ratio).toBeTypeOf('number');
+    }
+
+    expect(data.classification).toMatch(/^(normal|inverted|mixed)$/);
+  });
+});
+
+// ── calculate_dca_schedule ──────────────────────────────
+
+describe('calculate_dca_schedule tool', () => {
+  it('returns vol-adjusted DCA schedule with correct structure', async () => {
+    const { server } = setup();
+    const result = await server.callTool('calculate_dca_schedule', {
+      symbol: 'BTC/USDT',
+      total_amount: 10000,
+      num_orders: 5,
+      timeframe: '1d',
+      vol_adjust: true,
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.symbol).toBe('BTC/USDT');
+    expect(data.totalAmount).toBe(10000);
+    expect(data.numOrders).toBe(5);
+    expect(data.currentPrice).toBeTypeOf('number');
+    expect(data.currentPrice).toBeGreaterThan(0);
+    expect(data.volAdjust).toBe(true);
+    expect(data.schedule).toBeInstanceOf(Array);
+    expect(data.schedule).toHaveLength(5);
+
+    // Total quote amounts should sum approximately to totalAmount
+    const totalQuote = data.schedule.reduce((sum: number, o: any) => sum + o.amount_quote, 0);
+    expect(totalQuote).toBeCloseTo(10000, -1);
+
+    for (const order of data.schedule) {
+      expect(order.order_number).toBeTypeOf('number');
+      expect(order.amount_quote).toBeTypeOf('number');
+      expect(order.amount_quote).toBeGreaterThan(0);
+      expect(order.estimated_amount_base).toBeTypeOf('number');
+      expect(order.estimated_amount_base).toBeGreaterThan(0);
+      expect(order.size_reason).toBeTypeOf('string');
+      expect(order.size_reason).toContain('Vol-adjusted');
+    }
+  });
+
+  it('returns equal splits when vol_adjust is false', async () => {
+    const { server } = setup();
+    const result = await server.callTool('calculate_dca_schedule', {
+      symbol: 'BTC/USDT',
+      total_amount: 10000,
+      num_orders: 4,
+      timeframe: '1d',
+      vol_adjust: false,
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.volAdjust).toBe(false);
+    expect(data.schedule).toHaveLength(4);
+
+    for (const order of data.schedule) {
+      expect(order.amount_quote).toBe(2500);
+      expect(order.size_reason).toBe('Equal split');
+    }
+  });
+});

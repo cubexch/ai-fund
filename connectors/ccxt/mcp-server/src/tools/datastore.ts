@@ -534,4 +534,198 @@ export function registerDatastoreTools(server: McpServer, client: ExchangeClient
       };
     }),
   );
+
+  // ── Correlation Regime Detection ──────────────────────────
+
+  server.tool(
+    'detect_correlation_regime',
+    `Rolling correlation with regime change detection between two symbols. Computes rolling correlation over a sliding window, detects regime transitions (decorrelation events, sign flips), and classifies the current regime. Essential for pairs trading and dynamic hedging.`,
+    {
+      symbol_a: z.string().describe('First trading pair (e.g., BTC/USDT)'),
+      symbol_b: z.string().describe('Second trading pair (e.g., ETH/USDT)'),
+      timeframe: z.string().default('1d').describe('Candle timeframe'),
+      window: z.number().default(30).describe('Rolling correlation window size'),
+      lookback: z.number().default(200).describe('Total number of bars to analyze'),
+    } as any,
+    handler(async (params: any) => {
+      if (!store) throw new Error('DuckDB datastore not configured. Restart with data caching enabled.');
+
+      const window: number = params.window;
+      const lookback: number = params.lookback;
+
+      // Fetch candles for both symbols
+      const candlesA = await store.query({
+        symbol: params.symbol_a,
+        interval: params.timeframe,
+        exchange: client.exchangeId,
+        limit: lookback,
+      });
+      const candlesB = await store.query({
+        symbol: params.symbol_b,
+        interval: params.timeframe,
+        exchange: client.exchangeId,
+        limit: lookback,
+      });
+
+      if (candlesA.length < window + 1) {
+        throw new Error(`Insufficient cached data for ${params.symbol_a} (${candlesA.length} candles, need ${window + 1}). Run ingest_history first.`);
+      }
+      if (candlesB.length < window + 1) {
+        throw new Error(`Insufficient cached data for ${params.symbol_b} (${candlesB.length} candles, need ${window + 1}). Run ingest_history first.`);
+      }
+
+      const closesA = candlesA.map((c: any) => c.close);
+      const closesB = candlesB.map((c: any) => c.close);
+
+      // Align to same length
+      const minLen = Math.min(closesA.length, closesB.length);
+      const alignedA = closesA.slice(closesA.length - minLen);
+      const alignedB = closesB.slice(closesB.length - minLen);
+
+      const returnsA = returns(alignedA);
+      const returnsB = returns(alignedB);
+
+      // Compute rolling correlation
+      const rollingCorr: { index: number; correlation: number }[] = [];
+      for (let i = window - 1; i < returnsA.length; i++) {
+        const sliceA = returnsA.slice(i - window + 1, i + 1);
+        const sliceB = returnsB.slice(i - window + 1, i + 1);
+        const corr = correlation(sliceA, sliceB);
+        rollingCorr.push({ index: i, correlation: Math.round(corr * 1000) / 1000 });
+      }
+
+      // Detect regime transitions: zero crossings and sign flips
+      const transitions: { index: number; from: number; to: number; type: string }[] = [];
+      for (let i = 1; i < rollingCorr.length; i++) {
+        const prev = rollingCorr[i - 1].correlation;
+        const curr = rollingCorr[i].correlation;
+        if ((prev >= 0 && curr < 0) || (prev < 0 && curr >= 0)) {
+          transitions.push({
+            index: rollingCorr[i].index,
+            from: prev,
+            to: curr,
+            type: prev >= 0 && curr < 0 ? 'decorrelation' : 'recorrelation',
+          });
+        }
+      }
+
+      // Classify current regime
+      const currentCorr = rollingCorr.length > 0
+        ? rollingCorr[rollingCorr.length - 1].correlation
+        : 0;
+
+      let currentRegime: string;
+      if (currentCorr > 0.7) currentRegime = 'highly_correlated';
+      else if (currentCorr > 0.3) currentRegime = 'moderately_correlated';
+      else if (currentCorr >= -0.3) currentRegime = 'uncorrelated';
+      else currentRegime = 'inversely_correlated';
+
+      // Average correlation
+      const avgCorr = rollingCorr.length > 0
+        ? Math.round(mean(rollingCorr.map(r => r.correlation)) * 1000) / 1000
+        : 0;
+
+      // Sample the rolling series to avoid huge payloads (max ~50 points)
+      const step = Math.max(1, Math.floor(rollingCorr.length / 50));
+      const sampled = rollingCorr.filter((_, i) => i % step === 0 || i === rollingCorr.length - 1);
+
+      return {
+        symbolA: params.symbol_a,
+        symbolB: params.symbol_b,
+        timeframe: params.timeframe,
+        window,
+        dataPoints: rollingCorr.length,
+        currentCorrelation: currentCorr,
+        currentRegime,
+        averageCorrelation: avgCorr,
+        transitions,
+        rollingSeries: sampled,
+      };
+    }),
+  );
+
+  // ── Export to Parquet ──────────────────────────────────────
+
+  server.tool(
+    'export_to_parquet',
+    `Export cached market data to a Parquet file for external analysis (Python, R, DuckDB CLI). Filters by symbol, timeframe, and exchange before writing.`,
+    {
+      symbol: z.string().describe('Trading pair to export (e.g., BTC/USDT)'),
+      timeframe: z.string().default('1d').describe('Candle timeframe to export'),
+      output_path: z.string().optional().describe('Output file path (default: .desk/exports/{symbol}_{timeframe}.parquet)'),
+    } as any,
+    handler(async (params: any) => {
+      if (!store) throw new Error('DuckDB datastore not configured. Restart with data caching enabled.');
+
+      const safeSymbol = params.symbol.replace(/\//g, '-');
+      const outputPath: string = params.output_path
+        ?? `.desk/exports/${safeSymbol}_${params.timeframe}.parquet`;
+
+      const query = `SELECT * FROM ohlcv WHERE symbol = '${params.symbol.replace(/'/g, "''")}' AND interval = '${params.timeframe.replace(/'/g, "''")}' AND exchange = '${client.exchangeId.replace(/'/g, "''")}'`;
+
+      await store.exportParquet(query, outputPath);
+
+      // Get row count for confirmation
+      const countRows = await store.sql(
+        `SELECT COUNT(*) as cnt FROM ohlcv WHERE symbol = ? AND interval = ? AND exchange = ?`,
+        [params.symbol, params.timeframe, client.exchangeId],
+      );
+      const rowCount = countRows[0]?.cnt ?? 0;
+
+      return {
+        symbol: params.symbol,
+        timeframe: params.timeframe,
+        exchange: client.exchangeId,
+        outputPath,
+        rowCount,
+      };
+    }),
+  );
+
+  // ── P&L Attribution ───────────────────────────────────────
+
+  server.tool(
+    'get_pnl_attribution',
+    `Detailed P&L attribution from the trade journal. Group realized P&L by symbol, strategy, calendar day, or hour of day. Essential for identifying which pairs, agents, or time windows drive performance.`,
+    {
+      group_by: z.enum(['symbol', 'strategy', 'day', 'hour']).default('symbol').describe('Dimension to group P&L by'),
+      since: z.string().optional().describe('Start date (ISO 8601, e.g., "2024-01-01")'),
+    } as any,
+    handler(async (params: any) => {
+      const journal = (client as any).journal as TradeJournal | undefined;
+      if (!journal) throw new Error('Trade journal not configured.');
+
+      const groupBy: string = params.group_by;
+      const sinceClause = params.since
+        ? `WHERE timestamp >= ${new Date(params.since).getTime()}`
+        : '';
+
+      let sql: string;
+      switch (groupBy) {
+        case 'symbol':
+          sql = `SELECT symbol as dimension, SUM(CASE WHEN side = 'sell' THEN cost ELSE -cost END) as pnl, SUM(COALESCE(fee, 0)) as fees, COUNT(*) as trades FROM trades ${sinceClause} GROUP BY symbol ORDER BY pnl DESC`;
+          break;
+        case 'strategy':
+          sql = `SELECT COALESCE(strategy, 'unknown') as dimension, SUM(CASE WHEN side = 'sell' THEN cost ELSE -cost END) as pnl, SUM(COALESCE(fee, 0)) as fees, COUNT(*) as trades FROM trades ${sinceClause} GROUP BY strategy ORDER BY pnl DESC`;
+          break;
+        case 'day':
+          sql = `SELECT CAST(epoch_ms(timestamp) AS DATE) as dimension, SUM(CASE WHEN side = 'sell' THEN cost ELSE -cost END) as pnl, SUM(COALESCE(fee, 0)) as fees, COUNT(*) as trades FROM trades ${sinceClause} GROUP BY CAST(epoch_ms(timestamp) AS DATE) ORDER BY pnl DESC`;
+          break;
+        case 'hour':
+          sql = `SELECT EXTRACT(HOUR FROM epoch_ms(timestamp)) as dimension, SUM(CASE WHEN side = 'sell' THEN cost ELSE -cost END) as pnl, SUM(COALESCE(fee, 0)) as fees, COUNT(*) as trades FROM trades ${sinceClause} GROUP BY EXTRACT(HOUR FROM epoch_ms(timestamp)) ORDER BY pnl DESC`;
+          break;
+        default:
+          throw new Error(`Invalid group_by: ${groupBy}. Use symbol, strategy, day, or hour.`);
+      }
+
+      const rows = await journal.sql(sql);
+
+      return {
+        exchange: client.exchangeId,
+        groupBy,
+        since: params.since ?? null,
+        rows,
+      };
+    }),
+  );
 }
