@@ -214,3 +214,69 @@ describe('get_vwap tool', () => {
     expect(data.signal).toBeTypeOf('string');
   });
 });
+
+// ── backtest_strategy ───────────────────────────────────────
+
+describe('backtest_strategy tool', () => {
+  it('returns valid backtest results with trades', async () => {
+    const { server } = setup();
+    const result = await server.callTool('backtest_strategy', {
+      symbol: 'BTC/USDT', timeframe: '1d', fast_period: 5, slow_period: 15,
+      initial_capital: 10000, position_size_pct: 1.0,
+    });
+    const data = JSON.parse(result.content[0].text);
+    expect(data.symbol).toBe('BTC/USDT');
+    expect(data.timeframe).toBe('1d');
+    expect(data.fastPeriod).toBe(5);
+    expect(data.slowPeriod).toBe(15);
+    expect(data.trades).toBeInstanceOf(Array);
+    expect(data.totalBars).toBeGreaterThan(0);
+    expect(data.initialCapital).toBe(10000);
+    expect(data.finalCapital).toBeTypeOf('number');
+  });
+
+  it('returns positive number of trades', async () => {
+    const { server } = setup();
+    const result = await server.callTool('backtest_strategy', {
+      symbol: 'BTC/USDT', timeframe: '1d', fast_period: 5, slow_period: 15,
+      initial_capital: 10000, position_size_pct: 1.0,
+    });
+    const data = JSON.parse(result.content[0].text);
+    expect(data.totalTrades).toBeGreaterThan(0);
+    expect(data.winners + data.losers).toBe(data.totalTrades);
+  });
+
+  it('winRate is between 0 and 1', async () => {
+    const { server } = setup();
+    const result = await server.callTool('backtest_strategy', {
+      symbol: 'BTC/USDT', timeframe: '1d', fast_period: 5, slow_period: 15,
+      initial_capital: 10000, position_size_pct: 1.0,
+    });
+    const data = JSON.parse(result.content[0].text);
+    expect(data.winRate).toBeGreaterThanOrEqual(0);
+    expect(data.winRate).toBeLessThanOrEqual(1);
+  });
+
+  it('equity curve starts with initial capital', async () => {
+    const { server } = setup();
+    const result = await server.callTool('backtest_strategy', {
+      symbol: 'BTC/USDT', timeframe: '1d', fast_period: 5, slow_period: 15,
+      initial_capital: 10000, position_size_pct: 1.0,
+    });
+    const data = JSON.parse(result.content[0].text);
+    expect(data.equityCurve[0]).toBe(10000);
+    expect(data.equityCurve.length).toBeGreaterThan(0);
+  });
+
+  it('rejects when no store configured', async () => {
+    const client = createMockClient({ store: null } as any);
+    const srv = new MockMcpServer();
+    registerDatastoreTools(srv as any, client);
+    const result = await srv.callTool('backtest_strategy', {
+      symbol: 'BTC/USDT', timeframe: '1d', fast_period: 5, slow_period: 15,
+      initial_capital: 10000, position_size_pct: 1.0,
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('not configured');
+  });
+});

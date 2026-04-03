@@ -9,7 +9,7 @@ import {
 } from '../../../../../lib/indicators.js';
 import {
   correlation, correlationMatrix, returns, mean, standardDeviation,
-  sharpeRatio, sortinoRatio, maxDrawdown,
+  sharpeRatio, sortinoRatio, maxDrawdown, winRate, profitFactor,
 } from '../../../../../lib/math.js';
 
 // Cast schemas to any to avoid TS2589 "excessively deep type instantiation" with zod + MCP SDK
@@ -387,6 +387,150 @@ export function registerDatastoreTools(server: McpServer, client: ExchangeClient
       return {
         exchange: client.exchangeId,
         ...report,
+      };
+    }),
+  );
+
+  server.tool(
+    'backtest_strategy',
+    `Run a simple moving average crossover backtest on cached DuckDB data. Buys when fast SMA crosses above slow SMA, sells when fast crosses below. Returns trade list, equity curve, and performance stats (Sharpe, Sortino, max drawdown, win rate, profit factor).`,
+    {
+      symbol: z.string().describe('Trading pair (e.g., BTC/USDT)'),
+      timeframe: z.string().default('1d').describe('Candle timeframe (1m, 5m, 15m, 1h, 4h, 1d)'),
+      fast_period: z.number().default(10).describe('Fast MA period'),
+      slow_period: z.number().default(30).describe('Slow MA period'),
+      initial_capital: z.number().default(10000).describe('Starting capital in quote currency'),
+      position_size_pct: z.number().default(1.0).describe('Fraction of capital to use per trade (0-1)'),
+    } as any,
+    handler(async (params: any) => {
+      if (!store) throw new Error('DuckDB datastore not configured. Restart with data caching enabled.');
+
+      const fastPeriod: number = params.fast_period;
+      const slowPeriod: number = params.slow_period;
+      if (fastPeriod >= slowPeriod) {
+        throw new Error(`fast_period (${fastPeriod}) must be less than slow_period (${slowPeriod})`);
+      }
+
+      const candles = await store.query({
+        symbol: params.symbol,
+        interval: params.timeframe,
+        exchange: client.exchangeId,
+        limit: 10000, // fetch as much as available
+      });
+
+      if (candles.length < slowPeriod + 1) {
+        throw new Error(`Insufficient cached data (${candles.length} candles, need at least ${slowPeriod + 1}). Run ingest_history first.`);
+      }
+
+      const closes = candles.map((c: any) => c.close);
+
+      // Compute SMAs
+      const fastSma = sma(closes, fastPeriod);
+      const slowSma = sma(closes, slowPeriod);
+
+      // Align: slowSma starts at index (slowPeriod - 1) in closes
+      // fastSma starts at index (fastPeriod - 1) in closes
+      // We need both to exist, so start at (slowPeriod - 1)
+      const startIdx = slowPeriod - 1;
+
+      // Simulate trades
+      const trades: { type: string; price: number; bar: number; pnl?: number; pnlPct?: number }[] = [];
+      let capital = params.initial_capital as number;
+      const positionSizePct = params.position_size_pct as number;
+      let inPosition = false;
+      let entryPrice = 0;
+      let entryCapital = 0;
+      const equityCurve: number[] = [capital];
+
+      for (let i = startIdx + 1; i < closes.length; i++) {
+        // fastSma index: i - (fastPeriod - 1)
+        // slowSma index: i - (slowPeriod - 1)
+        const fastIdx = i - (fastPeriod - 1);
+        const slowIdx = i - (slowPeriod - 1);
+        const prevFastIdx = fastIdx - 1;
+        const prevSlowIdx = slowIdx - 1;
+
+        if (prevFastIdx < 0 || prevSlowIdx < 0) continue;
+
+        const fastNow = fastSma[fastIdx];
+        const slowNow = slowSma[slowIdx];
+        const fastPrev = fastSma[prevFastIdx];
+        const slowPrev = slowSma[prevSlowIdx];
+
+        // Buy signal: fast crosses above slow
+        if (!inPosition && fastPrev <= slowPrev && fastNow > slowNow) {
+          entryPrice = closes[i];
+          entryCapital = capital * positionSizePct;
+          inPosition = true;
+          trades.push({ type: 'buy', price: Math.round(entryPrice * 100) / 100, bar: i });
+        }
+        // Sell signal: fast crosses below slow
+        else if (inPosition && fastPrev >= slowPrev && fastNow < slowNow) {
+          const exitPrice = closes[i];
+          const pnl = entryCapital * ((exitPrice - entryPrice) / entryPrice);
+          const pnlPct = ((exitPrice - entryPrice) / entryPrice) * 100;
+          capital += pnl;
+          inPosition = false;
+          trades.push({
+            type: 'sell',
+            price: Math.round(exitPrice * 100) / 100,
+            bar: i,
+            pnl: Math.round(pnl * 100) / 100,
+            pnlPct: Math.round(pnlPct * 100) / 100,
+          });
+          equityCurve.push(Math.round(capital * 100) / 100);
+        }
+      }
+
+      // Close open position at last bar
+      if (inPosition) {
+        const exitPrice = closes[closes.length - 1];
+        const pnl = entryCapital * ((exitPrice - entryPrice) / entryPrice);
+        const pnlPct = ((exitPrice - entryPrice) / entryPrice) * 100;
+        capital += pnl;
+        trades.push({
+          type: 'sell',
+          price: Math.round(exitPrice * 100) / 100,
+          bar: closes.length - 1,
+          pnl: Math.round(pnl * 100) / 100,
+          pnlPct: Math.round(pnlPct * 100) / 100,
+        });
+        equityCurve.push(Math.round(capital * 100) / 100);
+      }
+
+      // Compute stats from trade P&Ls
+      const tradePnls = trades
+        .filter(t => t.type === 'sell' && t.pnl != null)
+        .map(t => t.pnl as number);
+
+      const winners = tradePnls.filter(p => p > 0).length;
+      const losers = tradePnls.filter(p => p <= 0).length;
+      const totalTrades = tradePnls.length;
+
+      // Compute returns series from equity curve for Sharpe/Sortino
+      const equityReturns = returns(equityCurve);
+      const dd = maxDrawdown(equityCurve);
+      const totalReturn = ((capital - params.initial_capital) / params.initial_capital) * 100;
+
+      return {
+        symbol: params.symbol,
+        timeframe: params.timeframe,
+        fastPeriod,
+        slowPeriod,
+        totalBars: closes.length,
+        trades,
+        totalTrades,
+        winners,
+        losers,
+        winRate: totalTrades > 0 ? Math.round(winRate(tradePnls) * 1000) / 1000 : 0,
+        profitFactor: totalTrades > 0 ? Math.round(profitFactor(tradePnls) * 100) / 100 : 0,
+        totalReturn: Math.round(totalReturn * 100) / 100,
+        sharpe: equityReturns.length > 1 ? Math.round(sharpeRatio(equityReturns) * 100) / 100 : 0,
+        sortino: equityReturns.length > 1 ? Math.round(sortinoRatio(equityReturns) * 100) / 100 : 0,
+        maxDrawdown: Math.round(dd.maxDrawdown * 10000) / 100,
+        initialCapital: params.initial_capital,
+        finalCapital: Math.round(capital * 100) / 100,
+        equityCurve,
       };
     }),
   );

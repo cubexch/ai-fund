@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import ccxt from 'ccxt';
 import type { ExchangeClient } from '../client/exchange.js';
+import type { StreamManager } from '../client/stream.js';
 import { handler, authHandler } from './handler.js';
 
 // Cast schemas to any to avoid TS2589 "excessively deep type instantiation" with zod + MCP SDK
@@ -511,6 +512,107 @@ export function registerExecutionTools(server: McpServer, client: ExchangeClient
         timeframe,
         timestamp: Date.now(),
         symbols: results,
+      };
+    }),
+  );
+
+  // ── get_live_snapshot ─────────────────────────────────────
+
+  server.tool(
+    'get_live_snapshot',
+    `Get real-time market data snapshot for a symbol on ${client.name}. Returns WebSocket-streamed order book, ticker, and trades if a stream is active, otherwise falls back to REST API (order book + quote).`,
+    {
+      symbol: z.string().describe('Trading pair (e.g., BTC/USDT)'),
+    } as any,
+    handler(async (params: any) => {
+      const symbol: string = params.symbol;
+      const stream = (client as any).stream as StreamManager | undefined;
+
+      if (stream) {
+        const snap = stream.getSnapshot(symbol);
+        if (snap && snap.lastUpdate > 0) {
+          return {
+            symbol,
+            source: 'websocket',
+            exchange: client.name,
+            staleness_ms: Date.now() - snap.lastUpdate,
+            ...snap,
+          };
+        }
+      }
+
+      // Fallback to REST
+      const [orderBook, quote] = await Promise.all([
+        client.getOrderBook(symbol, 20),
+        client.getQuote(symbol),
+      ]);
+
+      return {
+        symbol,
+        source: 'rest',
+        exchange: client.name,
+        orderBook: {
+          bids: orderBook.bids.slice(0, 10),
+          asks: orderBook.asks.slice(0, 10),
+          bestBid: orderBook.bestBid,
+          bestAsk: orderBook.bestAsk,
+          mid: orderBook.mid,
+          spread: orderBook.spread,
+          spreadBps: orderBook.spreadBps,
+          timestamp: orderBook.timestamp,
+        },
+        ticker: {
+          last: quote.last,
+          bid: quote.bid,
+          ask: quote.ask,
+          volume: undefined,
+          timestamp: quote.timestamp,
+        },
+        trades: undefined,
+        lastUpdate: Date.now(),
+      };
+    }),
+  );
+
+  // ── get_stream_status ─────────────────────────────────────
+
+  server.tool(
+    'get_stream_status',
+    `Show active WebSocket streaming subscriptions and data freshness on ${client.name}. Lists all symbols with active streams, their channels (orderBook, ticker, trades), and how recently each was updated.`,
+    {} as any,
+    handler(async () => {
+      const stream = (client as any).stream as StreamManager | undefined;
+
+      if (!stream) {
+        return {
+          exchange: client.name,
+          streaming: false,
+          message: 'No WebSocket stream manager is active. Market data is served via REST API.',
+          subscriptions: [],
+        };
+      }
+
+      const subs = stream.getSubscriptions();
+      const details = subs.map(({ symbol, channels }) => {
+        const snap = stream.getSnapshot(symbol);
+        return {
+          symbol,
+          channels,
+          lastUpdate: snap?.lastUpdate ?? null,
+          staleness_ms: snap?.lastUpdate ? Date.now() - snap.lastUpdate : null,
+          hasOrderBook: !!snap?.orderBook,
+          hasTicker: !!snap?.ticker,
+          hasTrades: !!snap?.trades && snap.trades.length > 0,
+          tradeCount: snap?.trades?.length ?? 0,
+        };
+      });
+
+      return {
+        exchange: client.name,
+        exchangeId: stream.exchangeId,
+        streaming: true,
+        totalSubscriptions: subs.length,
+        subscriptions: details,
       };
     }),
   );
