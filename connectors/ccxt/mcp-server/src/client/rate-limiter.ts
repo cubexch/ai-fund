@@ -30,6 +30,8 @@ export class RateLimiter {
     this.lastRefill = now;
   }
 
+  private draining = false;
+
   /** Acquire a token, waiting if necessary. */
   async acquire(): Promise<void> {
     this.refill();
@@ -37,19 +39,33 @@ export class RateLimiter {
       this.tokens -= 1;
       return;
     }
-    // Wait for a token
+    // Wait for a token — single drain loop processes the entire queue
     return new Promise<void>(resolve => {
       this.queue.push({ resolve });
-      const waitMs = Math.ceil((1 - this.tokens) / this.refillRate);
-      setTimeout(() => {
-        this.refill();
-        const pending = this.queue.shift();
-        if (pending) {
-          this.tokens = Math.max(0, this.tokens - 1);
-          pending.resolve();
-        }
-      }, waitMs);
+      if (!this.draining) {
+        this.scheduleDrain();
+      }
     });
+  }
+
+  private scheduleDrain(): void {
+    this.draining = true;
+    const waitMs = Math.max(1, Math.ceil((1 - this.tokens) / this.refillRate));
+    setTimeout(() => {
+      this.refill();
+      // Resolve as many waiters as we have tokens for
+      while (this.queue.length > 0 && this.tokens >= 1) {
+        this.tokens -= 1;
+        const pending = this.queue.shift();
+        pending?.resolve();
+      }
+      // If more waiters remain, schedule another drain
+      if (this.queue.length > 0) {
+        this.scheduleDrain();
+      } else {
+        this.draining = false;
+      }
+    }, waitMs);
   }
 
   /** Current available tokens (for monitoring). */

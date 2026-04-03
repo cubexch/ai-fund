@@ -24,7 +24,7 @@ interface RiskLimits {
   dailyLossLimitPct: number;    // max daily loss as % of portfolio
 }
 
-let riskLimits: RiskLimits = {
+const DEFAULT_RISK_LIMITS: RiskLimits = {
   maxPositionPct: 20,
   maxDrawdownPct: 15,
   maxLeverage: 3,
@@ -33,6 +33,8 @@ let riskLimits: RiskLimits = {
 };
 
 export function registerRiskTools(server: McpServer, client: ExchangeClient) {
+  // Scoped per-registration — each exchange gets its own limits, not shared globally
+  const riskLimits: RiskLimits = { ...DEFAULT_RISK_LIMITS };
 
   // ── Set / Get risk limits ───────────────────────────────────
 

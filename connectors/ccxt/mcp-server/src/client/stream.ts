@@ -59,6 +59,46 @@ export class StreamManager {
 
   get exchangeId(): string { return this._exchangeId; }
 
+  private static readonly MAX_RETRIES = 20;
+  private static readonly MAX_BACKOFF_MS = 30_000;
+
+  /**
+   * Run a watch loop with exponential backoff.
+   * On success, retries reset. After MAX_RETRIES consecutive failures, the loop stops.
+   */
+  private watchLoop(key: string, fn: (signal: AbortSignal) => Promise<void>): void {
+    const controller = new AbortController();
+    this.watchers.set(key, controller);
+
+    const loop = async () => {
+      let consecutiveErrors = 0;
+      while (!controller.signal.aborted) {
+        try {
+          await fn(controller.signal);
+          consecutiveErrors = 0; // reset on success
+        } catch (err) {
+          if (controller.signal.aborted) break;
+          consecutiveErrors++;
+          if (consecutiveErrors >= StreamManager.MAX_RETRIES) {
+            process.stderr.write(`[stream] ${key}: giving up after ${consecutiveErrors} consecutive errors\n`);
+            this.watchers.delete(key);
+            break;
+          }
+          const backoffMs = Math.min(
+            StreamManager.MAX_BACKOFF_MS,
+            1000 * Math.pow(2, consecutiveErrors - 1),
+          );
+          await new Promise(r => setTimeout(r, backoffMs));
+        }
+      }
+    };
+
+    loop().catch(err => {
+      process.stderr.write(`[stream] ${key}: fatal error: ${err?.message ?? err}\n`);
+      this.watchers.delete(key);
+    });
+  }
+
   /**
    * Subscribe to real-time order book updates for a symbol.
    * Runs in background, updates snapshot continuously.
@@ -67,32 +107,20 @@ export class StreamManager {
     const key = `ob:${symbol}`;
     if (this.watchers.has(key)) return; // already subscribed
 
-    const controller = new AbortController();
-    this.watchers.set(key, controller);
+    this.watchLoop(key, async () => {
+      const ob = await this.exchange.watchOrderBook(symbol, limit);
+      const bids = (ob.bids || []).slice(0, limit) as [number, number][];
+      const asks = (ob.asks || []).slice(0, limit) as [number, number][];
+      const bestBid = bids.length > 0 ? bids[0][0] : undefined;
+      const bestAsk = asks.length > 0 ? asks[0][0] : undefined;
+      const mid = bestBid != null && bestAsk != null ? (bestBid + bestAsk) / 2 : undefined;
+      const spread = bestBid != null && bestAsk != null ? bestAsk - bestBid : undefined;
+      const spreadBps = mid && spread ? Math.round((spread / mid) * 10000 * 100) / 100 : undefined;
 
-    // Fire-and-forget continuous watch loop
-    (async () => {
-      while (!controller.signal.aborted) {
-        try {
-          const ob = await this.exchange.watchOrderBook(symbol, limit);
-          const bids = (ob.bids || []).slice(0, limit) as [number, number][];
-          const asks = (ob.asks || []).slice(0, limit) as [number, number][];
-          const bestBid = bids.length > 0 ? bids[0][0] : undefined;
-          const bestAsk = asks.length > 0 ? asks[0][0] : undefined;
-          const mid = bestBid != null && bestAsk != null ? (bestBid + bestAsk) / 2 : undefined;
-          const spread = bestBid != null && bestAsk != null ? bestAsk - bestBid : undefined;
-          const spreadBps = mid && spread ? Math.round((spread / mid) * 10000 * 100) / 100 : undefined;
-
-          const snap = this.getOrCreate(symbol);
-          snap.orderBook = { bids, asks, bestBid, bestAsk, mid, spread, spreadBps, timestamp: ob.timestamp };
-          snap.lastUpdate = Date.now();
-        } catch (err) {
-          if (controller.signal.aborted) break;
-          // Wait before retry
-          await new Promise(r => setTimeout(r, 1000));
-        }
-      }
-    })();
+      const snap = this.getOrCreate(symbol);
+      snap.orderBook = { bids, asks, bestBid, bestAsk, mid, spread, spreadBps, timestamp: ob.timestamp };
+      snap.lastUpdate = Date.now();
+    });
   }
 
   /**
@@ -102,25 +130,15 @@ export class StreamManager {
     const key = `tk:${symbol}`;
     if (this.watchers.has(key)) return;
 
-    const controller = new AbortController();
-    this.watchers.set(key, controller);
-
-    (async () => {
-      while (!controller.signal.aborted) {
-        try {
-          const t = await this.exchange.watchTicker(symbol);
-          const snap = this.getOrCreate(symbol);
-          snap.ticker = {
-            last: t.last, bid: t.bid, ask: t.ask,
-            volume: t.baseVolume, timestamp: t.timestamp,
-          };
-          snap.lastUpdate = Date.now();
-        } catch (err) {
-          if (controller.signal.aborted) break;
-          await new Promise(r => setTimeout(r, 1000));
-        }
-      }
-    })();
+    this.watchLoop(key, async () => {
+      const t = await this.exchange.watchTicker(symbol);
+      const snap = this.getOrCreate(symbol);
+      snap.ticker = {
+        last: t.last, bid: t.bid, ask: t.ask,
+        volume: t.baseVolume, timestamp: t.timestamp,
+      };
+      snap.lastUpdate = Date.now();
+    });
   }
 
   /**
@@ -130,27 +148,17 @@ export class StreamManager {
     const key = `tr:${symbol}`;
     if (this.watchers.has(key)) return;
 
-    const controller = new AbortController();
-    this.watchers.set(key, controller);
-
-    (async () => {
-      while (!controller.signal.aborted) {
-        try {
-          const trades = await this.exchange.watchTrades(symbol);
-          const snap = this.getOrCreate(symbol);
-          const existing = snap.trades || [];
-          const newTrades = trades.map((t: any) => ({
-            id: t.id, side: t.side, price: t.price,
-            amount: t.amount, timestamp: t.timestamp,
-          }));
-          snap.trades = [...existing, ...newTrades].slice(-maxTrades);
-          snap.lastUpdate = Date.now();
-        } catch (err) {
-          if (controller.signal.aborted) break;
-          await new Promise(r => setTimeout(r, 1000));
-        }
-      }
-    })();
+    this.watchLoop(key, async () => {
+      const trades = await this.exchange.watchTrades(symbol);
+      const snap = this.getOrCreate(symbol);
+      const existing = snap.trades || [];
+      const newTrades = trades.map((t: any) => ({
+        id: t.id, side: t.side, price: t.price,
+        amount: t.amount, timestamp: t.timestamp,
+      }));
+      snap.trades = [...existing, ...newTrades].slice(-maxTrades);
+      snap.lastUpdate = Date.now();
+    });
   }
 
   /** Get current snapshot for a symbol. */
