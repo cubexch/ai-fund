@@ -47,13 +47,31 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
     }));
   }
 
+  // ── Helper: resolve symbol to market ──────────────────────
+
+  async function resolveMarket(symbol?: string, marketId?: number) {
+    const markets = await iridium.getMarkets();
+    if (marketId !== undefined) {
+      const m = markets.find(mk => mk.marketId === marketId);
+      if (!m) throw new Error(`Unknown marketId: ${marketId}`);
+      return m;
+    }
+    if (!symbol) throw new Error('Either symbol or marketId must be provided');
+    const upper = symbol.toUpperCase();
+    // Try exact match first, then prefix match
+    const m = markets.find(mk => mk.symbol.toUpperCase() === upper)
+      ?? markets.find(mk => mk.symbol.toUpperCase().startsWith(upper));
+    if (!m) throw new Error(`No market found for "${symbol}". Use get_assets to list available markets.`);
+    return m;
+  }
+
   // ── 1. detect_confluence ──────────────────────────────────
 
   server.tool(
     'detect_confluence',
     'Multi-timeframe confluence detection. Analyzes RSI, MACD, SMA trend, Bollinger Bands, and EMA across multiple timeframes to produce a directional score.',
     {
-      marketId: z.number().describe('Market ID to analyze'),
+      symbol: z.string().describe('Asset symbol (e.g. "SOL", "BTC", "SOLUSDC")'),
       timeframes: z
         .array(z.enum(['1m', '15m', '1h', '4h', '1d']))
         .default(['15m', '1h', '4h'])
@@ -61,11 +79,11 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
     },
     async params => {
       try {
+        const market = await resolveMarket(params.symbol);
         const barsPerTimeframe: Record<string, OHLCV[]> = {};
 
-        // Fetch bars for each timeframe in parallel
         const fetches = params.timeframes.map(async tf => {
-          const ohlcv = await fetchOhlcv(params.marketId, tf, 200);
+          const ohlcv = await fetchOhlcv(market.marketId, tf, 200);
           if (ohlcv.length < 51) {
             throw new Error(`Insufficient data for ${tf}: only ${ohlcv.length} bars (need 51+)`);
           }
@@ -78,7 +96,7 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
         return {
           content: [{
             type: 'text' as const,
-            text: JSON.stringify({ marketId: params.marketId, ...result }, null, 2),
+            text: JSON.stringify({ market: market.symbol, ...result }, null, 2),
           }],
         };
       } catch (error: any) {
@@ -96,7 +114,7 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
     'detect_bb_squeeze',
     'Detect Bollinger Band squeeze (low volatility compression that precedes breakouts). Returns squeeze status, duration, and directional bias.',
     {
-      marketId: z.number().describe('Market ID to analyze'),
+      symbol: z.string().describe('Asset symbol (e.g. "SOL", "BTC", "SOLUSDC")'),
       interval: z.enum(['1m', '15m', '1h', '4h', '1d']).default('1h').describe('Candlestick interval'),
       limit: z.number().default(200).describe('Number of candles to fetch'),
       period: z.number().default(20).describe('Bollinger Band period'),
@@ -104,7 +122,8 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
     },
     async params => {
       try {
-        const ohlcv = await fetchOhlcv(params.marketId, params.interval, params.limit);
+        const market = await resolveMarket(params.symbol);
+        const ohlcv = await fetchOhlcv(market.marketId, params.interval, params.limit);
         const closes = ohlcv.map(c => c.close);
 
         if (closes.length < params.period + 1) {
@@ -123,7 +142,7 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
           content: [{
             type: 'text' as const,
             text: JSON.stringify(
-              { marketId: params.marketId, interval: params.interval, ...result },
+              { market: market.symbol, interval: params.interval, ...result },
               null,
               2
             ),
@@ -292,27 +311,18 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
     'plan_twap',
     'Plan a TWAP (Time-Weighted Average Price) execution. Splits a large order into equal slices over a time window to minimize market impact.',
     {
-      marketId: z.number().describe('Market ID for the asset'),
+      symbol: z.string().describe('Asset symbol (e.g. "SOL", "BTC", "SOLUSDC")'),
       totalAmount: z.number().describe('Total quantity to execute (in base asset)'),
       durationMinutes: z.number().default(60).describe('Execution window in minutes'),
       numSlices: z.number().default(10).describe('Number of order slices'),
     },
     async params => {
       try {
+        const market = await resolveMarket(params.symbol);
         const [tickers, ohlcv] = await Promise.all([
           iridium.getTickers(),
-          fetchOhlcv(params.marketId, '1d', 30),
+          fetchOhlcv(market.marketId, '1d', 30),
         ]);
-
-        // Find ticker for this market
-        const markets = await iridium.getMarkets();
-        const market = markets.find(m => m.marketId === params.marketId);
-        if (!market) {
-          return {
-            content: [{ type: 'text' as const, text: `Unknown marketId: ${params.marketId}` }],
-            isError: true,
-          };
-        }
 
         const ticker = tickers.find(t => t.symbol === market.symbol);
         const currentPrice = ticker?.lastPrice ?? 0;
