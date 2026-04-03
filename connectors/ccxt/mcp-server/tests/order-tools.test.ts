@@ -38,6 +38,57 @@ function setup(overrides: Record<string, unknown> = {}) {
   return { server, client };
 }
 
+// ── modify_order ──────────────────────────────────────────
+
+describe('modify_order tool', () => {
+  it('returns modified order', async () => {
+    const { server } = setup({
+      modifyOrder: async () => ({
+        id: 'ord-mod', clientOrderId: 'co-mod', symbol: 'BTC/USDT',
+        side: 'buy', type: 'limit', amount: 0.2, filled: 0, remaining: 0.2,
+        price: 63000, average: undefined, status: 'open',
+        timestamp: 1700000000000, datetime: '2023-11-14T22:13:20.000Z',
+      }),
+    } as any);
+    const result = await server.callTool('modify_order', {
+      order_id: 'ord-1', symbol: 'BTC/USDT', side: 'buy', type: 'limit',
+      amount: 0.2, price: 63000,
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.id).toBe('ord-mod');
+    expect(data.amount).toBe(0.2);
+    expect(data.price).toBe(63000);
+  });
+
+  it('passes correct params to client', async () => {
+    const { server, client } = setup({
+      modifyOrder: async () => ({
+        id: 'ord-1', clientOrderId: 'co-1', symbol: 'BTC/USDT',
+        side: 'buy', type: 'limit', amount: 0.1, filled: 0, remaining: 0.1,
+        price: 64000, average: undefined, status: 'open',
+        timestamp: 1700000000000, datetime: '2023-11-14T22:13:20.000Z',
+      }),
+    } as any);
+    await server.callTool('modify_order', {
+      order_id: 'ord-1', symbol: 'BTC/USDT', side: 'buy', type: 'limit',
+      amount: 0.15, price: 63500,
+    });
+
+    expect(client.calls[0].method).toBe('modifyOrder');
+    expect(client.calls[0].args).toEqual(['ord-1', 'BTC/USDT', 'limit', 'buy', 0.15, 63500]);
+  });
+
+  it('fails without credentials', async () => {
+    const { server } = setup({ hasCredentials: false } as any);
+    const result = await server.callTool('modify_order', {
+      order_id: 'ord-1', symbol: 'BTC/USDT', side: 'buy', type: 'limit',
+      amount: 0.1, price: 64000,
+    });
+    expect(result.isError).toBe(true);
+  });
+});
+
 // ── place_order ────────────────────────────────────────────
 
 describe('place_order tool', () => {

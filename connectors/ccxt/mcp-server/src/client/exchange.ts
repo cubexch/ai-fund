@@ -258,7 +258,7 @@ export class ExchangeClient {
     const useds = (balance as any).used ?? {};
     for (const [currency, data] of Object.entries(totals)) {
       const total = data as number;
-      if (total > 0) {
+      if (total !== 0) {
         results.push({
           currency,
           free: (frees[currency] as number) ?? 0,
@@ -303,6 +303,12 @@ export class ExchangeClient {
     amount: number,
     price?: number,
   ): Promise<OrderResult> {
+    if (type === 'limit' && (price === undefined || price === null)) {
+      throw new Error('Limit orders require a price');
+    }
+    if (amount <= 0) {
+      throw new Error('Order amount must be positive');
+    }
     const order = await this.exchange.createOrder(symbol, type, side, amount, price);
     return this.formatOrder(order);
   }
@@ -311,14 +317,36 @@ export class ExchangeClient {
     await this.exchange.cancelOrder(orderId, symbol);
   }
 
+  async modifyOrder(
+    orderId: string,
+    symbol: string,
+    type: string,
+    side: string,
+    amount?: number,
+    price?: number,
+  ): Promise<OrderResult> {
+    if (typeof this.exchange.editOrder === 'function') {
+      const order = await this.exchange.editOrder(orderId, symbol, type, side, amount, price);
+      return this.formatOrder(order);
+    }
+    // Fallback: cancel + replace
+    await this.exchange.cancelOrder(orderId, symbol);
+    const order = await this.exchange.createOrder(symbol, type, side, amount!, price);
+    return this.formatOrder(order);
+  }
+
   async cancelAllOrders(symbol?: string): Promise<void> {
     if (typeof this.exchange.cancelAllOrders === 'function') {
       await this.exchange.cancelAllOrders(symbol);
     } else {
       const openOrders = await this.exchange.fetchOpenOrders(symbol);
-      await Promise.all(
+      const results = await Promise.allSettled(
         openOrders.map(order => this.exchange.cancelOrder(order.id, order.symbol))
       );
+      const failures = results.filter(r => r.status === 'rejected');
+      if (failures.length > 0) {
+        throw new Error(`Failed to cancel ${failures.length}/${openOrders.length} orders`);
+      }
     }
   }
 

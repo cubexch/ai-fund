@@ -90,6 +90,10 @@ class KeychainStore implements CredentialStore {
 
   async save(creds: CcxtCredentials): Promise<void> {
     const json = JSON.stringify(creds);
+    // Note: macOS `security` requires -w <password> as CLI arg — there's no stdin
+    // alternative. The credential is briefly visible in `ps` output. This is the
+    // same approach used by git-credential-osxkeychain and other macOS tools.
+    // The -U flag updates in place if the entry already exists.
     await exec('security', [
       'add-generic-password',
       '-a', creds.exchangeId,
@@ -170,7 +174,8 @@ class FileStore implements CredentialStore {
   }
 
   async save(creds: CcxtCredentials): Promise<void> {
-    await mkdir(credentialsDir(creds.exchangeId), { recursive: true });
+    const dir = credentialsDir(creds.exchangeId);
+    await mkdir(dir, { recursive: true, mode: 0o700 });
     await writeFile(credentialsFile(creds.exchangeId), JSON.stringify(creds, null, 2), { mode: 0o600 });
   }
 

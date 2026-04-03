@@ -110,6 +110,15 @@ describe('get_bars tool', () => {
     expect(client.calls[0].args[2]).toBe(1700000000000);
   });
 
+  it('rejects invalid since date strings', async () => {
+    const { server } = setup();
+    const result = await server.callTool('get_bars', {
+      symbol: 'BTC/USDT', timeframe: '1d', since: 'yesterday', limit: 100,
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Invalid since value');
+  });
+
   it('returns error on failure', async () => {
     const { server } = setup({
       getBars: async () => { throw new Error('invalid timeframe'); },

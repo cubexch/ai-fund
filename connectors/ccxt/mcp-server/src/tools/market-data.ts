@@ -31,9 +31,14 @@ export function registerMarketDataTools(server: McpServer, client: ExchangeClien
       limit: z.number().default(100).describe('Number of candles to return (max varies by exchange)'),
     } as any,
     handler(async (params: any) => {
-      const since = params.since
-        ? (isNaN(Number(params.since)) ? new Date(params.since).getTime() : Number(params.since))
-        : undefined;
+      let since: number | undefined;
+      if (params.since) {
+        const num = Number(params.since);
+        since = isNaN(num) ? new Date(params.since).getTime() : num;
+        if (isNaN(since)) {
+          throw new Error(`Invalid since value: "${params.since}". Use ISO 8601 (e.g., "2024-01-01T00:00:00Z") or Unix timestamp in ms.`);
+        }
+      }
       const bars = await client.getBars(params.symbol, params.timeframe, since, params.limit);
       return { symbol: params.symbol, timeframe: params.timeframe, bars };
     }),

@@ -3,7 +3,7 @@
  * Used by index.ts, login.ts, logout.ts, and status.ts.
  */
 
-import { loadCredentials } from '../client/credential-store.js';
+import { loadCredentials, validateExchangeId } from '../client/credential-store.js';
 
 // ── CLI arg parsing ────────────────────────────────────────────
 
@@ -28,6 +28,8 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
 
   exchangeId = process.env.CCXT_EXCHANGE ?? exchangeId;
   sandbox = process.env.CCXT_SANDBOX === 'true' || sandbox;
+
+  validateExchangeId(exchangeId);
 
   return { exchangeId, sandbox };
 }

@@ -16,6 +16,7 @@
 
 import { ExchangeClient } from '../client/exchange.js';
 import { saveCredentials, getBackendName } from '../client/credential-store.js';
+import { sanitizeError } from '../client/sanitize.js';
 import { parseArgs, envPrefix } from './common.js';
 
 function prompt(question: string, hidden = false): Promise<string> {
@@ -118,14 +119,14 @@ async function main() {
       }
     }
     console.error('\n  Credentials saved. You can now start the MCP server.\n');
-  } catch (error: any) {
-    console.error(`\nAuthentication failed: ${error.message}`);
+  } catch (error) {
+    console.error(`\nAuthentication failed: ${sanitizeError(error)}`);
     console.error('\nCheck your credentials and try again.');
     process.exit(1);
   }
 }
 
 main().catch(err => {
-  console.error(`\nLogin failed: ${err.message}`);
+  console.error(`\nLogin failed: ${sanitizeError(err)}`);
   process.exit(1);
 });

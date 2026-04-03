@@ -23,6 +23,25 @@ export function registerOrderTools(server: McpServer, client: ExchangeClient) {
   );
 
   server.tool(
+    'modify_order',
+    `Modify an existing order on ${client.name}. Changes price, amount, or both. Falls back to cancel+replace if exchange doesn't support native edit.`,
+    {
+      order_id: z.string().describe('The order ID to modify'),
+      symbol: z.string().describe('Trading pair (e.g., BTC/USDT)'),
+      side: z.enum(['buy', 'sell']).describe('Order side'),
+      type: z.enum(['market', 'limit']).describe('Order type'),
+      amount: z.number().optional().describe('New quantity (omit to keep current)'),
+      price: z.number().optional().describe('New limit price (omit to keep current)'),
+    } as any,
+    authHandler(client, async (params: any) => {
+      return client.modifyOrder(
+        params.order_id, params.symbol, params.type, params.side,
+        params.amount, params.price,
+      );
+    }),
+  );
+
+  server.tool(
     'cancel_order',
     `Cancel an open order on ${client.name} by order ID.`,
     {

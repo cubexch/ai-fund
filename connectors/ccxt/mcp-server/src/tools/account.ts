@@ -45,15 +45,21 @@ export function registerAccountTools(server: McpServer, client: ExchangeClient) 
       percentage: z.number().default(100).describe('Percentage of position to close (1-100)'),
     } as any,
     authHandler(client, async (params: any) => {
+      const pct = params.percentage;
+      if (pct <= 0 || pct > 100) {
+        throw new Error(`Invalid percentage: ${pct}. Must be between 1 and 100.`);
+      }
       const balances = await client.getBalance();
       const [base] = params.symbol.split('/');
       const position = balances.find(b => b.currency === base);
-      if (!position || position.free <= 0) {
+      if (!position || position.free === 0) {
         throw new Error(`No open position found for ${base}`);
       }
-      const amount = position.free * (params.percentage / 100);
-      const order = await client.placeOrder(params.symbol, 'market', 'sell', amount);
-      return { ...order, closedPercentage: params.percentage };
+      const amount = Math.abs(position.free) * (pct / 100);
+      // Negative free balance means short — buy to close; positive means long — sell to close
+      const side = position.free < 0 ? 'buy' : 'sell';
+      const order = await client.placeOrder(params.symbol, 'market', side, amount);
+      return { ...order, closedPercentage: pct, closeSide: side };
     }),
   );
 }

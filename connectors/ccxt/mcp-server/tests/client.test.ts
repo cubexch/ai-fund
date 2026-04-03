@@ -402,6 +402,102 @@ describe('getMyTrades', () => {
   });
 });
 
+// ── Input validation ──────────────────────────────────────
+
+describe('placeOrder validation', () => {
+  it('rejects limit orders without price', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    await expect(client.placeOrder('BTC/USDT', 'limit', 'buy', 0.1)).rejects.toThrow('Limit orders require a price');
+  });
+
+  it('rejects zero amount', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    await expect(client.placeOrder('BTC/USDT', 'market', 'buy', 0)).rejects.toThrow('amount must be positive');
+  });
+
+  it('rejects negative amount', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    await expect(client.placeOrder('BTC/USDT', 'market', 'buy', -1)).rejects.toThrow('amount must be positive');
+  });
+
+  it('allows market orders without price', async () => {
+    const mock = createMockCcxtExchange();
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const order = await client.placeOrder('BTC/USDT', 'market', 'buy', 0.1);
+    expect(order.id).toBe('ord-123');
+  });
+});
+
+describe('modifyOrder', () => {
+  it('uses editOrder when available', async () => {
+    const mock = createMockCcxtExchange({
+      editOrder: async (id: string, symbol: string, type: string, side: string, amount?: number, price?: number) => ({
+        id, clientOrderId: 'co-mod', symbol, side, type,
+        amount: amount ?? 0.1, filled: 0, remaining: amount ?? 0.1,
+        price: price ?? 64000, average: null, status: 'open',
+        timestamp: 1700000000000, datetime: '2023-11-14T22:13:20.000Z',
+      }),
+    });
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const order = await client.modifyOrder('ord-1', 'BTC/USDT', 'limit', 'buy', 0.2, 63000);
+    expect(order.id).toBe('ord-1');
+    expect(order.amount).toBe(0.2);
+    expect(order.price).toBe(63000);
+  });
+
+  it('falls back to cancel+replace when editOrder unavailable', async () => {
+    const mock = createMockCcxtExchange();
+    // Default mock doesn't have editOrder
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const order = await client.modifyOrder('ord-1', 'BTC/USDT', 'limit', 'buy', 0.1, 64000);
+    expect(order.id).toBe('ord-123'); // new order from createOrder
+  });
+});
+
+describe('cancelAllOrders fallback', () => {
+  it('continues canceling remaining orders when one fails', async () => {
+    let cancelledIds: string[] = [];
+    const mock = createMockCcxtExchange({
+      cancelAllOrders: undefined, // force fallback path
+      fetchOpenOrders: async () => [
+        { id: 'ord-1', symbol: 'BTC/USDT' },
+        { id: 'ord-2', symbol: 'BTC/USDT' },
+        { id: 'ord-3', symbol: 'BTC/USDT' },
+      ],
+      cancelOrder: async (id: string) => {
+        if (id === 'ord-2') throw new Error('cancel failed');
+        cancelledIds.push(id);
+      },
+    });
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    await expect(client.cancelAllOrders()).rejects.toThrow('Failed to cancel 1/3 orders');
+    // ord-1 and ord-3 should still have been attempted
+    expect(cancelledIds).toContain('ord-1');
+    expect(cancelledIds).toContain('ord-3');
+  });
+});
+
+describe('getBalance', () => {
+  it('includes negative balances (margin debt)', async () => {
+    const mock = createMockCcxtExchange({
+      fetchBalance: async () => ({
+        total: { BTC: -0.5, USDT: 50000 },
+        free: { BTC: -0.5, USDT: 40000 },
+        used: { BTC: 0, USDT: 10000 },
+      }),
+    });
+    const client = new ExchangeClient({ exchangeId: 'test', exchangeInstance: mock as any });
+    const balances = await client.getBalance();
+    expect(balances).toHaveLength(2);
+    const btc = balances.find(b => b.currency === 'BTC');
+    expect(btc!.total).toBe(-0.5);
+    expect(btc!.free).toBe(-0.5);
+  });
+});
+
 // ── Error handling ──────────────────────────────────────────
 
 describe('error handling', () => {

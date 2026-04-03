@@ -120,6 +120,42 @@ describe('close_position tool', () => {
     expect(client.calls[1].args[3]).toBe(0.5); // 50% of 1.0 free
   });
 
+  it('closes short position with market buy', async () => {
+    const { server, client } = setup({
+      getBalance: async () => [
+        { currency: 'BTC', free: -2.0, used: 0, total: -2.0 },
+        { currency: 'USDT', free: 100000, used: 0, total: 100000 },
+      ],
+    } as any);
+    const result = await server.callTool('close_position', {
+      symbol: 'BTC/USDT', percentage: 100,
+    });
+
+    const data = JSON.parse(result.content[0].text);
+    expect(data.closeSide).toBe('buy');
+    expect(client.calls[1].method).toBe('placeOrder');
+    expect(client.calls[1].args[2]).toBe('buy'); // buy to close short
+    expect(client.calls[1].args[3]).toBe(2.0); // abs(-2.0)
+  });
+
+  it('rejects percentage <= 0', async () => {
+    const { server } = setup();
+    const result = await server.callTool('close_position', {
+      symbol: 'BTC/USDT', percentage: 0,
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Invalid percentage');
+  });
+
+  it('rejects percentage > 100', async () => {
+    const { server } = setup();
+    const result = await server.callTool('close_position', {
+      symbol: 'BTC/USDT', percentage: 150,
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Invalid percentage');
+  });
+
   it('returns error if no position found', async () => {
     const { server } = setup({
       getBalance: async () => [
