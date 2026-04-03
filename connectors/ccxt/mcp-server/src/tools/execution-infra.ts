@@ -227,12 +227,15 @@ export function registerExecutionInfraTools(server: McpServer, client: ExchangeC
           }
           const ex = new ExClass() as any;
           const ticker = await ex.fetchTicker(symbol);
+          // Sanitize: some exchanges return empty strings or 0 for bid/ask
+          const bid = typeof ticker.bid === 'number' && ticker.bid > 0 ? ticker.bid : undefined;
+          const ask = typeof ticker.ask === 'number' && ticker.ask > 0 ? ticker.ask : undefined;
           quotes.push({
             exchange: exId,
-            bid: ticker.bid,
-            ask: ticker.ask,
-            last: ticker.last,
-            volume: ticker.baseVolume,
+            bid,
+            ask,
+            last: typeof ticker.last === 'number' && ticker.last > 0 ? ticker.last : undefined,
+            volume: typeof ticker.baseVolume === 'number' ? ticker.baseVolume : undefined,
             timestamp: ticker.timestamp,
           });
         } catch (err: any) {
