@@ -1,6 +1,6 @@
 # AI Fund
 
-An AI trading desk with 44 hedge fund agent personas (including 21 named personas like Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, and Warren Buffett) for Claude Code. 148 MCP tools across 3 built-in connectors. 16 shared analysis libraries. Trade on any exchange — Cube, OKX, Kraken, Binance, Coinbase, and 100+ more via CCXT.
+An AI trading desk with 45 hedge fund agent personas (including 22 named personas like Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Warren Buffett, and Peter Lynch) for Claude Code. 150 MCP tools across 3 built-in connectors. 28 shared analysis libraries. Trade on any exchange — Cube, OKX, Kraken, Binance, Coinbase, and 100+ more via CCXT.
 
 ## Project Structure
 
@@ -85,7 +85,7 @@ After every code change, run the following before considering the work done:
 - **Imports**: ES module syntax only (`import`/`export`), no `require()`. Use `.js` extensions in import paths.
 - **Commit messages**: Conventional Commits format — `feat(skills): add new persona`, `fix(cube): correct order signing`, `docs: update exchange table`. Scopes: `skills`, `cube`, `lib`, `desk`, `commands`, `docs`
 
-## Shared Libraries (16 modules, 120+ exported functions)
+## Shared Libraries (28 modules, 250+ exported functions)
 
 - **`lib/indicators.ts`** — `sma`, `ema`, `rsi`, `macd`, `bollingerBands`, `atr`, `obv`, `stochastic`, `adx`, `vwap`, `momentum`, `hurst` + `OHLCV` interface
 - **`lib/math.ts`** — `kelly`, `fixedFractionalSize`, `valueAtRisk`, `maxDrawdown`, `sharpeRatio`, `sortinoRatio`, `calmarRatio`, `correlation`, `correlationMatrix`, `mean`, `standardDeviation`, `zScore`, `returns`, `winRate`, `profitFactor`, `annualizedVolatility`, `beta`, `alpha`, `informationRatio`, `tailRisk`
@@ -93,10 +93,23 @@ After every code change, run the following before considering the work done:
 - **`lib/execution-planner.ts`** — `planTwap`, `planVwap`, `planIceberg`, `analyzeSniper`, `estimateMarketImpact`, `realizedVolatility`, `compareExecutionPlans`, `calculateImplementationShortfall`
 - **`lib/execution-analytics.ts`** — `simulateOrderBookFill`, `analyzeDepthAtBands`, `computeOrderBookImbalance`, `analyzeOrderBookShape`, `computeWeightedMid`, `analyzeTradeFlow`, `computeMomentumScore`, `computeExecutionQuality`, `recommendEntry`
 - **`lib/portfolio-analytics.ts`** — `resolvePrice`, `computePortfolioExposure`, `checkPreTrade`, `simulateStressTest`, `assessPortfolioRisk`, `calculateRebalanceTrades`, `detectCorrelationClusters`, `monitorDrawdown`, `computeMarginHealth`, `computeRiskDashboard`
+- **`lib/portfolio-optimizer.ts`** — `meanVariance`, `minimumVariance`, `riskParity`, `blackLitterman`, `maxDiversification`, `efficientFrontier`, `hierarchicalRiskParity`, `equalWeight`, `inverseVolatility`, `rebalanceOptimal`
+- **`lib/factor-model.ts`** — `pcaFactors`, `factorExposure`, `factorAttribution`, `marginalVaR`, `incrementalVaR`, `componentVaR`, `cryptoFactorModel`, `equityFactorModel`, `crossSectionalMomentum`, `computeFactorReturns`, `styleAnalysis`, `covarianceMatrix`, `riskDecomposition`, `sectorExposure`
+- **`lib/options.ts`** — `blackScholes`, `black76`, `binomialPrice`, `impliedVol`, `putCallParity`, `volSurface`, `skewMetrics`, `greeksExposure`, `breakeven`, `maxPain`
+- **`lib/monte-carlo.ts`** — `simulateGBM`, `simulateJumpDiffusion`, `monteCarloVaR`, `portfolioMonteCarloVaR`, `confidenceInterval`, `scenarioGeneration`, `drawdownDistribution`, `optionMonteCarlo`
+- **`lib/stat-arb.ts`** — `engleGranger`, `adfTest`, `halfLife`, `hedgeRatio`, `spreadZScore`, `pairSignal`, `scorePairs`, `kalmanHedgeRatio`, `johansen`, `rollingSpreadStats`
+- **`lib/microstructure.ts`** — `computeVpin`, `kyleLambda`, `classifyTrades`, `adverseSelection`, `amihudIlliquidity`, `realizedSpreadDecomposition`, `rollSpread`, `pinModel`, `hasbrouckInfoShare`, `tradeFlowToxicity`
+- **`lib/order-flow.ts`** — `cumulativeVolumeDelta`, `footprintData`, `absorptionDetection`, `icebergDetection`, `aggressivePassiveFlow`, `volumeClockSpeed`, `orderFlowImbalanceProfile`, `deltaProfile`, `largeTradeDetection`, `tradeIntensityMap`
+- **`lib/funding.ts`** — `predictFunding`, `fundingAnnualized`, `basisCurve`, `carryTrade`, `fundingArbitrage`, `fundingSentiment`, `cashAndCarry`, `fundingRateStats`, `rollYield`, `fundingHedgeCost`
+- **`lib/sentiment.ts`** — `fearGreedIndex`, `fundingSentiment`, `putCallRatio`, `socialVolumeNormalized`, `contrarianSignal`, `longShortRatio`, `sentimentMomentum`, `compositeScore`, `volSurfaceSentiment`, `marketBreadth`
+- **`lib/liquidation.ts`** — `estimateLiquidationLevels`, `cascadeRisk`, `leverageHeatmap`, `openInterestAnalysis`, `insuranceFundHealth`, `marginCallSimulation`, `effectiveLeverage`, `liquidationFlowPrediction`, `deleveragingIndex`, `safeMaxLeverage`
+- **`lib/time-series.ts`** — `garch11`, `adfTest`, `autocorrelation`, `partialAutocorrelation`, `hurstExponent`, `halfLife`, `structuralBreak`, `ewmaVolatility`, `varianceRatio`, `regimeChangeDetection`
+- **`lib/venue-analytics.ts`** — `triangularArb`, `crossVenueSpread`, `smartOrderRoute`, `venueQualityScore`, `fragmentationIndex`, `latencyCostModel`, `venueCorrelation`, `executionVenueSelection`, `makerTakerOptimization`, `crossVenueOBImbalance`
 - **`lib/confluence-detector.ts`** — `detectConfluence`, `analyzeTimeframeSignals`, `detectBbSqueeze`, `scanMeanReversion`, `computeVolTermStructure`, `classifyVolRegime`
 - **`lib/grid-trading.ts`** — `computeDcaSchedule`, `optimizeGridParams`, `analyzeBasisTrade`, `classifyVolRegime`
 - **`lib/volume-profile.ts`** — `computeVolumeProfile`, `detectCorrelationRegime`
 - **`lib/datastore.ts`** — `MarketDataStore` (DuckDB columnar store for OHLCV data with SQL queries, Parquet I/O, incremental updates)
+- **`lib/analytics-store.ts`** — `AnalyticsStore` class (DuckDB-powered: rolling correlations, cross-sectional sorts, factor returns, covariance, rolling beta, risk reports, universe screening, pairwise correlations, regime stats)
 - **`lib/backtester.ts`** — `Backtester` class (9 built-in strategies, walk-forward optimization)
 - **`lib/regime-detector.ts`** — `RegimeDetector` class (trend/range/volatile regime classification)
 - **`lib/signal-generator.ts`** — `SignalGenerator` class (multi-indicator signal scanning)
@@ -108,7 +121,7 @@ After every code change, run the following before considering the work done:
 
 Tests live in `connectors/*/mcp-server/tests/` using vitest.
 - **Cube**: `cd connectors/cube/mcp-server && npm test`
-- **CCXT**: `cd connectors/ccxt/mcp-server && npx vitest run` (672 tests)
+- **CCXT**: `cd connectors/ccxt/mcp-server && npx vitest run` (1,303 tests)
 
 ### Writing Tests
 
