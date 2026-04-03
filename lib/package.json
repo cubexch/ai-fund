@@ -31,6 +31,7 @@
     "./factor-model": "./factor-model.ts",
     "./funding": "./funding.ts",
     "./order-flow": "./order-flow.ts",
+    "./liquidation": "./liquidation.ts",
     "./microstructure": "./microstructure.ts",
     "./ingest/exchange": "./ingest/exchange.ts",
     "./ingest/yahoo": "./ingest/yahoo.ts",
