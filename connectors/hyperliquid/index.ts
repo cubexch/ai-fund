@@ -16,6 +16,7 @@ import type {
   Bar,
   PortfolioHistory,
 } from '../../lib/connector-interface.js';
+import { defineConnectorCapabilities } from '../../lib/connector-interface.js';
 import { loadCredentials, saveCredentials } from '../../lib/credential-store.js';
 import { HyperliquidAdapter } from './adapter.js';
 
@@ -36,10 +37,16 @@ export class HyperliquidConnector implements ExchangeConnector {
     name: 'hyperliquid',
     displayName: 'Hyperliquid',
     assetClasses: ['perps', 'crypto'],
+    status: 'beta',
     isPaper: true,
     supportsShorts: true,
     supportsOptions: false,
     marketHours: '24/7',
+    capabilities: defineConnectorCapabilities({
+      placeOrder: false,
+      cancelOrder: false,
+      cancelAllOrders: false,
+    }),
   };
 
   constructor(config: {
@@ -111,78 +118,23 @@ export class HyperliquidConnector implements ExchangeConnector {
   }
 
   async placeOrder(params: OrderParams): Promise<Order> {
-    // Testnet guard
-    if (!this.meta.isPaper) {
-      throw new Error(
-        'Live trading requires HYPERLIQUID_TESTNET=false explicitly set. ' +
-        'This is a safety guard to prevent accidental mainnet trades.',
-      );
-    }
-
-    // Get mid price for market orders
-    let limitPx = params.limitPrice ?? 0;
-    if (params.type === 'market' && !params.limitPrice) {
-      const mids = await this.adapter.getAllMids();
-      const mid = mids[params.symbol];
-      if (!mid) throw new Error(`No price found for ${params.symbol}`);
-      // Market orders use aggressive limit: 5% slippage tolerance
-      const midPrice = parseFloat(mid);
-      limitPx = params.side === 'buy'
-        ? midPrice * 1.05
-        : midPrice * 0.95;
-    }
-
-    const orderType = params.type === 'market'
-      ? { limit: { tif: 'Ioc' as const } }
-      : { limit: { tif: mapTimeInForce(params.timeInForce) } };
-
-    const result = await this.adapter.placeOrder({
-      coin: params.symbol,
-      isBuy: params.side === 'buy',
-      sz: params.qty,
-      limitPx,
-      orderType,
-    });
-
-    if (result.status === 'err') {
-      throw new Error(`Order failed: ${result.error ?? 'unknown error'}`);
-    }
-
-    const statuses = result.response?.data?.statuses ?? [];
-    const first = statuses[0];
-    const oid = first?.resting?.oid ?? first?.filled?.oid ?? 0;
-
-    return {
-      id: oid.toString(),
-      symbol: params.symbol,
-      side: params.side,
-      type: params.type,
-      qty: params.qty,
-      filledQty: first?.filled ? parseFloat(first.filled.totalSz) : 0,
-      limitPrice: params.limitPrice,
-      stopPrice: params.stopPrice,
-      status: first?.filled ? 'filled' : first?.resting ? 'open' : 'pending',
-      createdAt: Date.now(),
-    };
+    void params;
+    throw new Error(
+      'Hyperliquid order entry is disabled. The connector remains read-only beta until EIP-712 signing is implemented and verified.',
+    );
   }
 
   async cancelOrder(orderId: string): Promise<void> {
-    // Need the coin for the cancel — get from open orders
-    const orders = await this.adapter.getOpenOrders();
-    const order = orders.find(o => o.oid.toString() === orderId);
-    if (!order) throw new Error(`Order ${orderId} not found in open orders`);
-
-    const result = await this.adapter.cancelOrder(order.coin, order.oid);
-    if (result.status === 'err') {
-      throw new Error(`Cancel failed: ${result.error ?? 'unknown error'}`);
-    }
+    void orderId;
+    throw new Error(
+      'Hyperliquid order cancellation is disabled. The connector remains read-only beta until EIP-712 signing is implemented and verified.',
+    );
   }
 
   async cancelAllOrders(): Promise<void> {
-    const orders = await this.adapter.getOpenOrders();
-    for (const order of orders) {
-      await this.adapter.cancelOrder(order.coin, order.oid);
-    }
+    throw new Error(
+      'Hyperliquid order cancellation is disabled. The connector remains read-only beta until EIP-712 signing is implemented and verified.',
+    );
   }
 
   // ── Market Data ─────────────────────────────────────────

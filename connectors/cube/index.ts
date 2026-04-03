@@ -17,6 +17,7 @@ import type {
   Bar,
   PortfolioHistory,
 } from '../../lib/connector-interface.js';
+import { defineConnectorCapabilities } from '../../lib/connector-interface.js';
 import { IridiumClient } from './mcp-server/src/client/iridium.js';
 import { resolveAuth } from './mcp-server/src/client/auth.js';
 import { toLots, fromLots, SIDE_MAP, ORDER_TYPE_MAP, TIF_MAP } from './mcp-server/src/tools/orders.js';
@@ -61,10 +62,12 @@ export class CubeConnector implements ExchangeConnector {
       name: 'cube',
       displayName: 'Cube Exchange',
       assetClasses: ['crypto'],
+      status: 'ready',
       isPaper: isPaperMode,
       supportsShorts: false,
       supportsOptions: false,
       marketHours: '24/7',
+      capabilities: defineConnectorCapabilities(),
     };
   }
 

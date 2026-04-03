@@ -8,10 +8,16 @@
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
+    "test": "npm run test:unit",
+    "test:unit": "vitest run",
+    "test:integration": "vitest run --passWithNoTests \"tests/**/*.integration.test.ts\"",
+    "test:platform": "vitest run --passWithNoTests \"tests/**/*.platform.test.ts\"",
+    "test:live": "vitest run --passWithNoTests \"tests/**/*.live.test.ts\"",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "login": "tsx src/cli/login.ts",
     "logout": "tsx src/cli/logout.ts",
     "status": "tsx src/cli/status.ts",
-    "test": "vitest run"
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@ai-fund/lib": "*",

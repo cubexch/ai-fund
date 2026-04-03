@@ -19,11 +19,8 @@ jobs:
 
       - run: npm ci
 
-      - name: Typecheck
-        run: npm run typecheck
+      - name: Build Supported Workspaces
+        run: npm run build
 
-      - name: Run tests
-        run: npm test --workspace=connectors/cube/mcp-server
-
-      - name: Run skill evals
-        run: npm run test:evals
+      - name: Run Governed Checks
+        run: npm run check

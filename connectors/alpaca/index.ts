@@ -15,6 +15,7 @@ import type {
   Bar,
   PortfolioHistory,
 } from '../../lib/connector-interface.js';
+import { defineConnectorCapabilities } from '../../lib/connector-interface.js';
 import { loadCredentials, saveCredentials } from '../../lib/credential-store.js';
 import { AlpacaAdapter, AlpacaError } from './adapter.js';
 import type { AlpacaAccount, AlpacaOrder } from './types.js';
@@ -99,10 +100,12 @@ export class AlpacaConnector implements ExchangeConnector {
     name: 'alpaca',
     displayName: 'Alpaca',
     assetClasses: ['equities'],
+    status: 'ready',
     isPaper: true,
     supportsShorts: false,
     supportsOptions: false,
     marketHours: 'weekdays-only',
+    capabilities: defineConnectorCapabilities(),
   };
 
   constructor(config: {

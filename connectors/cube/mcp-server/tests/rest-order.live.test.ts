@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { IridiumClient } from '../src/client/iridium';
 
 /**
- * Integration test: REST order placement via Iridium client.
+ * Live test: REST order placement via Iridium client.
  * Tests the full flow: authenticate → convert lots → POST /os/v0/order.
  *
  * Requires a Cube API key with WRITE access (not on waitlist).

@@ -244,6 +244,8 @@ export function extractAllToolReferences(content: string): string[] {
 /** Known generic trading tools from the exchange API */
 export const KNOWN_TOOLS = [
   'place_order', 'cancel_order', 'modify_order', 'mass_cancel',
+  'cancel_all_orders',
+  'get_account', 'get_orders', 'get_quote', 'get_bars', 'get_portfolio_history',
   'get_tickers', 'get_markets', 'get_order_book', 'get_recent_trades',
   'get_positions', 'get_balances', 'get_portfolio_summary',
   'get_order_history', 'get_fills', 'get_subaccounts',

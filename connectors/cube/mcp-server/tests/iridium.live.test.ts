@@ -3,9 +3,9 @@ import { IridiumClient } from '../src/client/iridium';
 import type { Ticker, Market, Kline, ParsedOrderBook, ParsedRecentTrades } from '../src/client/iridium';
 
 /**
- * Integration tests for the Cube Exchange Iridium client.
- * These hit the REAL production API (public endpoints only).
- * No API key required for public endpoints.
+ * Live tests for the Cube Exchange Iridium client.
+ * These hit the real production API (public endpoints only).
+ * They are opt-in and do not run in the default unit/integration path.
  */
 
 let client: IridiumClient;

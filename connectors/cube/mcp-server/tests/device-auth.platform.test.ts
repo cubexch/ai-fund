@@ -34,6 +34,11 @@ function mockFetch(responses: Array<{ status: number; body: unknown }>): typeof 
   return fn;
 }
 
+function getRequestBody(fetchFn: ReturnType<typeof vi.fn>, callIndex = 0): Record<string, unknown> {
+  const init = fetchFn.mock.calls[callIndex]?.[1] as RequestInit | undefined;
+  return JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+}
+
 const MOCK_DEVICE_CODE_RESPONSE: DeviceCodeResponse = {
   deviceCode: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
   authorizeUrl: 'https://cube.exchange/agent/authorize?code=a1b2c3d4',
@@ -617,12 +622,12 @@ describe('deviceAuthFlow', () => {
 
     expect(fetchFn).toHaveBeenCalledTimes(2);
 
-    const codeCallBody = JSON.parse(fetchFn.mock.calls[0][1]?.body as string);
+    const codeCallBody = getRequestBody(fetchFn);
     expect(codeCallBody.callbackUrl).toContain('localhost');
     expect(codeCallBody.clientName).toBe('AI Fund');
     expect(codeCallBody.verificationKey).toBeTruthy();
 
-    const tokenCallBody = JSON.parse(fetchFn.mock.calls[1][1]?.body as string);
+    const tokenCallBody = getRequestBody(fetchFn, 1);
     expect(tokenCallBody.deviceCode).toBe(MOCK_DEVICE_CODE_RESPONSE.deviceCode);
     expect(tokenCallBody.callbackToken).toBe('test-callback-token');
 
@@ -634,7 +639,7 @@ describe('deviceAuthFlow', () => {
     const logs: string[] = [];
     const onPending = vi.fn();
 
-    const fetchFn = vi.fn(async (url: string) => {
+    const fetchFn = vi.fn(async (url: string, _init?: RequestInit) => {
       const urlStr = url.toString();
 
       if (urlStr.includes('/agent/device/code')) {
@@ -669,7 +674,7 @@ describe('deviceAuthFlow', () => {
     expect(result.verificationKeyId).toBe(MOCK_TOKEN_RESPONSE.verificationKeyId);
 
     // Verify no callbackUrl in device code request
-    const codeCallBody = JSON.parse(fetchFn.mock.calls[0][1]?.body as string);
+    const codeCallBody = getRequestBody(fetchFn);
     expect(codeCallBody.callbackUrl).toBeUndefined();
 
     // Verify URL was printed
@@ -682,7 +687,7 @@ describe('deviceAuthFlow', () => {
 
     // Token poll responses: pending, then approved
     let tokenCalls = 0;
-    const fetchFn = vi.fn(async (url: string) => {
+    const fetchFn = vi.fn(async (url: string, _init?: RequestInit) => {
       const urlStr = url.toString();
 
       if (urlStr.includes('/agent/device/code')) {
@@ -777,7 +782,7 @@ describe('deviceAuthFlow', () => {
     ]);
 
     let tokenCalls = 0;
-    const fetchFn = vi.fn(async (url: string) => {
+    const fetchFn = vi.fn(async (url: string, _init?: RequestInit) => {
       const urlStr = url.toString();
       if (urlStr.includes('/agent/device/code')) {
         return mockResponse(200, MOCK_HEADLESS_CODE_RESPONSE);
@@ -830,7 +835,7 @@ describe('deviceAuthFlow', () => {
   });
 
   it('propagates access_denied from polling', async () => {
-    const fetchFn = vi.fn(async (url: string) => {
+    const fetchFn = vi.fn(async (url: string, _init?: RequestInit) => {
       const urlStr = url.toString();
       if (urlStr.includes('/agent/device/code')) {
         return mockResponse(200, MOCK_HEADLESS_CODE_RESPONSE);
@@ -895,11 +900,11 @@ describe('deviceAuthFlow', () => {
     expect(result.verificationKeyId).toBe(MOCK_TOKEN_RESPONSE.verificationKeyId);
 
     // The verification key in the device code request should use the existing public key
-    const codeCallBody = JSON.parse(fetchFn.mock.calls[0][1]?.body as string);
+    const codeCallBody = getRequestBody(fetchFn);
     expect(codeCallBody.verificationKey).toBeTruthy();
     // Decode the base64 verification key and check it contains our public key bytes
     // Protobuf layout: outer(0x0a, len) -> V0(0x0a, len) -> PublicKey(0x12, 0x20, <32 bytes>)
-    const vkBytes = Buffer.from(codeCallBody.verificationKey, 'base64');
+    const vkBytes = Buffer.from(String(codeCallBody.verificationKey), 'base64');
     const pubKeyInVk = vkBytes.subarray(6, 38);
     expect(Buffer.from(existingKeyPair.publicKey).equals(pubKeyInVk)).toBe(true);
   });

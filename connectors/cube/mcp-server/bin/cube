@@ -1,0 +1,40 @@
+#!/usr/bin/env node
+import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const packageRoot = resolve(__dirname, '..');
+const sourceCli = resolve(packageRoot, 'src', 'cli', 'cube.ts');
+const requireFromPackage = createRequire(import.meta.url);
+
+let tsxCli;
+try {
+  tsxCli = resolve(dirname(requireFromPackage.resolve('tsx/package.json')), 'dist', 'cli.mjs');
+} catch {
+  process.stderr.write('cube: unable to locate the tsx runtime. Install package dependencies first.\\n');
+  process.exit(1);
+}
+
+if (!existsSync(tsxCli)) {
+  process.stderr.write('cube: unable to locate the tsx runtime. Install package dependencies first.\n');
+  process.exit(1);
+}
+
+if (!existsSync(sourceCli)) {
+  process.stderr.write('cube: unable to locate source CLI entrypoint. Reinstall the package.\n');
+  process.exit(1);
+}
+
+const result = spawnSync(process.execPath, [tsxCli, sourceCli, ...process.argv.slice(2)], {
+  stdio: 'inherit',
+  env: process.env,
+});
+
+if (result.error) {
+  throw result.error;
+}
+
+process.exit(result.status ?? 0);

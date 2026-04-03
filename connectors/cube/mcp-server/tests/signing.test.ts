@@ -15,6 +15,10 @@ import {
 import { readFile, unlink, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
+function toBufferSource(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+  return Uint8Array.from(bytes);
+}
+
 describe('Ed25519 Key Generation', () => {
   it('generates a keypair with 32-byte public key', async () => {
     const kp = await generateKeyPair();
@@ -42,8 +46,8 @@ describe('Ed25519 Signing', () => {
     expect(signature.length).toBe(64); // Ed25519 signatures are 64 bytes
 
     // Verify using Web Crypto
-    const pubKey = await crypto.subtle.importKey('raw', kp.publicKey, 'Ed25519', false, ['verify']);
-    const valid = await crypto.subtle.verify('Ed25519', pubKey, signature, message);
+    const pubKey = await crypto.subtle.importKey('raw', toBufferSource(kp.publicKey), 'Ed25519', false, ['verify']);
+    const valid = await crypto.subtle.verify('Ed25519', pubKey, toBufferSource(signature), toBufferSource(message));
     expect(valid).toBe(true);
   });
 
@@ -53,8 +57,8 @@ describe('Ed25519 Signing', () => {
     const signature = await signMessage(message, kp.privateKey);
 
     const tampered = new TextEncoder().encode('tampered');
-    const pubKey = await crypto.subtle.importKey('raw', kp.publicKey, 'Ed25519', false, ['verify']);
-    const valid = await crypto.subtle.verify('Ed25519', pubKey, signature, tampered);
+    const pubKey = await crypto.subtle.importKey('raw', toBufferSource(kp.publicKey), 'Ed25519', false, ['verify']);
+    const valid = await crypto.subtle.verify('Ed25519', pubKey, toBufferSource(signature), toBufferSource(tampered));
     expect(valid).toBe(false);
   });
 });

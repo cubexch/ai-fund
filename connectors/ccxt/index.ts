@@ -16,6 +16,7 @@ import type {
   Bar,
   PortfolioHistory,
 } from '../../lib/connector-interface.js';
+import { defineConnectorCapabilities } from '../../lib/connector-interface.js';
 import { loadCredentials, saveCredentials } from '../../lib/credential-store.js';
 
 // ── Credential Shape ────────────────────────────────────────
@@ -72,10 +73,12 @@ export class CcxtConnector implements ExchangeConnector {
       name: `ccxt-${exchangeName}`,
       displayName: `${capitalize(exchangeName)} (via CCXT)`,
       assetClasses: ['crypto'],
+      status: 'ready',
       isPaper: sandbox,
       supportsShorts: false,
       supportsOptions: false,
       marketHours: '24/7',
+      capabilities: defineConnectorCapabilities(),
     };
   }
 
@@ -83,7 +86,6 @@ export class CcxtConnector implements ExchangeConnector {
     if (this.exchange) return this.exchange;
 
     // Dynamic import — CCXT is an optional peer dependency
-    // @ts-expect-error ccxt may not be installed
     const ccxt = await import('ccxt');
     const ExchangeClass = (ccxt as any)[this.exchangeName];
     if (!ExchangeClass) {

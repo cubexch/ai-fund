@@ -16,6 +16,9 @@ import {
   list,
   getByAssetClass,
 } from '@ai-fund/lib/connector-registry';
+import {
+  defineConnectorCapabilities,
+} from '@ai-fund/lib/connector-interface';
 import type {
   Bar,
   Quote,
@@ -36,10 +39,12 @@ function makeMeta(name: string, overrides: Partial<ConnectorMeta> = {}): Connect
     name,
     displayName: name.toUpperCase(),
     assetClasses: ['crypto'],
+    status: 'ready',
     isPaper: true,
     supportsShorts: false,
     supportsOptions: false,
     marketHours: '24/7',
+    capabilities: defineConnectorCapabilities(),
     ...overrides,
   };
 }

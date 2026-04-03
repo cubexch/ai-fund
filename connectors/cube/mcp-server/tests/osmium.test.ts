@@ -195,7 +195,6 @@ describe('Protobuf Encoding — OrderResponse', () => {
         side: Side.BID,
         timeInForce: TimeInForce.GOOD_FOR_SESSION,
         orderType: OrderType.LIMIT,
-        cancelOnDisconnect: true,
       },
     };
 

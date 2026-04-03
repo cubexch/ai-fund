@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "description": "Shared libraries for ai-fund: indicators, math, backtesting, signals, regime detection",
   "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
   "exports": {
     "./indicators": "./indicators.ts",
     "./math": "./math.ts",
@@ -42,6 +46,9 @@
     "ingest/*.ts",
     "test-fixtures/*.ts"
   ],
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  },
   "engines": {
     "node": ">=20"
   },

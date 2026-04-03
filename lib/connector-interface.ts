@@ -78,14 +78,48 @@ export interface OrderParams {
 
 // ── Connector Metadata ──────────────────────────────────────
 
+export type ConnectorStatus = 'ready' | 'beta' | 'experimental';
+
+export interface ConnectorCapabilities {
+  account: boolean;
+  positions: boolean;
+  orders: boolean;
+  placeOrder: boolean;
+  cancelOrder: boolean;
+  cancelAllOrders: boolean;
+  quote: boolean;
+  bars: boolean;
+  portfolioHistory: boolean;
+}
+
+export const DEFAULT_CONNECTOR_CAPABILITIES: ConnectorCapabilities = {
+  account: true,
+  positions: true,
+  orders: true,
+  placeOrder: true,
+  cancelOrder: true,
+  cancelAllOrders: true,
+  quote: true,
+  bars: true,
+  portfolioHistory: true,
+};
+
+export function defineConnectorCapabilities(
+  overrides: Partial<ConnectorCapabilities> = {},
+): ConnectorCapabilities {
+  return { ...DEFAULT_CONNECTOR_CAPABILITIES, ...overrides };
+}
+
 export interface ConnectorMeta {
   name: string;
   displayName: string;
   assetClasses: ('crypto' | 'equities' | 'futures' | 'options' | 'perps')[];
+  status: ConnectorStatus;
   isPaper: boolean;
   supportsShorts: boolean;
   supportsOptions: boolean;
   marketHours: '24/7' | 'weekdays-only' | 'custom';
+  capabilities: ConnectorCapabilities;
 }
 
 // ── Connector Interface ─────────────────────────────────────

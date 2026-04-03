@@ -14,8 +14,22 @@ ai-fund connects to exchanges via typed connectors that implement `ExchangeConne
 | **[Binance](https://binance.com)** | Built-in (CCXT) | Ships with this repo | ✅ Ready — via `--exchange binance` |
 | **[Bybit](https://bybit.com)** | Built-in (CCXT) | Ships with this repo | ✅ Ready — via `--exchange bybit` |
 | **100+ more** | Built-in (CCXT) | Ships with this repo | ✅ Any CCXT-supported exchange |
-| **[Robinhood](https://robinhood.com)** | Built-in | Ships with this repo | 🗓 Roadmap — crypto only (official API), no stocks |
-| **[Hyperliquid](https://hyperliquid.xyz)** | Community MCP | [Options](https://github.com/search?q=hyperliquid+mcp) | 🔧 Community |
+| **[Robinhood](https://robinhood.com)** | Built-in | Ships with this repo | 🧪 Beta — crypto-focused connector, narrower coverage than Cube/Alpaca/CCXT |
+| **[Hyperliquid](https://hyperliquid.xyz)** | Built-in | Ships with this repo | 🧪 Beta — read-only until EIP-712 signing is implemented |
+| **Gateway** | Experimental | `connectors/gateway/index.ts` | ⚠️ Experimental — not part of default PR CI yet |
+
+## Capability Matrix
+
+Connectors now declare their governed status plus a capability matrix in `ConnectorMeta`. The gateway uses that matrix to avoid registering unsupported tools.
+
+| Connector | Status | Account | Positions | Orders | Quote | Bars | Portfolio History | Place/Cancel Orders | Notes |
+|-----------|--------|---------|-----------|--------|-------|------|-------------------|---------------------|-------|
+| Cube | `ready` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Full built-in MCP server plus normalized connector |
+| Alpaca | `ready` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Paper mode default, weekday market hours |
+| CCXT | `ready` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Exchange-specific behavior normalized behind one adapter |
+| Robinhood | `beta` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Narrower surface and test coverage than the ready connectors |
+| Hyperliquid | `beta` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | Read-only beta until signing is implemented and verified |
+| Gateway | `experimental` | Varies | Varies | Varies | Varies | Varies | Varies | Varies | Capability-driven surface over loaded connectors |
 
 ## Architecture
 
@@ -28,7 +42,7 @@ Agent (skill)
       → Exchange REST API (direct HTTP calls)
 ```
 
-No MCP-to-MCP indirection. No leaked tool surfaces. Each connector is a thin REST wrapper.
+No MCP-to-MCP indirection. No leaked tool surfaces. Each connector is a thin REST wrapper. Connector metadata also carries a governed `status` plus per-method `capabilities`, so tooling can distinguish ready adapters from beta or experimental surfaces.
 
 ## Credentials
 
@@ -63,7 +77,7 @@ Run `/setup` → select Alpaca → enter paper API keys. See `connectors/alpaca/
 
 ### Hyperliquid (on-chain perps)
 
-Run `/setup` → select Hyperliquid → enter wallet address and private key. See `connectors/hyperliquid/README.md`.
+Run `/setup` → select Hyperliquid → enter wallet address and private key. The current repo exposes Hyperliquid as read-only beta until EIP-712 signing lands. See `connectors/hyperliquid/README.md`.
 
 ### Any CCXT Exchange (Binance, Bybit, 100+ more)
 
@@ -145,7 +159,7 @@ With multiple exchanges connected, the desk unlocks powerful strategies:
 
 ## Unified Tool API
 
-All connectors implement the same interface:
+All connectors implement the same interface. Ready connectors expose the full set below; beta and experimental connectors may expose a capability-gated subset:
 
 | Method | Description |
 |---|---|

@@ -115,7 +115,7 @@ The two layers don't know about each other. Add an exchange, don't touch agent c
 ```bash
 git clone https://github.com/cubexch/ai-fund
 cd ai-fund
-npm install
+npm ci
 ```
 
 Open Claude Code and connect your exchanges:
@@ -464,9 +464,17 @@ Create a folder in `skills/` with a `SKILL.md` file. Use `skills/_template/SKILL
 
 ## Development
 
-**CI/CD**: GitHub Actions runs typecheck + vitest on every push and PR (`.github/workflows/test.yml`). PRs that fail CI will not be merged.
+**Package manager**: use `npm` workspaces only. The governed root commands assume `npm ci` and `npm run ...` from the repo root.
 
-**Testing**: 1,000+ tests across 3 connectors. Cube: `cd connectors/cube/mcp-server && npm test` (361 tests). CCXT: `cd connectors/ccxt/mcp-server && npx vitest run` (672 tests). Covers indicators, math, strategy, risk, execution, error paths, and integration flows.
+**CI/CD**: GitHub Actions runs `npm run build` and `npm run check` on every push and PR (`.github/workflows/test.yml`). The default PR path covers governed workspaces and hermetic suites only.
+
+**Canonical commands**:
+- `npm run build` builds the shared lib plus supported connector workspaces.
+- `npm run check` runs workspace typecheck, hermetic unit tests, hermetic integration tests, and evals.
+- `npm run test:unit` runs deterministic default suites.
+- `npm run test:integration` runs mocked or replay-backed connector integration suites.
+- `npm run test:platform` runs loopback/keychain/process-sensitive suites and is opt-in.
+- `npm run test:live` runs real exchange tests and is opt-in.
 
 **Auth**: Agents authenticate via Device Authorization (RFC 8628) — no API keys needed. See [`docs/agent-auth-brief.md`](docs/agent-auth-brief.md).
 

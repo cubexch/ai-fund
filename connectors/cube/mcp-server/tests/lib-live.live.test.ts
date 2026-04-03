@@ -1,8 +1,8 @@
 /**
- * Integration test: run lib/indicators, lib/math, and lib/valuation
+ * Live test: run lib/indicators, lib/math, and lib/valuation
  * against live Cube Exchange market data (public endpoints, no auth).
  *
- * Run with: npx vitest run tests/lib-live.integration.test.ts
+ * Run with: npm run test:live -- tests/lib-live.live.test.ts
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import type { OHLCV } from '@ai-fund/lib/indicators';

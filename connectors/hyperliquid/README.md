@@ -1,5 +1,9 @@
 # Hyperliquid Connector
 
+Status: `beta`
+
+This repo currently treats Hyperliquid as a read-only connector. Market/account reads work. Order placement and cancellation stay disabled until real EIP-712 signing is implemented and verified.
+
 On-chain perpetual futures with non-custodial wallet auth. Direct REST wrapper — no SDK, no MCP dependencies.
 
 ## What's Supported
@@ -8,10 +12,11 @@ On-chain perpetual futures with non-custodial wallet auth. Direct REST wrapper �
 |---|---|
 | Perpetual futures | ✅ |
 | Spot | ✅ |
-| Leverage | ✅ (cross and isolated) |
+| Leverage inspection | ✅ |
 | Short selling | ✅ |
 | Testnet | ✅ Default |
 | Funding rates | ✅ |
+| Order placement/cancellation | ❌ Disabled in this repo |
 | Options | ❌ |
 
 ## Setup
@@ -25,13 +30,13 @@ Credentials are stored in your system keychain (macOS) or `~/.ai-fund/hyperliqui
 
 ## Security
 
-Your private key is used **locally** to sign transactions via EIP-712. It is never sent to any server. Hyperliquid is non-custodial — you maintain full control of your funds.
+Your private key remains local to your machine. The current connector does **not** enable write operations, so no exchange-signed order flow is performed yet. Once EIP-712 support is implemented, signing will continue to happen locally only.
 
 ## Testnet vs Mainnet
 
 Testnet is **on by default**. Uses `https://api.hyperliquid-testnet.xyz`.
 
-To trade on mainnet, you must explicitly configure live mode during `/setup`. The connector blocks mainnet orders by default.
+To trade on mainnet, you must explicitly configure live mode during `/setup`. The current repo still blocks order entry entirely until signing support is completed.
 
 To get testnet funds: visit the [faucet](https://app.hyperliquid-testnet.xyz/drip) (requires a prior mainnet deposit with the same address for 1,000 mock USDC).
 
@@ -53,7 +58,8 @@ Perpetual futures use leverage. Higher leverage means higher liquidation risk. T
 
 ## Not Supported (Yet)
 
-- Full EIP-712 order signing (read operations work, write operations pending crypto lib integration)
+- Full EIP-712 order signing
+- Order placement and cancellation through this repo
 - WebSocket streaming
 - Vault trading
 - TWAP orders

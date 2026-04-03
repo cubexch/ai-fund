@@ -32,7 +32,8 @@ let client: ExchangeClient;
 // ── Helpers ──────────────────────────────────────────────────
 
 function patchCcxtFetch(c: ExchangeClient) {
-  (c as any).exchange.fetchImplementation = (...args: any[]) => globalThis.fetch(...args);
+  (c as any).exchange.fetchImplementation = (input: RequestInfo | URL, init?: RequestInit) =>
+    globalThis.fetch(input, init);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1304,10 +1305,10 @@ describe('latency tracking', () => {
     const stats = c.latency.allStats();
     expect(Object.keys(stats).length).toBeGreaterThan(0);
 
-    const fetchTickerStats = stats['fetchTicker'];
+    const fetchTickerStats = stats.find(stat => stat.method === 'fetchTicker');
     if (fetchTickerStats) {
       expect(fetchTickerStats.count).toBeGreaterThanOrEqual(2);
-      expect(fetchTickerStats.avg).toBeGreaterThanOrEqual(0);
+      expect(fetchTickerStats.avgMs).toBeGreaterThanOrEqual(0);
     }
     replay12.stop();
   }, 15000);

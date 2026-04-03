@@ -4,12 +4,28 @@
   "description": "Cube Exchange connector for AI Hedge Fund — 200μs matching engine",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "cube": "bin/cube"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "src/",
+    "package.json",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
+    "cube": "tsx src/cli/cube.ts",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "test": "vitest run",
+    "test": "npm run test:unit",
+    "test:unit": "vitest run --config vitest.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:platform": "vitest run --config vitest.platform.config.ts",
+    "test:live": "vitest run --config vitest.live.config.ts",
     "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "login": "tsx src/cli/device-login.ts",
     "status": "tsx src/cli/status.ts",
     "logout": "tsx src/cli/logout.ts"
@@ -18,12 +34,12 @@
     "@ai-fund/lib": "*",
     "@cubexch/client": "^1.15.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "tsx": "^4.19.0",
     "open": "^10.0.0",
     "ws": "^8.20.0"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",
-    "tsx": "^4.19.0",
     "typescript": "^5.5.0",
     "vitest": "^4.1.2"
   }
