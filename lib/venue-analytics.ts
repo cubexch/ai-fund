@@ -1,13 +1,20 @@
 /**
  * Cross-venue analytics and smart order routing.
- * Triangular arb, spread analysis, venue scoring, fragmentation,
- * latency cost modeling, and order book aggregation.
- * Pure functions only — no async, no exchange clients, no MCP.
+ * Pure functions for multi-exchange comparison, arbitrage detection,
+ * and execution venue selection.
  */
 
 import { mean, standardDeviation, correlation } from './math.js';
 
 // ── Types ────────────────────────────────────────────────
+
+export interface TriangularArbInput {
+  pair: string;
+  bid: number;
+  ask: number;
+  venue: string;
+  fee: number;
+}
 
 export interface ArbLeg {
   pair: string;
@@ -30,12 +37,12 @@ export interface TriangularArbResult {
   scanned: number;
 }
 
-export interface VenueSpreadEntry {
+export interface VenueQuote {
   venue: string;
-  midPrice: number;
-  spread: number;
-  spreadBps: number;
-  effectiveSpread: number;
+  bid: number;
+  ask: number;
+  volume24h: number;
+  fee: number;
 }
 
 export interface CrossVenueSpreadResult {
@@ -45,10 +52,28 @@ export interface CrossVenueSpreadResult {
   crossSpreadPct: number;
   arbOpportunity: boolean;
   netArbProfit: number;
-  venues: VenueSpreadEntry[];
+  venues: Array<{
+    venue: string;
+    midPrice: number;
+    spread: number;
+    spreadBps: number;
+    effectiveSpread: number;
+  }>;
 }
 
-export interface RouteFill {
+export interface SmartOrderRouteParams {
+  side: 'buy' | 'sell';
+  totalQuantity: number;
+  venues: Array<{
+    venue: string;
+    price: number;
+    availableQty: number;
+    fee: number;
+    latencyMs: number;
+  }>;
+}
+
+export interface SmartOrderRouteFill {
   venue: string;
   quantity: number;
   price: number;
@@ -57,7 +82,7 @@ export interface RouteFill {
 }
 
 export interface SmartOrderRouteResult {
-  fills: RouteFill[];
+  fills: SmartOrderRouteFill[];
   totalCost: number;
   avgPrice: number;
   totalFees: number;
@@ -65,12 +90,28 @@ export interface SmartOrderRouteResult {
   savings: number;
 }
 
-export interface VenueScore {
+export interface VenueQualityMetrics {
+  venue: string;
+  uptime: number;
+  latencyMs: number;
+  spreadBps: number;
+  fillRate: number;
+  slippageBps: number;
+  volume24h: number;
+}
+
+export interface VenueQualityResult {
   venue: string;
   score: number;
   rank: number;
   strengths: string[];
   weaknesses: string[];
+}
+
+export interface FragmentationInput {
+  venue: string;
+  volume24h: number;
+  openInterest?: number;
 }
 
 export interface FragmentationResult {
@@ -81,6 +122,13 @@ export interface FragmentationResult {
   shares: Array<{ venue: string; sharePct: number }>;
 }
 
+export interface LatencyCostParams {
+  latencyMs: number;
+  volatility: number;
+  orderSize: number;
+  avgVolume: number;
+}
+
 export interface LatencyCostResult {
   latencyCostBps: number;
   annualizedCost: number;
@@ -88,20 +136,32 @@ export interface LatencyCostResult {
   costCurve: Array<{ latencyMs: number; costBps: number }>;
 }
 
-export interface LeadLagEntry {
-  leader: string;
-  follower: string;
-  lagMs: number;
-  correlation: number;
-}
-
 export interface VenueCorrelationResult {
   correlations: Record<string, Record<string, number>>;
-  leadLag: LeadLagEntry[];
+  leadLag: Array<{
+    leader: string;
+    follower: string;
+    lagMs: number;
+    correlation: number;
+  }>;
   priceDiscoveryLeader: string;
 }
 
-export interface VenueSelectionResult {
+export interface ExecutionVenueSelectionParams {
+  side: 'buy' | 'sell';
+  size: number;
+  urgency: 'low' | 'medium' | 'high';
+  venues: Array<{
+    venue: string;
+    spread: number;
+    depth: number;
+    fee: number;
+    latencyMs: number;
+    fillRate: number;
+  }>;
+}
+
+export interface ExecutionVenueSelectionResult {
   primary: string;
   secondary: string | null;
   reasoning: string;
@@ -110,301 +170,405 @@ export interface VenueSelectionResult {
   splitRecommendation: boolean;
 }
 
+export interface MakerTakerParams {
+  venues: Array<{
+    venue: string;
+    makerFee: number;
+    takerFee: number;
+    makerRebate?: number;
+    volumeTier?: number;
+  }>;
+  monthlyVolume: number;
+  makerRatio: number;
+}
+
 export interface MakerTakerResult {
   optimalVenue: string;
   monthlySavings: number;
   effectiveFee: number;
-  venueAnalysis: Array<{ venue: string; effectiveFee: number; monthlyCost: number }>;
+  venueAnalysis: Array<{
+    venue: string;
+    effectiveFee: number;
+    monthlyCost: number;
+  }>;
 }
 
-export interface VenueImbalance {
+export interface OrderbookLevel {
+  price: number;
+  qty: number;
+}
+
+export interface OrderbookInput {
   venue: string;
-  imbalance: number;
-  bidDepth: number;
-  askDepth: number;
+  bids: OrderbookLevel[];
+  asks: OrderbookLevel[];
 }
 
-export interface CrossVenueOBResult {
+export interface CrossVenueOBImbalanceResult {
   aggregateImbalance: number;
-  venueImbalances: VenueImbalance[];
+  venueImbalances: Array<{
+    venue: string;
+    imbalance: number;
+    bidDepth: number;
+    askDepth: number;
+  }>;
   pressure: 'buy' | 'sell' | 'neutral';
   divergence: boolean;
 }
 
-// ── Public Functions ─────────────────────────────────────
+// ── Triangular Arbitrage ─────────────────────────────────
 
 /**
- * Detect triangular arbitrage opportunities across currency pairs.
+ * Detect triangular arbitrage opportunities across venue price quotes.
+ * Scans all 3-pair cycles (A/B -> B/C -> C/A) for profitable round-trips.
  */
-export function triangularArb(
-  prices: Array<{ pair: string; bid: number; ask: number; venue: string; fee: number }>
-): TriangularArbResult {
-  if (prices.length < 3) return { opportunities: [], scanned: 0 };
-
-  // Extract unique currencies
-  const currencies = new Set<string>();
+export function triangularArb(prices: TriangularArbInput[]): TriangularArbResult {
+  const pairMap = new Map<string, TriangularArbInput[]>();
   for (const p of prices) {
-    const [base, quote] = p.pair.split('/');
-    if (base) currencies.add(base);
-    if (quote) currencies.add(quote);
+    const existing = pairMap.get(p.pair) ?? [];
+    existing.push(p);
+    pairMap.set(p.pair, existing);
   }
 
-  // Build price lookup
-  const lookup = new Map<string, typeof prices[0]>();
-  for (const p of prices) {
-    lookup.set(p.pair, p);
-  }
-
-  const currList = [...currencies];
+  const pairs = [...pairMap.keys()];
   const opportunities: TriangularArbOpportunity[] = [];
   let scanned = 0;
 
-  // Try all 3-currency paths
-  for (let i = 0; i < currList.length; i++) {
-    for (let j = 0; j < currList.length; j++) {
-      if (j === i) continue;
-      for (let k = 0; k < currList.length; k++) {
-        if (k === i || k === j) continue;
+  // Extract base/quote from pair string (e.g. "BTC/USDT" -> ["BTC", "USDT"])
+  const splitPair = (pair: string): [string, string] | null => {
+    const parts = pair.split('/');
+    if (parts.length !== 2) return null;
+    return [parts[0], parts[1]];
+  };
+
+  // Build adjacency: currency -> list of pairs containing that currency
+  const currencyPairs = new Map<string, string[]>();
+  for (const pair of pairs) {
+    const parts = splitPair(pair);
+    if (!parts) continue;
+    for (const c of parts) {
+      const list = currencyPairs.get(c) ?? [];
+      list.push(pair);
+      currencyPairs.set(c, list);
+    }
+  }
+
+  // Find all 3-leg cycles
+  for (const startCurrency of currencyPairs.keys()) {
+    const firstPairs = currencyPairs.get(startCurrency) ?? [];
+    for (const p1 of firstPairs) {
+      const [b1, q1] = splitPair(p1)!;
+      const midCurrency = b1 === startCurrency ? q1 : b1;
+
+      const secondPairs = (currencyPairs.get(midCurrency) ?? []).filter(p => p !== p1);
+      for (const p2 of secondPairs) {
+        const [b2, q2] = splitPair(p2)!;
+        const endCurrency = b2 === midCurrency ? q2 : b2;
+        if (endCurrency === startCurrency || endCurrency === midCurrency) continue;
+
+        // Find closing pair
+        const closingPair = pairs.find(p => {
+          const parts = splitPair(p);
+          if (!parts) return false;
+          return (parts[0] === endCurrency && parts[1] === startCurrency) ||
+                 (parts[0] === startCurrency && parts[1] === endCurrency);
+        });
+        if (!closingPair) continue;
+
         scanned++;
 
-        const a = currList[i], b = currList[j], c = currList[k];
+        // Get best prices for each leg
+        const quotes1 = pairMap.get(p1) ?? [];
+        const quotes2 = pairMap.get(p2) ?? [];
+        const quotes3 = pairMap.get(closingPair) ?? [];
 
-        // Path: A → B → C → A
-        const ab = lookup.get(`${a}/${b}`) ?? lookup.get(`${b}/${a}`);
-        const bc = lookup.get(`${b}/${c}`) ?? lookup.get(`${c}/${b}`);
-        const ca = lookup.get(`${c}/${a}`) ?? lookup.get(`${a}/${c}`);
+        // Determine sides: we start with startCurrency and want to end with startCurrency
+        // Leg 1: startCurrency -> midCurrency
+        const leg1Side: 'buy' | 'sell' = b1 === midCurrency ? 'buy' : 'sell';
+        // Leg 2: midCurrency -> endCurrency
+        const leg2Side: 'buy' | 'sell' = b2 === endCurrency ? 'buy' : 'sell';
+        // Leg 3: endCurrency -> startCurrency
+        const [b3] = splitPair(closingPair)!;
+        const leg3Side: 'buy' | 'sell' = b3 === startCurrency ? 'buy' : 'sell';
 
-        if (!ab || !bc || !ca) continue;
+        // Best execution price for each leg
+        const bestLeg1 = leg1Side === 'buy'
+          ? quotes1.reduce((best, q) => q.ask < best.ask ? q : best, quotes1[0])
+          : quotes1.reduce((best, q) => q.bid > best.bid ? q : best, quotes1[0]);
+        const bestLeg2 = leg2Side === 'buy'
+          ? quotes2.reduce((best, q) => q.ask < best.ask ? q : best, quotes2[0])
+          : quotes2.reduce((best, q) => q.bid > best.bid ? q : best, quotes2[0]);
+        const bestLeg3 = leg3Side === 'buy'
+          ? quotes3.reduce((best, q) => q.ask < best.ask ? q : best, quotes3[0])
+          : quotes3.reduce((best, q) => q.bid > best.bid ? q : best, quotes3[0]);
 
-        // Calculate round-trip return
-        const capital = 10000;
+        // Calculate round-trip P&L starting with 1 unit of startCurrency
+        const capital = 1;
         let amount = capital;
-        const legs: ArbLeg[] = [];
 
-        // Leg 1: buy B with A
-        if (ab.pair === `${a}/${b}`) {
-          amount = amount / ab.ask;
-          legs.push({ pair: ab.pair, side: 'buy', price: ab.ask, venue: ab.venue });
-        } else {
-          amount = amount * ab.bid;
-          legs.push({ pair: ab.pair, side: 'sell', price: ab.bid, venue: ab.venue });
-        }
-        amount *= (1 - ab.fee);
+        // Leg 1
+        const price1 = leg1Side === 'buy' ? bestLeg1.ask : bestLeg1.bid;
+        amount = leg1Side === 'buy' ? amount / price1 : amount * price1;
+        amount *= (1 - bestLeg1.fee);
 
-        // Leg 2: buy C with B
-        if (bc.pair === `${b}/${c}`) {
-          amount = amount / bc.ask;
-          legs.push({ pair: bc.pair, side: 'buy', price: bc.ask, venue: bc.venue });
-        } else {
-          amount = amount * bc.bid;
-          legs.push({ pair: bc.pair, side: 'sell', price: bc.bid, venue: bc.venue });
-        }
-        amount *= (1 - bc.fee);
+        // Leg 2
+        const price2 = leg2Side === 'buy' ? bestLeg2.ask : bestLeg2.bid;
+        amount = leg2Side === 'buy' ? amount / price2 : amount * price2;
+        amount *= (1 - bestLeg2.fee);
 
-        // Leg 3: sell C for A
-        if (ca.pair === `${c}/${a}`) {
-          amount = amount * ca.bid;
-          legs.push({ pair: ca.pair, side: 'sell', price: ca.bid, venue: ca.venue });
-        } else {
-          amount = amount / ca.ask;
-          legs.push({ pair: ca.pair, side: 'buy', price: ca.ask, venue: ca.venue });
-        }
-        amount *= (1 - ca.fee);
+        // Leg 3
+        const price3 = leg3Side === 'buy' ? bestLeg3.ask : bestLeg3.bid;
+        amount = leg3Side === 'buy' ? amount / price3 : amount * price3;
+        amount *= (1 - bestLeg3.fee);
 
-        const grossProfit = amount - capital;
-        const netProfit = grossProfit; // fees already deducted
-        const profitPct = (netProfit / capital) * 100;
+        const grossAmount = capital;
+        const grossProfit = amount - grossAmount;
+        // Fees already deducted in the amount calculation
+        const netProfit = grossProfit;
 
         if (netProfit > 0) {
           opportunities.push({
-            path: [a, b, c, a],
-            grossProfit: amount - capital + capital * (ab.fee + bc.fee + ca.fee),
+            path: [startCurrency, midCurrency, endCurrency, startCurrency],
+            grossProfit: amount - capital, // before fees would be higher, but we computed net inline
             netProfit,
-            profitPct,
+            profitPct: (netProfit / capital) * 100,
             requiredCapital: capital,
-            legs,
+            legs: [
+              { pair: p1, side: leg1Side, price: price1, venue: bestLeg1.venue },
+              { pair: p2, side: leg2Side, price: price2, venue: bestLeg2.venue },
+              { pair: closingPair, side: leg3Side, price: price3, venue: bestLeg3.venue },
+            ],
           });
         }
       }
     }
   }
 
+  // Sort by profit descending
   opportunities.sort((a, b) => b.netProfit - a.netProfit);
+
   return { opportunities, scanned };
 }
 
+// ── Cross-Venue Spread ───────────────────────────────────
+
 /**
- * Analyze spread differences across venues for the same asset.
+ * Analyze bid/ask spreads across venues to find the best execution
+ * and detect cross-venue arbitrage.
  */
-export function crossVenueSpread(
-  venues: Array<{ venue: string; bid: number; ask: number; volume24h: number; fee: number }>
-): CrossVenueSpreadResult {
+export function crossVenueSpread(venues: VenueQuote[]): CrossVenueSpreadResult {
   if (venues.length === 0) {
     return {
-      bestBid: { venue: '', price: 0 }, bestAsk: { venue: '', price: 0 },
-      crossSpread: 0, crossSpreadPct: 0, arbOpportunity: false, netArbProfit: 0, venues: [],
+      bestBid: { venue: '', price: 0 },
+      bestAsk: { venue: '', price: 0 },
+      crossSpread: 0,
+      crossSpreadPct: 0,
+      arbOpportunity: false,
+      netArbProfit: 0,
+      venues: [],
     };
   }
 
-  let bestBid = { venue: venues[0].venue, price: venues[0].bid };
-  let bestAsk = { venue: venues[0].venue, price: venues[0].ask };
-
-  const venueEntries: VenueSpreadEntry[] = [];
-
+  // Find best bid (highest) and best ask (lowest)
+  let bestBid = venues[0];
+  let bestAsk = venues[0];
   for (const v of venues) {
-    if (v.bid > bestBid.price) bestBid = { venue: v.venue, price: v.bid };
-    if (v.ask < bestAsk.price) bestAsk = { venue: v.venue, price: v.ask };
+    if (v.bid > bestBid.bid) bestBid = v;
+    if (v.ask < bestAsk.ask) bestAsk = v;
+  }
 
+  const crossSpread = bestBid.bid - bestAsk.ask;
+  const midRef = (bestBid.bid + bestAsk.ask) / 2;
+  const crossSpreadPct = midRef === 0 ? 0 : (crossSpread / midRef) * 100;
+
+  // Net arb profit accounts for fees on both sides
+  const netArbProfit = crossSpread > 0
+    ? crossSpread - (bestAsk.ask * bestAsk.fee) - (bestBid.bid * bestBid.fee)
+    : 0;
+  const arbOpportunity = netArbProfit > 0;
+
+  const venueDetails = venues.map(v => {
     const mid = (v.bid + v.ask) / 2;
     const spread = v.ask - v.bid;
-    venueEntries.push({
+    const spreadBps = mid === 0 ? 0 : (spread / mid) * 10000;
+    const effectiveSpread = spread + mid * v.fee * 2;
+    return {
       venue: v.venue,
       midPrice: mid,
       spread,
-      spreadBps: mid === 0 ? 0 : (spread / mid) * 10000,
-      effectiveSpread: spread + mid * v.fee * 2,
-    });
-  }
+      spreadBps,
+      effectiveSpread,
+    };
+  });
 
-  const crossSpread = bestBid.price - bestAsk.price;
-  const mid = (bestBid.price + bestAsk.price) / 2;
-  const crossSpreadPct = mid === 0 ? 0 : (crossSpread / mid) * 100;
-
-  // Check if arb exists after fees
-  const bidVenue = venues.find(v => v.venue === bestBid.venue)!;
-  const askVenue = venues.find(v => v.venue === bestAsk.venue)!;
-  const fees = bestBid.price * bidVenue.fee + bestAsk.price * askVenue.fee;
-  const netArbProfit = crossSpread - fees;
-  const arbOpportunity = netArbProfit > 0;
-
-  return { bestBid, bestAsk, crossSpread, crossSpreadPct, arbOpportunity, netArbProfit, venues: venueEntries };
+  return {
+    bestBid: { venue: bestBid.venue, price: bestBid.bid },
+    bestAsk: { venue: bestAsk.venue, price: bestAsk.ask },
+    crossSpread,
+    crossSpreadPct,
+    arbOpportunity,
+    netArbProfit: Math.max(0, netArbProfit),
+    venues: venueDetails,
+  };
 }
 
+// ── Smart Order Routing ──────────────────────────────────
+
 /**
- * Optimal order split across venues minimizing total execution cost.
+ * Route an order across multiple venues to minimize execution cost.
+ * Greedily fills at the best available price, accounting for fees and latency.
  */
-export function smartOrderRoute(params: {
-  side: 'buy' | 'sell';
-  totalQuantity: number;
-  venues: Array<{ venue: string; price: number; availableQty: number; fee: number; latencyMs: number }>;
-}): SmartOrderRouteResult {
-  const { side, totalQuantity } = params;
-  if (totalQuantity <= 0 || params.venues.length === 0) {
+export function smartOrderRoute(params: SmartOrderRouteParams): SmartOrderRouteResult {
+  const { side, totalQuantity, venues } = params;
+
+  if (venues.length === 0 || totalQuantity <= 0) {
     return { fills: [], totalCost: 0, avgPrice: 0, totalFees: 0, venueCount: 0, savings: 0 };
   }
 
-  // Sort venues by effective price (price + fee for buy, price - fee for sell)
-  const sorted = [...params.venues].sort((a, b) => {
-    const effA = side === 'buy' ? a.price * (1 + a.fee) : a.price * (1 - a.fee);
-    const effB = side === 'buy' ? b.price * (1 + b.fee) : b.price * (1 - b.fee);
-    return side === 'buy' ? effA - effB : effB - effA;
-  });
+  // Sort venues by effective price (price + fee adjustment)
+  // For buys: lowest effective price first; for sells: highest effective price first
+  const sorted = [...venues].map(v => ({
+    ...v,
+    effectivePrice: side === 'buy'
+      ? v.price * (1 + v.fee)
+      : v.price * (1 - v.fee),
+  })).sort((a, b) =>
+    side === 'buy'
+      ? a.effectivePrice - b.effectivePrice
+      : b.effectivePrice - a.effectivePrice
+  );
 
-  const fills: RouteFill[] = [];
+  const fills: SmartOrderRouteFill[] = [];
   let remaining = totalQuantity;
-  let totalCost = 0;
-  let totalFees = 0;
 
   for (const v of sorted) {
     if (remaining <= 0) break;
-    const qty = Math.min(remaining, v.availableQty);
-    if (qty <= 0) continue;
+    const fillQty = Math.min(remaining, v.availableQty);
+    if (fillQty <= 0) continue;
 
-    const fee = qty * v.price * v.fee;
-    const cost = qty * v.price + (side === 'buy' ? fee : -fee);
+    const fee = fillQty * v.price * v.fee;
+    const cost = fillQty * v.price + (side === 'buy' ? fee : -fee);
 
-    fills.push({ venue: v.venue, quantity: qty, price: v.price, fee, cost });
-    totalCost += cost;
-    totalFees += fee;
-    remaining -= qty;
+    fills.push({
+      venue: v.venue,
+      quantity: fillQty,
+      price: v.price,
+      fee,
+      cost,
+    });
+
+    remaining -= fillQty;
   }
 
-  const filledQty = totalQuantity - remaining;
-  const avgPrice = filledQty === 0 ? 0 : totalCost / filledQty;
+  const totalCost = fills.reduce((s, f) => s + f.cost, 0);
+  const totalQtyFilled = fills.reduce((s, f) => s + f.quantity, 0);
+  const avgPrice = totalQtyFilled === 0 ? 0 : totalCost / totalQtyFilled;
+  const totalFees = fills.reduce((s, f) => s + f.fee, 0);
 
-  // Savings vs worst venue
-  const worstPrice = side === 'buy'
-    ? Math.max(...params.venues.map(v => v.price * (1 + v.fee)))
-    : Math.min(...params.venues.map(v => v.price * (1 - v.fee)));
-  const worstCost = filledQty * worstPrice;
+  // Savings vs worst single venue
+  const worstVenue = side === 'buy'
+    ? sorted[sorted.length - 1]
+    : sorted[sorted.length - 1];
+  const worstCost = worstVenue
+    ? totalQtyFilled * worstVenue.effectivePrice
+    : totalCost;
   const savings = Math.abs(worstCost - totalCost);
 
-  return { fills, totalCost, avgPrice, totalFees, venueCount: fills.length, savings };
+  return {
+    fills,
+    totalCost,
+    avgPrice,
+    totalFees,
+    venueCount: fills.length,
+    savings,
+  };
 }
 
+// ── Venue Quality Score ──────────────────────────────────
+
 /**
- * Composite quality score per venue.
+ * Score and rank venues based on multiple quality dimensions.
+ * Weights: uptime 20%, latency 20%, spread 20%, fill rate 20%, slippage 10%, volume 10%.
  */
 export function venueQualityScore(
-  metrics: Array<{ venue: string; uptime: number; latencyMs: number; spreadBps: number; fillRate: number; slippageBps: number; volume24h: number }>
-): VenueScore[] {
+  metrics: VenueQualityMetrics[]
+): VenueQualityResult[] {
   if (metrics.length === 0) return [];
 
-  const maxVol = Math.max(...metrics.map(m => m.volume24h));
-  const maxLatency = Math.max(...metrics.map(m => m.latencyMs));
-  const maxSpread = Math.max(...metrics.map(m => m.spreadBps));
-  const maxSlippage = Math.max(...metrics.map(m => m.slippageBps));
+  // Normalize each dimension to 0-1 (higher is better)
+  const maxLatency = Math.max(...metrics.map(m => m.latencyMs), 1);
+  const maxSpread = Math.max(...metrics.map(m => m.spreadBps), 1);
+  const maxSlippage = Math.max(...metrics.map(m => m.slippageBps), 1);
+  const maxVolume = Math.max(...metrics.map(m => m.volume24h), 1);
 
   const scored = metrics.map(m => {
-    let score = 0;
+    const uptimeScore = m.uptime; // already 0-1
+    const latencyScore = 1 - m.latencyMs / maxLatency;
+    const spreadScore = 1 - m.spreadBps / maxSpread;
+    const fillScore = m.fillRate; // already 0-1
+    const slippageScore = 1 - m.slippageBps / maxSlippage;
+    const volumeScore = m.volume24h / maxVolume;
+
+    const score =
+      uptimeScore * 0.20 +
+      latencyScore * 0.20 +
+      spreadScore * 0.20 +
+      fillScore * 0.20 +
+      slippageScore * 0.10 +
+      volumeScore * 0.10;
+
     const strengths: string[] = [];
     const weaknesses: string[] = [];
 
-    // Uptime (0-1, weight 20)
-    score += m.uptime * 20;
-    if (m.uptime > 0.999) strengths.push('excellent uptime');
-    if (m.uptime < 0.99) weaknesses.push('reliability concerns');
+    if (uptimeScore >= 0.99) strengths.push('high uptime');
+    else if (uptimeScore < 0.95) weaknesses.push('low uptime');
 
-    // Latency (lower better, weight 20)
-    const latScore = maxLatency === 0 ? 20 : 20 * (1 - m.latencyMs / maxLatency);
-    score += latScore;
-    if (m.latencyMs < 10) strengths.push('low latency');
-    if (m.latencyMs > 200) weaknesses.push('high latency');
+    if (latencyScore >= 0.8) strengths.push('low latency');
+    else if (latencyScore < 0.3) weaknesses.push('high latency');
 
-    // Spread (lower better, weight 20)
-    const spScore = maxSpread === 0 ? 20 : 20 * (1 - m.spreadBps / maxSpread);
-    score += spScore;
-    if (m.spreadBps < 5) strengths.push('tight spreads');
-    if (m.spreadBps > 20) weaknesses.push('wide spreads');
+    if (spreadScore >= 0.8) strengths.push('tight spreads');
+    else if (spreadScore < 0.3) weaknesses.push('wide spreads');
 
-    // Fill rate (higher better, weight 20)
-    score += m.fillRate * 20;
-    if (m.fillRate > 0.95) strengths.push('high fill rate');
-    if (m.fillRate < 0.8) weaknesses.push('low fill rate');
+    if (fillScore >= 0.95) strengths.push('high fill rate');
+    else if (fillScore < 0.8) weaknesses.push('low fill rate');
 
-    // Slippage (lower better, weight 10)
-    const slScore = maxSlippage === 0 ? 10 : 10 * (1 - m.slippageBps / maxSlippage);
-    score += slScore;
+    if (slippageScore >= 0.8) strengths.push('low slippage');
+    else if (slippageScore < 0.3) weaknesses.push('high slippage');
 
-    // Volume (higher better, weight 10)
-    const volScore = maxVol === 0 ? 10 : 10 * (m.volume24h / maxVol);
-    score += volScore;
-    if (m.volume24h === maxVol) strengths.push('highest volume');
+    if (volumeScore >= 0.5) strengths.push('deep liquidity');
+    else if (volumeScore < 0.1) weaknesses.push('thin liquidity');
 
-    return { venue: m.venue, score, rank: 0, strengths, weaknesses };
+    return { venue: m.venue, score, strengths, weaknesses, rank: 0 };
   });
 
+  // Sort by score descending and assign ranks
   scored.sort((a, b) => b.score - a.score);
   scored.forEach((s, i) => { s.rank = i + 1; });
 
   return scored;
 }
 
+// ── Fragmentation Index ──────────────────────────────────
+
 /**
- * Market fragmentation metrics.
+ * Herfindahl-Hirschman Index and effective venue count for market fragmentation.
  */
-export function fragmentationIndex(
-  venues: Array<{ venue: string; volume24h: number; openInterest?: number }>
-): FragmentationResult {
+export function fragmentationIndex(venues: FragmentationInput[]): FragmentationResult {
   if (venues.length === 0) {
-    return { hhi: 0, effectiveVenues: 0, topVenueShare: 0, fragmentationLevel: 'consolidated', shares: [] };
+    return {
+      hhi: 0,
+      effectiveVenues: 0,
+      topVenueShare: 0,
+      fragmentationLevel: 'consolidated',
+      shares: [],
+    };
   }
 
-  const totalVol = venues.reduce((s, v) => s + v.volume24h, 0);
-  if (totalVol === 0) {
+  const totalVolume = venues.reduce((s, v) => s + v.volume24h, 0);
+  if (totalVolume === 0) {
     return {
-      hhi: 10000,
-      effectiveVenues: venues.length,
+      hhi: 0,
+      effectiveVenues: 0,
       topVenueShare: 0,
       fragmentationLevel: 'consolidated',
       shares: venues.map(v => ({ venue: v.venue, sharePct: 0 })),
@@ -412,183 +576,280 @@ export function fragmentationIndex(
   }
 
   const shares = venues
-    .map(v => ({ venue: v.venue, sharePct: (v.volume24h / totalVol) * 100 }))
+    .map(v => ({
+      venue: v.venue,
+      sharePct: (v.volume24h / totalVolume) * 100,
+    }))
     .sort((a, b) => b.sharePct - a.sharePct);
 
-  const hhi = shares.reduce((s, sh) => s + sh.sharePct ** 2, 0);
-  const effectiveVenues = hhi === 0 ? 0 : 10000 / hhi;
+  // HHI = sum of squared market shares (using percentages, so max is 10000)
+  const hhi = shares.reduce((s, v) => s + (v.sharePct) ** 2, 0);
+
+  // Effective number of venues (inverse HHI with decimal shares)
+  const decimalShares = shares.map(s => s.sharePct / 100);
+  const hhiDecimal = decimalShares.reduce((s, d) => s + d ** 2, 0);
+  const effectiveVenues = hhiDecimal === 0 ? 0 : 1 / hhiDecimal;
+
   const topVenueShare = shares[0].sharePct;
 
-  let fragmentationLevel: FragmentationResult['fragmentationLevel'];
-  if (hhi > 5000) fragmentationLevel = 'consolidated';
-  else if (hhi > 2500) fragmentationLevel = 'moderate';
-  else fragmentationLevel = 'fragmented';
+  let fragmentationLevel: 'consolidated' | 'moderate' | 'fragmented';
+  if (hhi > 2500) {
+    fragmentationLevel = 'consolidated';
+  } else if (hhi > 1500) {
+    fragmentationLevel = 'moderate';
+  } else {
+    fragmentationLevel = 'fragmented';
+  }
 
   return { hhi, effectiveVenues, topVenueShare, fragmentationLevel, shares };
 }
 
+// ── Latency Cost Model ───────────────────────────────────
+
 /**
- * Estimate cost of latency in basis points.
+ * Model the cost of latency in basis points using a square-root market impact model.
+ * Cost ~ volatility * sqrt(latency) * sqrt(orderSize / avgVolume).
  */
-export function latencyCostModel(params: {
-  latencyMs: number;
-  volatility: number;
-  orderSize: number;
-  avgVolume: number;
-}): LatencyCostResult {
+export function latencyCostModel(params: LatencyCostParams): LatencyCostResult {
   const { latencyMs, volatility, orderSize, avgVolume } = params;
 
-  // Cost = volatility * sqrt(latency in trading days) * participation rate
-  const tradingDayMs = 24 * 60 * 60 * 1000; // crypto = 24h
-  const latencyFraction = latencyMs / tradingDayMs;
-  const participation = avgVolume === 0 ? 0 : orderSize / avgVolume;
+  const participationRate = avgVolume === 0 ? 0 : orderSize / avgVolume;
+  const costFn = (lat: number): number => {
+    // Almgren-Chriss inspired: cost = sigma * sqrt(lat/1000) * sqrt(participation)
+    return volatility * Math.sqrt(lat / 1000) * Math.sqrt(participationRate) * 10000;
+  };
 
-  const latencyCostBps = volatility * Math.sqrt(latencyFraction) * 10000 * (1 + participation);
-  const annualizedCost = latencyCostBps * 252; // ~252 trading days
+  const latencyCostBps = costFn(latencyMs);
 
-  // Optimal latency: where marginal cost reduction = marginal infrastructure cost
-  // Simplified: 1ms is the floor
-  const optimalLatency = Math.max(1, latencyMs * 0.1);
+  // Annualized cost assuming continuous trading (252 trading days, 6.5h each)
+  const tradesPerDay = avgVolume === 0 ? 0 : avgVolume / orderSize;
+  const annualizedCost = latencyCostBps * tradesPerDay * 252 / 10000;
 
-  // Cost curve
+  // Optimal latency: where marginal cost of faster infra exceeds marginal savings
+  // Simple heuristic: latency where cost drops below 0.1 bps
+  let optimalLatency = 1;
+  for (let l = 1; l <= 1000; l++) {
+    if (costFn(l) <= 0.1) {
+      optimalLatency = l;
+      break;
+    }
+    optimalLatency = l;
+  }
+
+  // Cost curve at various latency points
   const costCurve: Array<{ latencyMs: number; costBps: number }> = [];
-  for (const ms of [1, 5, 10, 25, 50, 100, 250, 500, 1000]) {
-    const frac = ms / tradingDayMs;
-    const cost = volatility * Math.sqrt(frac) * 10000 * (1 + participation);
-    costCurve.push({ latencyMs: ms, costBps: cost });
+  const points = [1, 5, 10, 25, 50, 100, 250, 500, 1000];
+  for (const l of points) {
+    costCurve.push({ latencyMs: l, costBps: costFn(l) });
   }
 
   return { latencyCostBps, annualizedCost, optimalLatency, costCurve };
 }
 
+// ── Venue Correlation ────────────────────────────────────
+
 /**
- * Price correlation and lead-lag between venues.
+ * Compute price correlation between venues and detect lead-lag relationships.
+ * Uses cross-correlation at various lags to find price discovery leader.
  */
-export function venueCorrelation(
-  priceSeries: Record<string, number[]>
-): VenueCorrelationResult {
+export function venueCorrelation(priceSeries: Record<string, number[]>): VenueCorrelationResult {
   const venues = Object.keys(priceSeries);
-  if (venues.length < 2) {
-    return { correlations: {}, leadLag: [], priceDiscoveryLeader: venues[0] ?? '' };
-  }
-
   const correlations: Record<string, Record<string, number>> = {};
-  const leadLag: LeadLagEntry[] = [];
+  const leadLag: Array<{
+    leader: string;
+    follower: string;
+    lagMs: number;
+    correlation: number;
+  }> = [];
 
-  for (const a of venues) {
-    correlations[a] = {};
-    for (const b of venues) {
-      const corr = correlation(priceSeries[a], priceSeries[b]);
-      correlations[a][b] = corr;
-    }
-  }
-
-  // Lead-lag: compute cross-correlation at lag 1
-  let bestLeader = venues[0];
-  let bestLeadScore = 0;
-
-  for (let i = 0; i < venues.length; i++) {
-    for (let j = i + 1; j < venues.length; j++) {
-      const a = priceSeries[venues[i]];
-      const b = priceSeries[venues[j]];
-      const n = Math.min(a.length, b.length);
-      if (n < 3) continue;
-
-      // Cross-corr: a leads b (a[t] vs b[t+1])
-      const aLead = correlation(a.slice(0, n - 1), b.slice(1, n));
-      // Cross-corr: b leads a (b[t] vs a[t+1])
-      const bLead = correlation(b.slice(0, n - 1), a.slice(1, n));
-
-      if (Math.abs(aLead) > Math.abs(bLead)) {
-        leadLag.push({ leader: venues[i], follower: venues[j], lagMs: 1, correlation: aLead });
-        if (Math.abs(aLead) > bestLeadScore) {
-          bestLeadScore = Math.abs(aLead);
-          bestLeader = venues[i];
-        }
+  // Pairwise correlation
+  for (const v1 of venues) {
+    correlations[v1] = {};
+    for (const v2 of venues) {
+      if (v1 === v2) {
+        correlations[v1][v2] = 1;
       } else {
-        leadLag.push({ leader: venues[j], follower: venues[i], lagMs: 1, correlation: bLead });
-        if (Math.abs(bLead) > bestLeadScore) {
-          bestLeadScore = Math.abs(bLead);
-          bestLeader = venues[j];
-        }
+        correlations[v1][v2] = correlation(priceSeries[v1], priceSeries[v2]);
       }
     }
   }
 
-  return { correlations, leadLag, priceDiscoveryLeader: bestLeader };
-}
+  // Lead-lag detection via cross-correlation at shifted lags
+  for (let i = 0; i < venues.length; i++) {
+    for (let j = i + 1; j < venues.length; j++) {
+      const v1 = venues[i];
+      const v2 = venues[j];
+      const s1 = priceSeries[v1];
+      const s2 = priceSeries[v2];
+      const maxLag = Math.min(10, Math.floor(s1.length / 4));
 
-/**
- * Recommend best venue(s) given order characteristics.
- */
-export function executionVenueSelection(params: {
-  side: 'buy' | 'sell';
-  size: number;
-  urgency: 'low' | 'medium' | 'high';
-  venues: Array<{ venue: string; spread: number; depth: number; fee: number; latencyMs: number; fillRate: number }>;
-}): VenueSelectionResult {
-  const { side, size, urgency, venues } = params;
-  if (venues.length === 0) {
-    return { primary: '', secondary: null, reasoning: 'No venues available', expectedCost: 0, expectedSlippage: 0, splitRecommendation: false };
+      let bestCorr = -Infinity;
+      let bestLag = 0;
+      let leader = v1;
+      let follower = v2;
+
+      for (let lag = -maxLag; lag <= maxLag; lag++) {
+        let corr: number;
+        if (lag >= 0) {
+          corr = correlation(s1.slice(lag), s2.slice(0, s2.length - lag));
+        } else {
+          corr = correlation(s1.slice(0, s1.length + lag), s2.slice(-lag));
+        }
+        if (corr > bestCorr) {
+          bestCorr = corr;
+          bestLag = lag;
+          if (lag > 0) {
+            leader = v1;
+            follower = v2;
+          } else if (lag < 0) {
+            leader = v2;
+            follower = v1;
+          } else {
+            leader = v1;
+            follower = v2;
+          }
+        }
+      }
+
+      leadLag.push({
+        leader,
+        follower,
+        lagMs: Math.abs(bestLag),
+        correlation: bestCorr,
+      });
+    }
   }
 
-  // Score each venue based on urgency-weighted criteria
-  const weights = urgency === 'high'
-    ? { latency: 0.35, fillRate: 0.30, spread: 0.20, depth: 0.10, fee: 0.05 }
-    : urgency === 'medium'
-    ? { latency: 0.15, fillRate: 0.20, spread: 0.30, depth: 0.20, fee: 0.15 }
-    : { latency: 0.05, fillRate: 0.10, spread: 0.25, depth: 0.25, fee: 0.35 };
+  // Price discovery leader: venue that leads most often
+  const leadCount = new Map<string, number>();
+  for (const ll of leadLag) {
+    if (ll.lagMs > 0) {
+      leadCount.set(ll.leader, (leadCount.get(ll.leader) ?? 0) + 1);
+    }
+  }
 
-  const maxLat = Math.max(...venues.map(v => v.latencyMs), 1);
-  const maxSpread = Math.max(...venues.map(v => v.spread), 1);
-  const maxDepth = Math.max(...venues.map(v => v.depth), 1);
-  const maxFee = Math.max(...venues.map(v => v.fee), 0.001);
+  let priceDiscoveryLeader = venues[0] ?? '';
+  let maxLeads = 0;
+  for (const [venue, count] of leadCount) {
+    if (count > maxLeads) {
+      maxLeads = count;
+      priceDiscoveryLeader = venue;
+    }
+  }
+
+  return { correlations, leadLag, priceDiscoveryLeader };
+}
+
+// ── Execution Venue Selection ────────────────────────────
+
+/**
+ * Select optimal execution venue(s) based on order characteristics and venue quality.
+ * Considers urgency, size relative to depth, fees, and fill probability.
+ */
+export function executionVenueSelection(
+  params: ExecutionVenueSelectionParams
+): ExecutionVenueSelectionResult {
+  const { side, size, urgency, venues } = params;
+
+  if (venues.length === 0) {
+    return {
+      primary: '',
+      secondary: null,
+      reasoning: 'No venues available',
+      expectedCost: 0,
+      expectedSlippage: 0,
+      splitRecommendation: false,
+    };
+  }
+
+  // Urgency weights: high urgency prioritizes fill rate and latency; low urgency prioritizes cost
+  const weights = {
+    low: { spread: 0.35, fee: 0.30, depth: 0.15, fillRate: 0.10, latency: 0.10 },
+    medium: { spread: 0.25, fee: 0.20, depth: 0.20, fillRate: 0.20, latency: 0.15 },
+    high: { spread: 0.15, fee: 0.10, depth: 0.15, fillRate: 0.30, latency: 0.30 },
+  }[urgency];
+
+  // Normalize metrics
+  const maxSpread = Math.max(...venues.map(v => v.spread), 1e-10);
+  const maxFee = Math.max(...venues.map(v => v.fee), 1e-10);
+  const maxDepth = Math.max(...venues.map(v => v.depth), 1e-10);
+  const maxLatency = Math.max(...venues.map(v => v.latencyMs), 1);
 
   const scored = venues.map(v => {
+    const spreadScore = 1 - v.spread / maxSpread;
+    const feeScore = 1 - v.fee / maxFee;
+    const depthScore = v.depth / maxDepth;
+    const fillScore = v.fillRate;
+    const latencyScore = 1 - v.latencyMs / maxLatency;
+
     const score =
-      weights.latency * (1 - v.latencyMs / maxLat) +
-      weights.fillRate * v.fillRate +
-      weights.spread * (1 - v.spread / maxSpread) +
-      weights.depth * (v.depth / maxDepth) +
-      weights.fee * (1 - v.fee / maxFee);
+      spreadScore * weights.spread +
+      feeScore * weights.fee +
+      depthScore * weights.depth +
+      fillScore * weights.fillRate +
+      latencyScore * weights.latency;
+
     return { ...v, score };
   }).sort((a, b) => b.score - a.score);
 
   const primary = scored[0];
-  const splitRecommendation = size > primary.depth * 0.5 && scored.length > 1;
-  const secondary = splitRecommendation ? scored[1].venue : null;
+  const secondary = scored.length > 1 ? scored[1] : null;
 
-  const expectedSlippage = primary.depth === 0 ? 0 : (size / primary.depth) * primary.spread;
+  // Recommend splitting if order size exceeds 30% of primary venue depth
+  const splitRecommendation = size > primary.depth * 0.3 && secondary !== null;
+
+  const expectedSlippage = primary.depth === 0
+    ? 0
+    : (size / primary.depth) * primary.spread;
+
   const expectedCost = size * primary.spread + size * primary.fee + expectedSlippage;
 
-  const reasoning = splitRecommendation
-    ? `Split recommended: order size (${size}) exceeds 50% of ${primary.venue} depth (${primary.depth})`
-    : `${primary.venue} best for ${urgency} urgency: ${urgency === 'high' ? 'lowest latency' : urgency === 'low' ? 'lowest cost' : 'balanced execution'}`;
-
-  return { primary: primary.venue, secondary, reasoning, expectedCost, expectedSlippage, splitRecommendation };
-}
-
-/**
- * Optimize venue selection by fee structure.
- */
-export function makerTakerOptimization(params: {
-  venues: Array<{ venue: string; makerFee: number; takerFee: number; makerRebate?: number; volumeTier?: number }>;
-  monthlyVolume: number;
-  makerRatio: number;
-}): MakerTakerResult {
-  const { venues, monthlyVolume, makerRatio } = params;
-  if (venues.length === 0) {
-    return { optimalVenue: '', monthlySavings: 0, effectiveFee: 0, venueAnalysis: [] };
+  const reasons: string[] = [];
+  if (urgency === 'high') reasons.push('prioritizing fill speed');
+  if (urgency === 'low') reasons.push('prioritizing cost');
+  reasons.push(`${primary.venue} scores highest at ${primary.score.toFixed(3)}`);
+  if (splitRecommendation) {
+    reasons.push(`split recommended: order is ${((size / primary.depth) * 100).toFixed(0)}% of depth`);
   }
 
+  return {
+    primary: primary.venue,
+    secondary: secondary ? secondary.venue : null,
+    reasoning: reasons.join('; '),
+    expectedCost,
+    expectedSlippage,
+    splitRecommendation,
+  };
+}
+
+// ── Maker/Taker Fee Optimization ─────────────────────────
+
+/**
+ * Find the venue with the lowest effective fee given a maker/taker ratio
+ * and monthly volume.
+ */
+export function makerTakerOptimization(params: MakerTakerParams): MakerTakerResult {
+  const { venues, monthlyVolume, makerRatio } = params;
   const takerRatio = 1 - makerRatio;
 
+  if (venues.length === 0) {
+    return {
+      optimalVenue: '',
+      monthlySavings: 0,
+      effectiveFee: 0,
+      venueAnalysis: [],
+    };
+  }
+
   const analysis = venues.map(v => {
-    const makerCost = (v.makerFee - (v.makerRebate ?? 0)) * makerRatio;
-    const takerCost = v.takerFee * takerRatio;
-    const effectiveFee = makerCost + takerCost;
-    const monthlyCost = effectiveFee * monthlyVolume;
-    return { venue: v.venue, effectiveFee, monthlyCost };
+    const makerCost = v.makerFee - (v.makerRebate ?? 0);
+    const effectiveFee = makerCost * makerRatio + v.takerFee * takerRatio;
+    const monthlyCost = monthlyVolume * effectiveFee;
+    return {
+      venue: v.venue,
+      effectiveFee,
+      monthlyCost,
+    };
   }).sort((a, b) => a.effectiveFee - b.effectiveFee);
 
   const best = analysis[0];
@@ -602,43 +863,67 @@ export function makerTakerOptimization(params: {
   };
 }
 
+// ── Cross-Venue Order Book Imbalance ─────────────────────
+
 /**
  * Aggregate order book imbalance across venues.
+ * Positive imbalance = more bid depth (buy pressure).
+ * Detects divergence when venues disagree on direction.
  */
 export function crossVenueOBImbalance(
-  orderbooks: Array<{ venue: string; bids: Array<{ price: number; qty: number }>; asks: Array<{ price: number; qty: number }> }>,
-  depth?: number
-): CrossVenueOBResult {
+  orderbooks: OrderbookInput[],
+  depth: number = 10
+): CrossVenueOBImbalanceResult {
   if (orderbooks.length === 0) {
-    return { aggregateImbalance: 0, venueImbalances: [], pressure: 'neutral', divergence: false };
+    return {
+      aggregateImbalance: 0,
+      venueImbalances: [],
+      pressure: 'neutral',
+      divergence: false,
+    };
   }
 
-  const d = depth ?? 10;
-  let totalBid = 0;
-  let totalAsk = 0;
-  const venueImbalances: VenueImbalance[] = [];
-
-  for (const ob of orderbooks) {
-    const bidDepth = ob.bids.slice(0, d).reduce((s, b) => s + b.qty, 0);
-    const askDepth = ob.asks.slice(0, d).reduce((s, a) => s + a.qty, 0);
+  const venueImbalances = orderbooks.map(ob => {
+    const bids = ob.bids.slice(0, depth);
+    const asks = ob.asks.slice(0, depth);
+    const bidDepth = bids.reduce((s, l) => s + l.qty, 0);
+    const askDepth = asks.reduce((s, l) => s + l.qty, 0);
     const total = bidDepth + askDepth;
     const imbalance = total === 0 ? 0 : (bidDepth - askDepth) / total;
+    return {
+      venue: ob.venue,
+      imbalance,
+      bidDepth,
+      askDepth,
+    };
+  });
 
-    venueImbalances.push({ venue: ob.venue, imbalance, bidDepth, askDepth });
-    totalBid += bidDepth;
-    totalAsk += askDepth;
+  // Aggregate: volume-weighted imbalance
+  const totalDepth = venueImbalances.reduce((s, v) => s + v.bidDepth + v.askDepth, 0);
+  const aggregateImbalance = totalDepth === 0
+    ? 0
+    : venueImbalances.reduce((s, v) => {
+        const weight = (v.bidDepth + v.askDepth) / totalDepth;
+        return s + v.imbalance * weight;
+      }, 0);
+
+  // Pressure classification
+  let pressure: 'buy' | 'sell' | 'neutral';
+  if (aggregateImbalance > 0.1) {
+    pressure = 'buy';
+  } else if (aggregateImbalance < -0.1) {
+    pressure = 'sell';
+  } else {
+    pressure = 'neutral';
   }
 
-  const totalDepth = totalBid + totalAsk;
-  const aggregateImbalance = totalDepth === 0 ? 0 : (totalBid - totalAsk) / totalDepth;
-
-  const pressure: 'buy' | 'sell' | 'neutral' =
-    aggregateImbalance > 0.1 ? 'buy' :
-    aggregateImbalance < -0.1 ? 'sell' : 'neutral';
-
   // Divergence: venues disagree on direction
-  const signs = venueImbalances.map(v => Math.sign(v.imbalance));
-  const divergence = signs.some(s => s > 0) && signs.some(s => s < 0);
+  const signs = venueImbalances.map(v =>
+    v.imbalance > 0.1 ? 1 : v.imbalance < -0.1 ? -1 : 0
+  );
+  const hasPositive = signs.some(s => s > 0);
+  const hasNegative = signs.some(s => s < 0);
+  const divergence = hasPositive && hasNegative;
 
   return { aggregateImbalance, venueImbalances, pressure, divergence };
 }
