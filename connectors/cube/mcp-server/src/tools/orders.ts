@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { IridiumClient, Market } from '../client/iridium';
 import type { OsmiumClient } from '../client/osmium';
+import { toolError } from '@ai-fund/lib/tool-errors';
 
 /**
  * Convert a human-readable price/quantity to lot units using market tick sizes.
@@ -150,7 +151,7 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
                 }, null, 2),
               }],
             };
-          } catch (wsError: any) {
+          } catch {
             // WebSocket failed — fall through to REST
           }
         }
@@ -195,16 +196,8 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
             },
           ],
         };
-      } catch (error: any) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Order failed: ${error.message}`,
-            },
-          ],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error, 'Order failed');
       }
     }
   );
@@ -252,16 +245,8 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
             },
           ],
         };
-      } catch (error: any) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Cancel failed: ${error.message}`,
-            },
-          ],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error, 'Cancel failed');
       }
     }
   );
@@ -323,16 +308,8 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
             },
           ],
         };
-      } catch (error: any) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Modify failed: ${error.message}`,
-            },
-          ],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error, 'Modify failed');
       }
     }
   );
@@ -398,16 +375,8 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
             },
           ],
         };
-      } catch (error: any) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Mass cancel failed: ${error.message}`,
-            },
-          ],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error, 'Mass cancel failed');
       }
     }
   );
@@ -456,14 +425,8 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
             }, null, 2),
           }],
         };
-      } catch (error: any) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Get orders failed: ${error.message}`,
-          }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error, 'Get orders failed');
       }
     }
   );
@@ -567,7 +530,7 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
                 }, null, 2),
               }],
             };
-          } catch (wsError: any) {
+          } catch {
             // WebSocket failed — fall through to REST
           }
         }
@@ -606,14 +569,8 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
             }, null, 2),
           }],
         };
-      } catch (error: any) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Close position failed: ${error.message}`,
-          }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error, 'Close position failed');
       }
     }
   );

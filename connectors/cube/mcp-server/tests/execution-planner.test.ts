@@ -230,6 +230,7 @@ describe('analyzeSniper', () => {
   it('fills completely when book has enough depth', () => {
     const result = analyzeSniper({
       amount: 5,
+      side: 'buy',
       levels: [[100, 3], [101, 3], [102, 5]],
       bestPrice: 100,
     });
@@ -240,6 +241,7 @@ describe('analyzeSniper', () => {
   it('partial fill when book is thin', () => {
     const result = analyzeSniper({
       amount: 10,
+      side: 'buy',
       levels: [[100, 3], [101, 2]],
       bestPrice: 100,
     });
@@ -250,6 +252,7 @@ describe('analyzeSniper', () => {
   it('computes price impact in bps', () => {
     const result = analyzeSniper({
       amount: 5,
+      side: 'buy',
       levels: [[100, 2], [105, 5]],
       bestPrice: 100,
     });

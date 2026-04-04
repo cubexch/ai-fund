@@ -23,6 +23,7 @@ import {
   computeWeightedMid,
 } from '@ai-fund/lib/execution-analytics';
 import { returns } from '@ai-fund/lib/math';
+import { toolError } from '@ai-fund/lib/tool-errors';
 
 export function registerAnalysisTools(server: McpServer, iridium: IridiumClient) {
   const defaultSubaccountId = () => iridium.getDefaultSubaccountId();
@@ -99,11 +100,8 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
             text: JSON.stringify({ market: market.symbol, ...result }, null, 2),
           }],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );
@@ -148,11 +146,8 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
             ),
           }],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );
@@ -228,11 +223,8 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
             text: JSON.stringify(result, null, 2),
           }],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );
@@ -296,11 +288,8 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
             text: JSON.stringify({ scenario: params.scenario, ...result }, null, 2),
           }],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );
@@ -363,11 +352,8 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
             ),
           }],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );
@@ -461,11 +447,8 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
             ),
           }],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );
@@ -548,11 +531,8 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
             text: JSON.stringify(result, null, 2),
           }],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );

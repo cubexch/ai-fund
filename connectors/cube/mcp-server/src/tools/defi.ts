@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { IridiumClient, TokenSearchResult, Ticker } from '../client/iridium';
 import type { OsmiumClient } from '../client/osmium';
 import { getSigningCredentials } from '../client/auth';
+import { toolError } from '@ai-fund/lib/tool-errors';
 
 export function isMintAddress(value: string): boolean {
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
@@ -101,11 +102,8 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
             text: JSON.stringify({ query: params.query, count: tokens.length, tokens }, null, 2),
           }],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );
@@ -134,11 +132,8 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
             text: JSON.stringify({ count: tokens.length, tokens }, null, 2),
           }],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );
@@ -401,7 +396,7 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
               }, null, 2),
             }],
           };
-        } catch (execError: any) {
+        } catch (execError) {
           return {
             content: [{
               type: 'text' as const,
@@ -415,14 +410,14 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
                 action: signingCreds
                   ? 'On-chain execution failed. Try again or execute at cube.exchange/swap.'
                   : 'Run `npm run login` to enable trading, or execute at cube.exchange/swap.',
-                error: execError.message,
+                error: execError instanceof Error ? execError.message : String(execError),
               }, null, 2),
             }],
             isError: true,
           };
         }
-      } catch (error: any) {
-        return { content: [{ type: 'text' as const, text: `Failed: ${error.message}` }], isError: true };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );

@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { AlpacaClient } from '../client/api';
+import { toolError } from '@ai-fund/lib/tool-errors';
 
 export function registerAccountTools(server: McpServer, client: AlpacaClient) {
   server.tool(
@@ -30,11 +31,8 @@ export function registerAccountTools(server: McpServer, client: AlpacaClient) {
             }, null, 2),
           }],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     },
   );
@@ -65,11 +63,8 @@ export function registerAccountTools(server: McpServer, client: AlpacaClient) {
             text: JSON.stringify(formatted, null, 2),
           }],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     },
   );
@@ -101,11 +96,8 @@ export function registerAccountTools(server: McpServer, client: AlpacaClient) {
             }, null, 2),
           }],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     },
   );
@@ -128,11 +120,8 @@ export function registerAccountTools(server: McpServer, client: AlpacaClient) {
             }, null, 2),
           }],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     },
   );

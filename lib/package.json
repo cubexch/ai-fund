@@ -35,6 +35,7 @@
     "./microstructure": "./microstructure.ts",
     "./stat-arb": "./stat-arb.ts",
     "./time-series": "./time-series.ts",
+    "./tool-errors": "./tool-errors.ts",
     "./venue-analytics": "./venue-analytics.ts",
     "./analytics-store": "./analytics-store.ts",
     "./ingest/exchange": "./ingest/exchange.ts",

@@ -1,0 +1,33 @@
+{
+  "name": "Cross-Exchange Arb Scanner",
+  "description": "Detect and execute price differences across connected exchanges",
+  "difficulty": "intermediate",
+  "prerequisites": [
+    "Two or more exchanges connected via /setup",
+    "Paper mode enabled on all exchanges"
+  ],
+  "agents": [
+    "risk-manager",
+    "arbitrageur",
+    "execution-trader"
+  ],
+  "commands": [
+    "/hire risk-manager",
+    "/hire arbitrageur",
+    "/hire execution-trader"
+  ],
+  "workflow": [
+    "1. Ask the arbitrageur to scan all exchanges for BTC and ETH price differences",
+    "2. The arbitrageur reports spreads in basis points with execution feasibility",
+    "3. Ask risk-manager to size the trade based on portfolio limits",
+    "4. Ask execution-trader to plan the two-leg execution (buy on cheap venue, sell on expensive)",
+    "5. Review the plan, then confirm execution"
+  ],
+  "expected_output": "Spread report with bps, venue names, fill probability, and net profit after fees",
+  "failure_modes": [
+    "Spread too small to cover fees → arbitrageur will flag this",
+    "Insufficient balance on one venue → risk-manager blocks the trade",
+    "High latency → execution-trader warns about slippage risk"
+  ],
+  "estimated_time": "5-10 minutes"
+}

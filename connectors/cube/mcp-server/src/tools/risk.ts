@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { IridiumClient } from '../client/iridium';
 import { kelly, fixedFractionalSize } from '@ai-fund/lib/math';
+import { toolError } from '@ai-fund/lib/tool-errors';
 
 export function registerRiskTools(server: McpServer, iridium: IridiumClient) {
   const defaultSubaccountId = () => iridium.getDefaultSubaccountId();
@@ -75,11 +76,8 @@ export function registerRiskTools(server: McpServer, iridium: IridiumClient) {
             },
           ],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );

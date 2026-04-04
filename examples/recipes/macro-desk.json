@@ -1,0 +1,36 @@
+{
+  "name": "Macro Trading Desk",
+  "description": "Run a macro-driven trading desk with conviction sizing and risk management",
+  "difficulty": "beginner",
+  "prerequisites": [
+    "At least one exchange connected via /setup",
+    "Paper mode enabled"
+  ],
+  "agents": [
+    "risk-manager",
+    "arthur-hayes",
+    "raoul-pal",
+    "execution-trader"
+  ],
+  "commands": [
+    "/hire risk-manager",
+    "/hire arthur-hayes",
+    "/hire raoul-pal",
+    "/hire execution-trader"
+  ],
+  "workflow": [
+    "1. Ask arthur-hayes for the current macro thesis (DXY, yields, liquidity)",
+    "2. Ask raoul-pal for the cycle position and network value analysis",
+    "3. Compare their views — they may disagree, which is valuable",
+    "4. Ask risk-manager to size a position based on the consensus (or lack of it)",
+    "5. Ask execution-trader to plan a TWAP entry over 1 hour",
+    "6. Review and confirm the execution plan"
+  ],
+  "expected_output": "Macro thesis with supporting data, sized position proposal, and TWAP execution plan",
+  "failure_modes": [
+    "Agents disagree on direction → risk-manager reduces size to reflect uncertainty",
+    "High volatility → execution-trader switches from TWAP to iceberg",
+    "Drawdown limit hit → risk-manager blocks new positions"
+  ],
+  "estimated_time": "5-10 minutes"
+}
