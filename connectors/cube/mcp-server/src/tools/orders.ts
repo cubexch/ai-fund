@@ -285,7 +285,7 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
     {
       symbol: z.string().optional().describe('Market symbol (e.g. "BTCUSDC", "SOLUSDC")'),
       marketId: z.number().optional().describe('Numeric market ID (alternative to symbol)'),
-      clientOrderId: z.number().describe('Client-assigned order ID to cancel'),
+      clientOrderId: z.union([z.number(), z.string().transform(Number)]).describe('The clientOrderId from the original place_order response'),
     },
     async (params, extra) => {
       try {
@@ -335,13 +335,13 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
 
   server.tool(
     'modify_order',
-    "Modify an existing resting order's price and/or quantity. Values in human-readable units.",
+    "Modify an existing resting order's price and/or quantity. Requires clientOrderId (from place_order response), newQuantity, and optionally newPrice. Values in human-readable units.",
     {
-      symbol: z.string().optional().describe('Market symbol (e.g. "BTCUSDC", "SOLUSDC")'),
+      symbol: z.string().optional().describe('Market symbol (e.g. "BTCUSDC", "tBTCtUSDC"). Required to resolve tick sizes.'),
       marketId: z.number().optional().describe('Numeric market ID (alternative to symbol)'),
-      clientOrderId: z.number().describe('Client-assigned order ID to modify'),
-      newPrice: z.string().optional().describe('New price in human-readable units'),
-      newQuantity: z.string().describe('New quantity in human-readable units'),
+      clientOrderId: z.union([z.number(), z.string().transform(Number)]).describe('The clientOrderId from the original place_order response'),
+      newPrice: z.string().optional().describe('New limit price in human-readable units (e.g. "82000")'),
+      newQuantity: z.string().describe('New quantity in human-readable units (e.g. "0.005")'),
       postOnly: z.boolean().default(false).describe('If true, modified order will only rest as maker'),
     },
     async (params, extra) => {
