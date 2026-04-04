@@ -281,6 +281,7 @@ Defined in `.claude/commands/` as markdown files:
 - `/fire <role>` — Deactivate an underperforming agent (updates `.desk/`)
 - `/review` — Run desk-wide performance evaluation
 - `/health-report` — Generate desk health report with PnL, drawdown, violations
+- `/first-trade` — Guided walkthrough to your first paper trade in under 5 minutes
 - `/backtest` — Test a strategy on historical data
 
 ## Safety Rules

@@ -392,6 +392,7 @@ What ships with each agent:
 | `/hire <role>` | Activate an agent |
 | `/fire <role>` | Remove an agent |
 | `/review` | Performance review + fire recs |
+| `/first-trade` | Guided first paper trade (5 min) |
 | `/health-report` | Daily PnL, drawdown, violations |
 | `/backtest` | Test on historical data |
 
