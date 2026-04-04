@@ -17,6 +17,7 @@ import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { runDemo } from './demo.js';
 import { preInstallCheck, printDiagnostics } from './diagnose.js';
+import { runVerify } from './verify.js';
 
 const SKILLS_SRC = resolve(import.meta.dirname, '..', 'skills');
 const CLAUDE_SKILLS_DIR = join(homedir(), '.claude', 'skills');
@@ -125,6 +126,9 @@ switch (command) {
   case 'diagnose':
     printDiagnostics();
     break;
+  case 'verify':
+    runVerify();
+    break;
   case 'demo':
     runDemo(args.slice(1));
     break;
@@ -138,6 +142,7 @@ Usage:
   npx ai-fund install <role>       Install a specific agent
   npx ai-fund list                 List available agents
   npx ai-fund diagnose             Check system requirements
+  npx ai-fund verify               Verify installation is working
   npx ai-fund demo                 Run a simulated trading desk demo
   npx ai-fund demo --seed 42       Run demo with reproducible results
 
