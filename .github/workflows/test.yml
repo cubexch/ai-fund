@@ -24,3 +24,14 @@ jobs:
 
       - name: Run Governed Checks
         run: npm run check
+
+      - name: Generate Repo Map
+        run: npm run repo:map:json
+
+      - name: Upload Repo Map Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-map
+          path: .ai/
+          retention-days: 30
