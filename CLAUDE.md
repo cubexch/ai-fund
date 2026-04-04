@@ -94,7 +94,11 @@ After every code change, run the following before considering the work done:
 - **`lib/execution-analytics.ts`** — `simulateOrderBookFill`, `analyzeDepthAtBands`, `computeOrderBookImbalance`, `analyzeOrderBookShape`, `computeWeightedMid`, `analyzeTradeFlow`, `computeMomentumScore`, `computeExecutionQuality`, `recommendEntry`
 - **`lib/portfolio-analytics.ts`** — `resolvePrice`, `computePortfolioExposure`, `checkPreTrade`, `simulateStressTest`, `assessPortfolioRisk`, `calculateRebalanceTrades`, `detectCorrelationClusters`, `monitorDrawdown`, `computeMarginHealth`, `computeRiskDashboard`
 - **`lib/portfolio-optimizer.ts`** — `meanVariance`, `minimumVariance`, `riskParity`, `blackLitterman`, `maxDiversification`, `efficientFrontier`, `hierarchicalRiskParity`, `equalWeight`, `inverseVolatility`, `rebalanceOptimal`
-- **`lib/factor-model.ts`** — `pcaFactors`, `factorExposure`, `factorAttribution`, `marginalVaR`, `incrementalVaR`, `componentVaR`, `cryptoFactorModel`, `equityFactorModel`, `crossSectionalMomentum`, `computeFactorReturns`, `styleAnalysis`, `covarianceMatrix`, `riskDecomposition`, `sectorExposure`
+- **`lib/factor-model.ts`** — Barrel re-export of the three submodules below (backward-compatible)
+- **`lib/matrix.ts`** — `matTranspose`, `matMultiply`, `matVecMultiply`, `vecDot`, `vecNorm`, `vecScale`, `vecSub`, `matInverse`, `sampleCov`, `powerIteration`, `deflateMatrix`, `olsRegression`, `zScoreForConfidence`
+- **`lib/factor-extraction.ts`** — `pcaFactors`, `factorExposure`, `factorAttribution`, `computeFactorReturns`, `styleAnalysis`
+- **`lib/factor-risk.ts`** — `marginalVaR`, `incrementalVaR`, `componentVaR`, `riskDecomposition`, `covarianceMatrix`
+- **`lib/factor-models.ts`** — `cryptoFactorModel`, `equityFactorModel`, `sectorExposure`, `crossSectionalMomentum`
 - **`lib/options.ts`** — `blackScholes`, `black76`, `binomialPrice`, `impliedVol`, `putCallParity`, `volSurface`, `skewMetrics`, `greeksExposure`, `breakeven`, `maxPain`
 - **`lib/monte-carlo.ts`** — `simulateGBM`, `simulateJumpDiffusion`, `monteCarloVaR`, `portfolioMonteCarloVaR`, `confidenceInterval`, `scenarioGeneration`, `drawdownDistribution`, `optionMonteCarlo`
 - **`lib/stat-arb.ts`** — `engleGranger`, `adfTest`, `halfLife`, `hedgeRatio`, `spreadZScore`, `pairSignal`, `scorePairs`, `kalmanHedgeRatio`, `johansen`, `rollingSpreadStats`
