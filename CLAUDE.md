@@ -253,6 +253,8 @@ Agent state, briefing books, and trade history persist between sessions in the `
 - `desk-state fire <slug> [reason]` — marks agent inactive, warns if risk-manager fired with active traders
 - `desk-state update <slug> <key> <value>` — updates agent metadata
 - `desk-state show` — dumps full desk state as JSON
+- `desk-state health` — generates health report as JSON
+- `desk-state health md` — generates health report as markdown
 
 ### Briefing Books (`.desk/briefings/<agent>.md`)
 
@@ -274,6 +276,7 @@ Defined in `.claude/commands/` as markdown files:
 - `/hire <role>` — Activate a trading agent (reads/writes `.desk/`)
 - `/fire <role>` — Deactivate an underperforming agent (updates `.desk/`)
 - `/review` — Run desk-wide performance evaluation
+- `/health-report` — Generate desk health report with PnL, drawdown, violations
 - `/backtest` — Test a strategy on historical data
 
 ## Safety Rules
