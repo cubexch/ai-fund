@@ -120,6 +120,17 @@ The two layers don't know about each other. Add an exchange, don't touch agent c
 
 ---
 
+## AI Contributor Path (for faster maintenance)
+
+If you are modifying this repo with an AI coding agent, follow the maintainer guide:
+
+- [`docs/ai-maintainer-path.md`](docs/ai-maintainer-path.md)
+- Run `npm run repo:map` to surface current large-file hotspots before coding
+
+This keeps changes small, local, and easier to review.
+
+---
+
 ## Quick Start
 
 ```bash
