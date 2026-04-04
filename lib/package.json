@@ -13,6 +13,7 @@
     "./format": "./format.ts",
     "./datastore": "./datastore.ts",
     "./backtester": "./backtester.ts",
+    "./backtest-strategies": "./backtest-strategies.ts",
     "./regime-detector": "./regime-detector.ts",
     "./signal-generator": "./signal-generator.ts",
     "./connector-interface": "./connector-interface.ts",

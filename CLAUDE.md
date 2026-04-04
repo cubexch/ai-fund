@@ -114,7 +114,8 @@ After every code change, run the following before considering the work done:
 - **`lib/volume-profile.ts`** — `computeVolumeProfile`, `detectCorrelationRegime`
 - **`lib/datastore.ts`** — `MarketDataStore` (DuckDB columnar store for OHLCV data with SQL queries, Parquet I/O, incremental updates)
 - **`lib/analytics-store.ts`** — `AnalyticsStore` class (DuckDB-powered: rolling correlations, cross-sectional sorts, factor returns, covariance, rolling beta, risk reports, universe screening, pairwise correlations, regime stats)
-- **`lib/backtester.ts`** — `Backtester` class (9 built-in strategies, walk-forward optimization)
+- **`lib/backtester.ts`** — `Backtester` class (run, runAll, optimize, walkForward) — imports strategies from submodule
+- **`lib/backtest-strategies.ts`** — 9 built-in strategies (`STRATEGIES` registry, `DEFAULT_PARAMS`): SMA crossover, RSI mean reversion, MACD momentum, Bollinger breakout/mean-reversion, EMA trend, stochastic, ADX, multi-indicator confluence
 - **`lib/regime-detector.ts`** — `RegimeDetector` class (trend/range/volatile regime classification)
 - **`lib/signal-generator.ts`** — `SignalGenerator` class (multi-indicator signal scanning)
 - **`lib/valuation.ts`** — 19 valuation functions (DCF, NVT, MVRV, stock-to-flow, etc.)
