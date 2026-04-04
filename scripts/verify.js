@@ -81,7 +81,7 @@ function checkDemoRunnable() {
 }
 
 function checkCommandsInstalled() {
-  const commandsDir = join(ROOT, '.claude', 'commands');
+  const commandsDir = join(homedir(), '.claude', 'commands');
   if (!existsSync(commandsDir)) {
     return { ok: false, message: '.claude/commands/ not found' };
   }

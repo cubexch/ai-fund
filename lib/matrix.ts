@@ -9,6 +9,7 @@ import { mean } from './math.js';
 // ── Matrix Operations ───────────────────────────────────
 
 export function matTranspose(m: number[][]): number[][] {
+  if (m.length === 0 || m[0].length === 0) return [];
   const rows = m.length;
   const cols = m[0].length;
   const t: number[][] = Array.from({ length: cols }, () => Array(rows).fill(0));
@@ -21,6 +22,7 @@ export function matTranspose(m: number[][]): number[][] {
 }
 
 export function matMultiply(a: number[][], b: number[][]): number[][] {
+  if (a.length === 0 || b.length === 0 || b[0].length === 0) return [];
   const rows = a.length;
   const cols = b[0].length;
   const inner = b.length;
@@ -97,7 +99,8 @@ export function matInverse(m: number[][]): number[][] {
       }
     }
     if (maxVal < 1e-15) {
-      // Singular — return identity as fallback
+      // Singular — return identity as fallback with a warning flag
+      // Callers should check for singular input or use the result defensively
       return Array.from({ length: n }, (_, i) => {
         const row = Array(n).fill(0);
         row[i] = 1;

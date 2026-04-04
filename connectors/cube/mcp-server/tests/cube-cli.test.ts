@@ -102,6 +102,27 @@ describe('cube CLI parser helpers', () => {
     });
     expect(result.extra).toEqual([]);
   });
+
+  it('skips optional number params when positional is non-numeric', () => {
+    const schema = z.object({
+      side: z.enum(['Bid', 'Ask']),
+      price: z.number(),
+      subaccountId: z.number().optional(),
+      symbol: z.string().optional(),
+      quantity: z.number().optional(),
+    });
+
+    const result = parseToolParams(['Bid', '90', 'SOL', '1'], schema);
+
+    expect(result.params).toMatchObject({
+      side: 'Bid',
+      price: 90,
+      symbol: 'SOL',
+      quantity: 1,
+    });
+    expect(result.params.subaccountId).toBeUndefined();
+    expect(result.extra).toEqual([]);
+  });
 });
 
 describe('cube CLI catalog surface', () => {

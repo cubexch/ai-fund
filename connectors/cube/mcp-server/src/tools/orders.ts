@@ -123,7 +123,7 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
   async function refreshMarketsCache(): Promise<Market[]> {
     const now = Date.now();
     if (!marketsCache || now - marketsCacheTime > CACHE_TTL) {
-      marketsCache = await iridium.getMarkets();
+      marketsCache = await iridium.getActiveMarkets();
       marketsCacheTime = now;
     }
     return marketsCache;
@@ -186,92 +186,49 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
           ? toLots(params.stopPrice, market.priceTickSize)
           : undefined;
 
-        // Try WebSocket (Osmium) first for faster execution
-        if (osmium) {
-          try {
-            // Auto-discover subaccount if needed
-            if (!osmium.isConnected) {
-              const subId = await iridium.getDefaultSubaccountId();
-              osmium.setSubaccountId(subId);
-            }
-
-            const wsResult = await osmium.placeOrder({
-              marketId: resolvedMarketId,
-              side: normalizedSide,
-              price: priceLots !== undefined ? String(priceLots) : undefined,
-              quantity: String(quantityLots),
-              orderType: params.orderType,
-              timeInForce: params.timeInForce,
-              postOnly: params.postOnly,
-              cancelOnDisconnect: false,
-              stopPrice: stopPriceLots !== undefined ? String(stopPriceLots) : undefined,
-            });
-
-            const humanPrice = wsResult.price ? fromLots(Number(wsResult.price), market.priceTickSize) : params.price;
-            const humanQty = fromLots(Number(wsResult.quantity), market.quantityTickSize);
-
-            return {
-              content: [{
-                type: 'text' as const,
-                text: JSON.stringify({
-                  status: 'placed',
-                  via: 'websocket',
-                  clientOrderId: wsResult.clientOrderId,
-                  exchangeOrderId: wsResult.exchangeOrderId,
-                  market: market.symbol,
-                  marketId: wsResult.marketId,
-                  side: wsResult.side,
-                  price: humanPrice,
-                  quantity: humanQty,
-                  orderType: params.orderType,
-                  transactTime: wsResult.transactTime,
-                }, null, 2),
-              }],
-            };
-          } catch {
-            // WebSocket failed — fall through to REST
-          }
+        if (!osmium) {
+          throw new Error('WebSocket client not available. Cannot place orders without Osmium.');
         }
 
-        // REST fallback via Iridium → Osmium REST API
-        const result = await iridium.placeOrderRest({
+        // Auto-discover subaccount and connect if needed
+        if (!osmium.isConnected) {
+          const subId = await iridium.getDefaultSubaccountId();
+          osmium.setSubaccountId(subId);
+          await osmium.connect();
+        }
+
+        const wsResult = await osmium.placeOrder({
           marketId: resolvedMarketId,
-          side: SIDE_MAP[normalizedSide],
-          price: priceLots,
-          quantity: quantityLots,
-          orderType: ORDER_TYPE_MAP[params.orderType],
-          timeInForce: TIF_MAP[params.timeInForce],
-          postOnly: params.postOnly ? 1 : 0,
+          side: normalizedSide,
+          price: priceLots !== undefined ? String(priceLots) : undefined,
+          quantity: String(quantityLots),
+          orderType: params.orderType,
+          timeInForce: params.timeInForce,
+          postOnly: params.postOnly,
           cancelOnDisconnect: false,
-          stopPrice: stopPriceLots,
+          stopPrice: stopPriceLots !== undefined ? String(stopPriceLots) : undefined,
         });
 
-        const humanPrice = result.price ? fromLots(result.price, market.priceTickSize) : params.price;
-        const humanQty = fromLots(result.quantity, market.quantityTickSize);
+        const humanPrice = wsResult.price ? fromLots(Number(wsResult.price), market.priceTickSize) : params.price;
+        const humanQty = fromLots(Number(wsResult.quantity), market.quantityTickSize);
 
         return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(
-                {
-                  status: 'placed',
-                  via: 'rest',
-                  clientOrderId: result.clientOrderId,
-                  exchangeOrderId: result.exchangeOrderId,
-                  market: market.symbol,
-                  marketId: result.marketId,
-                  side: normalizedSide,
-                  price: humanPrice,
-                  quantity: humanQty,
-                  orderType: params.orderType,
-                  transactTime: result.transactTime,
-                },
-                null,
-                2
-              ),
-            },
-          ],
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              status: 'placed',
+              via: 'websocket',
+              clientOrderId: wsResult.clientOrderId,
+              exchangeOrderId: wsResult.exchangeOrderId,
+              market: market.symbol,
+              marketId: wsResult.marketId,
+              side: wsResult.side,
+              price: humanPrice,
+              quantity: humanQty,
+              orderType: params.orderType,
+              transactTime: wsResult.transactTime,
+            }, null, 2),
+          }],
         };
       } catch (error) {
         return toolError(error, 'Order failed');
@@ -285,7 +242,7 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
     {
       symbol: z.string().optional().describe('Market symbol (e.g. "BTCUSDC", "SOLUSDC")'),
       marketId: z.number().optional().describe('Numeric market ID (alternative to symbol)'),
-      clientOrderId: z.union([z.number(), z.string().transform(Number)]).describe('The clientOrderId from the original place_order response'),
+      clientOrderId: z.union([z.number(), z.string().transform(Number)]).pipe(z.number().finite()).describe('The clientOrderId from the original place_order response'),
     },
     async (params, extra) => {
       try {
@@ -296,36 +253,24 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
 
         const resolvedMarketId = await resolveMarketId(params.symbol, params.marketId);
 
-        // Try WebSocket first
-        if (osmium?.isConnected) {
-          try {
-            const wsResult = await osmium.cancelOrder({
-              marketId: resolvedMarketId,
-              clientOrderId: String(params.clientOrderId),
-            });
-            return {
-              content: [{
-                type: 'text' as const,
-                text: JSON.stringify({ status: 'cancelled', via: 'websocket', ...wsResult }, null, 2),
-              }],
-            };
-          } catch {
-            // Fall through to REST
-          }
+        if (!osmium) {
+          throw new Error('WebSocket client not available. Cannot cancel orders without Osmium.');
+        }
+        if (!osmium.isConnected) {
+          const subId = await iridium.getDefaultSubaccountId();
+          osmium.setSubaccountId(subId);
+          await osmium.connect();
         }
 
-        const result = await iridium.cancelOrderRest({
+        const wsResult = await osmium.cancelOrder({
           marketId: resolvedMarketId,
-          clientOrderId: params.clientOrderId,
+          clientOrderId: String(params.clientOrderId),
         });
-
         return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify({ status: 'cancelled', via: 'rest', ...result as object }, null, 2),
-            },
-          ],
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({ status: 'cancelled', via: 'websocket', ...wsResult }, null, 2),
+          }],
         };
       } catch (error) {
         return toolError(error, 'Cancel failed');
@@ -339,7 +284,7 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
     {
       symbol: z.string().optional().describe('Market symbol (e.g. "BTCUSDC", "tBTCtUSDC"). Required to resolve tick sizes.'),
       marketId: z.number().optional().describe('Numeric market ID (alternative to symbol)'),
-      clientOrderId: z.union([z.number(), z.string().transform(Number)]).describe('The clientOrderId from the original place_order response'),
+      clientOrderId: z.union([z.number(), z.string().transform(Number)]).pipe(z.number().finite()).describe('The clientOrderId from the original place_order response'),
       newPrice: z.string().optional().describe('New limit price in human-readable units (e.g. "82000")'),
       newQuantity: z.string().describe('New quantity in human-readable units (e.g. "0.005")'),
       postOnly: z.boolean().default(false).describe('If true, modified order will only rest as maker'),
@@ -354,46 +299,29 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
         const resolvedMarketId = await resolveMarketId(params.symbol, params.marketId);
         const market = await getMarket(resolvedMarketId);
 
-        // Try WebSocket first
-        if (osmium?.isConnected) {
-          try {
-            const wsResult = await osmium.modifyOrder({
-              marketId: resolvedMarketId,
-              clientOrderId: String(params.clientOrderId),
-              newPrice: params.newPrice !== undefined
-                ? String(toLots(params.newPrice, market.priceTickSize))
-                : undefined,
-              newQuantity: String(toLots(params.newQuantity, market.quantityTickSize)),
-              postOnly: params.postOnly,
-            });
-            return {
-              content: [{
-                type: 'text' as const,
-                text: JSON.stringify({ ...wsResult, status: 'modified', via: 'websocket' }, null, 2),
-              }],
-            };
-          } catch {
-            // Fall through to REST
-          }
+        if (!osmium) {
+          throw new Error('WebSocket client not available. Cannot modify orders without Osmium.');
+        }
+        if (!osmium.isConnected) {
+          const subId = await iridium.getDefaultSubaccountId();
+          osmium.setSubaccountId(subId);
+          await osmium.connect();
         }
 
-        const result = await iridium.modifyOrderRest({
+        const wsResult = await osmium.modifyOrder({
           marketId: resolvedMarketId,
-          clientOrderId: params.clientOrderId,
+          clientOrderId: String(params.clientOrderId),
           newPrice: params.newPrice !== undefined
-            ? toLots(params.newPrice, market.priceTickSize)
+            ? String(toLots(params.newPrice, market.priceTickSize))
             : undefined,
-          newQuantity: toLots(params.newQuantity, market.quantityTickSize),
-          postOnly: params.postOnly ? 1 : 0,
+          newQuantity: String(toLots(params.newQuantity, market.quantityTickSize)),
+          postOnly: params.postOnly,
         });
-
         return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify({ status: 'modified', via: 'rest', ...result as object }, null, 2),
-            },
-          ],
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({ ...wsResult, status: 'modified', via: 'websocket' }, null, 2),
+          }],
         };
       } catch (error) {
         return toolError(error, 'Modify failed');
@@ -420,52 +348,30 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
           ? await resolveMarketId(params.symbol, params.marketId)
           : undefined;
 
-        // Try WebSocket first
-        if (osmium?.isConnected) {
-          try {
-            const wsResult = await osmium.massCancel({
-              marketId: resolvedMktId,
-              side: params.side,
-            });
-            return {
-              content: [{
-                type: 'text' as const,
-                text: JSON.stringify({
-                  status: 'mass_cancelled',
-                  via: 'websocket',
-                  marketId: resolvedMktId ?? 'all',
-                  side: params.side ?? 'both',
-                  ...wsResult,
-                }, null, 2),
-              }],
-            };
-          } catch {
-            // Fall through to REST
-          }
+        if (!osmium) {
+          throw new Error('WebSocket client not available. Cannot cancel orders without Osmium.');
+        }
+        if (!osmium.isConnected) {
+          const subId = await iridium.getDefaultSubaccountId();
+          osmium.setSubaccountId(subId);
+          await osmium.connect();
         }
 
-        const result = await iridium.massCancelRest({
+        const wsResult = await osmium.massCancel({
           marketId: resolvedMktId,
-          side: params.side !== undefined ? SIDE_MAP[params.side] : undefined,
+          side: params.side,
         });
-
         return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(
-                {
-                  status: 'mass_cancelled',
-                  via: 'rest',
-                  marketId: resolvedMktId ?? 'all',
-                  side: params.side ?? 'both',
-                  ...result as object,
-                },
-                null,
-                2
-              ),
-            },
-          ],
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              status: 'mass_cancelled',
+              via: 'websocket',
+              marketId: resolvedMktId ?? 'all',
+              side: params.side ?? 'both',
+              ...wsResult,
+            }, null, 2),
+          }],
         };
       } catch (error) {
         return toolError(error, 'Mass cancel failed');
@@ -488,9 +394,11 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
           ? await resolveMarketId(params.symbol, params.marketId)
           : undefined;
         const subId = params.subaccountId ?? await iridium.getDefaultSubaccountId();
-        const orders = await iridium.getOrderHistory(subId, {
+        const rawOrders = await iridium.getOrderHistory(subId, {
           marketId: filterMarketId,
         });
+        // Defensive: getOrderHistory may return array or { name, orders, metadata } wrapper
+        const orders = Array.isArray(rawOrders) ? rawOrders : (rawOrders as any)?.orders ?? [];
 
         // Open order statuses — orders still resting on the book
         const OPEN_STATUSES = new Set([
@@ -503,7 +411,7 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
         ]);
 
         const filtered = params.status === 'open'
-          ? orders.filter(o => OPEN_STATUSES.has(o.status))
+          ? orders.filter((o: any) => OPEN_STATUSES.has(o.status))
           : orders;
 
         return {
@@ -590,84 +498,57 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
         const quantityStr = snappedQty.toString();
         const quantityLots = toLots(quantityStr, market.quantityTickSize);
 
-        // Place a market sell order — try WebSocket first, REST fallback
-        if (osmium) {
-          try {
-            if (!osmium.isConnected) {
-              osmium.setSubaccountId(subId);
-            }
-
-            const wsResult = await osmium.placeOrder({
-              marketId: market.marketId,
-              side: 'ASK',
-              quantity: String(quantityLots),
-              orderType: 'MARKET_WITH_PROTECTION',
-              timeInForce: 'IOC',
-              postOnly: false,
-              cancelOnDisconnect: false,
-            });
-
-            const humanQty = fromLots(Number(wsResult.quantity), market.quantityTickSize);
-            const humanPrice = wsResult.price ? fromLots(Number(wsResult.price), market.priceTickSize) : undefined;
-
-            return {
-              content: [{
-                type: 'text' as const,
-                text: JSON.stringify({
-                  status: 'closing',
-                  via: 'websocket',
-                  symbol,
-                  market: market.symbol,
-                  marketId: market.marketId,
-                  side: 'ASK',
-                  quantity: humanQty,
-                  price: humanPrice,
-                  percentage: params.percentage,
-                  positionSize: positionAmount.toString(),
-                  clientOrderId: wsResult.clientOrderId,
-                  exchangeOrderId: wsResult.exchangeOrderId,
-                  transactTime: wsResult.transactTime,
-                }, null, 2),
-              }],
-            };
-          } catch {
-            // WebSocket failed — fall through to REST
-          }
+        if (!osmium) {
+          throw new Error('WebSocket client not available. Cannot close position without Osmium.');
+        }
+        if (!osmium.isConnected) {
+          osmium.setSubaccountId(subId);
+          await osmium.connect();
         }
 
-        // REST fallback
-        const result = await iridium.placeOrderRest({
+        const wsResult = await osmium.placeOrder({
           marketId: market.marketId,
-          side: SIDE_MAP['ASK'],
-          quantity: quantityLots,
-          orderType: ORDER_TYPE_MAP['MARKET_WITH_PROTECTION'],
-          timeInForce: TIF_MAP['IOC'],
-          postOnly: 0,
+          side: 'ASK',
+          quantity: String(quantityLots),
+          orderType: 'MARKET_WITH_PROTECTION',
+          timeInForce: 'IOC',
+          postOnly: false,
           cancelOnDisconnect: false,
         });
 
-        const humanQty = fromLots(result.quantity, market.quantityTickSize);
-        const humanPrice = result.price ? fromLots(result.price, market.priceTickSize) : undefined;
+        const humanQty = fromLots(Number(wsResult.quantity), market.quantityTickSize);
+        const humanPrice = wsResult.price ? fromLots(Number(wsResult.price), market.priceTickSize) : undefined;
+
+        const humanFills = wsResult.fills?.map(f => ({
+          price: fromLots(Number(f.fillPrice), market.priceTickSize),
+          quantity: fromLots(Number(f.fillQuantity), market.quantityTickSize),
+          quoteQuantity: fromLots(Number(f.fillQuoteQuantity), market.quoteLotSize),
+        }));
+
+        const resultStatus = wsResult.status === 'canceled' ? 'no_fill' : wsResult.status === 'partial_fill' ? 'partial_close' : 'closed';
 
         return {
           content: [{
             type: 'text' as const,
             text: JSON.stringify({
-              status: 'closing',
-              via: 'rest',
+              status: resultStatus,
+              via: 'websocket',
               symbol,
               market: market.symbol,
               marketId: market.marketId,
               side: 'ASK',
               quantity: humanQty,
               price: humanPrice,
+              ...(humanFills && humanFills.length > 0 ? { fills: humanFills } : {}),
+              ...(wsResult.canceledQuantity ? { canceledQuantity: fromLots(Number(wsResult.canceledQuantity), market.quantityTickSize) } : {}),
               percentage: params.percentage,
               positionSize: positionAmount.toString(),
-              clientOrderId: result.clientOrderId,
-              exchangeOrderId: result.exchangeOrderId,
-              transactTime: result.transactTime,
+              clientOrderId: wsResult.clientOrderId,
+              exchangeOrderId: wsResult.exchangeOrderId,
+              transactTime: wsResult.transactTime,
             }, null, 2),
           }],
+          ...(resultStatus === 'no_fill' ? { isError: true } : {}),
         };
       } catch (error) {
         return toolError(error, 'Close position failed');

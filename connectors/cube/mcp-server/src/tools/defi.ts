@@ -1,6 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import type { IridiumClient, TokenSearchResult, Ticker } from '../client/iridium';
+import type { IridiumClient, Market, TokenSearchResult, Ticker } from '../client/iridium';
 import type { OsmiumClient } from '../client/osmium';
 import { getSigningCredentials } from '../client/auth';
 import { toolError } from '@ai-fund/lib/tool-errors';
@@ -26,6 +26,57 @@ export function formatToken(t: TokenSearchResult): string {
   if (t.metadata.snapshotPrice) parts.push(`$${t.metadata.snapshotPrice}`);
   if (t.metadata.liquidity) parts.push(`mcap:$${(t.metadata.liquidity / 1e6).toFixed(1)}M`);
   return parts.join(' | ');
+}
+
+export function assetSymbolMatches(input: string, actual: string): boolean {
+  const lhs = input.toUpperCase();
+  const rhs = actual.toUpperCase();
+
+  if (lhs === rhs) return true;
+
+  for (const prefixed of [lhs, rhs]) {
+    const plain = prefixed === lhs ? rhs : lhs;
+    if (prefixed.length === plain.length + 1 && ['T', 'G'].includes(prefixed[0] ?? '') && prefixed.slice(1) === plain) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function findMatchingTickerSymbol(
+  tickers: Pick<Ticker, 'symbol' | 'baseAsset' | 'quoteAsset'>[],
+  baseInput: string,
+  quoteInput: string,
+): string | null {
+  const exactSymbol = `${baseInput.toUpperCase()}${quoteInput.toUpperCase()}`;
+  const exact = tickers.find(t => t.symbol.toUpperCase() === exactSymbol);
+  if (exact) return exact.symbol;
+
+  const matched = tickers.find(t =>
+    assetSymbolMatches(baseInput, t.baseAsset) &&
+    assetSymbolMatches(quoteInput, t.quoteAsset)
+  );
+
+  return matched?.symbol ?? null;
+}
+
+async function resolveOrderbookMarket(
+  iridium: IridiumClient,
+  baseInput: string,
+  quoteInput: string,
+): Promise<{ market: Market; ticker: Ticker | null } | null> {
+  const [markets, tickers] = await Promise.all([iridium.getActiveMarkets(), iridium.getTickers()]);
+  const matchedTickerSymbol = findMatchingTickerSymbol(tickers, baseInput, quoteInput);
+  if (!matchedTickerSymbol) return null;
+
+  const market = markets.find(m => m.symbol === matchedTickerSymbol);
+  if (!market) return null;
+
+  return {
+    market,
+    ticker: tickers.find(t => t.symbol === matchedTickerSymbol) ?? null,
+  };
 }
 
 /**
@@ -155,20 +206,20 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
       try {
         const baseSymbol = params.base.toUpperCase();
         const quoteSymbol = params.quote.toUpperCase();
-        const marketSymbol = `${baseSymbol}${quoteSymbol}`;
+        const pairLabel = `${baseSymbol}/${quoteSymbol}`;
 
         // ── Get orderbook price ──
         let orderbookPrice: number | null = null;
-        let orderbookMarket: { marketId: number; symbol: string; priceTickSize: string; quantityTickSize: string } | null = null;
+        let orderbookMarket: { marketId: number; symbol: string; priceTickSize: string; quantityTickSize: string; quoteLotSize: string } | null = null;
 
         if (params.venue !== 'onchain') {
           try {
-            const markets = await iridium.getMarkets();
-            orderbookMarket = markets.find(m => m.symbol.toUpperCase() === marketSymbol) ?? null;
-            if (orderbookMarket) {
-              const tickers = await iridium.getTickers();
-              const ticker = tickers.find(t => t.symbol === orderbookMarket!.symbol);
-              orderbookPrice = params.side === 'buy' ? (ticker?.askPrice ?? null) : (ticker?.bidPrice ?? null);
+            const resolvedOrderbook = await resolveOrderbookMarket(iridium, params.base, params.quote);
+            if (resolvedOrderbook) {
+              orderbookMarket = resolvedOrderbook.market;
+              orderbookPrice = params.side === 'buy'
+                ? (resolvedOrderbook.ticker?.askPrice ?? null)
+                : (resolvedOrderbook.ticker?.bidPrice ?? null);
             }
           } catch {
             // Orderbook unavailable
@@ -225,12 +276,12 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
 
         if (params.venue === 'orderbook') {
           if (!orderbookPrice || !orderbookMarket) {
-            return { content: [{ type: 'text' as const, text: `No orderbook market found for ${marketSymbol}. Try venue: "onchain" or "auto".` }], isError: true };
+            return { content: [{ type: 'text' as const, text: `No orderbook market found for ${pairLabel}. Try venue: "onchain" or "auto".` }], isError: true };
           }
           chosenVenue = 'orderbook';
         } else if (params.venue === 'onchain') {
           if (!onchainPrice || !baseResolved || !quoteResolved) {
-            return { content: [{ type: 'text' as const, text: `No on-chain route found for ${baseSymbol}/${quoteSymbol}. Try venue: "orderbook" or "auto".` }], isError: true };
+            return { content: [{ type: 'text' as const, text: `No on-chain route found for ${pairLabel}. Try venue: "orderbook" or "auto".` }], isError: true };
           }
           chosenVenue = 'onchain';
         } else {
@@ -246,7 +297,7 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
           } else if (onchainPrice) {
             chosenVenue = 'onchain';
           } else {
-            return { content: [{ type: 'text' as const, text: `No liquidity found for ${baseSymbol}/${quoteSymbol} on any venue.` }], isError: true };
+            return { content: [{ type: 'text' as const, text: `No liquidity found for ${pairLabel} on any venue.` }], isError: true };
           }
         }
 
@@ -257,81 +308,73 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
         // ── Execute on orderbook ──
         if (chosenVenue === 'orderbook') {
           const market = orderbookMarket!;
-          const { toLots, fromLots, SIDE_MAP, ORDER_TYPE_MAP, TIF_MAP } = await import('./orders.js');
+          const { toLots, fromLots } = await import('./orders.js');
           const quantityLots = toLots(params.amount, market.quantityTickSize);
           const normalizedSide = params.side === 'buy' ? 'BID' : 'ASK';
 
-          // Try WebSocket first
-          if (osmium) {
-            try {
-              if (!osmium.isConnected) {
-                const subId = await iridium.getDefaultSubaccountId();
-                osmium.setSubaccountId(subId);
-              }
-              const wsResult = await osmium.placeOrder({
-                marketId: market.marketId,
-                side: normalizedSide,
-                quantity: String(quantityLots),
-                orderType: 'MARKET_WITH_PROTECTION',
-                timeInForce: 'IOC',
-                postOnly: false,
-                cancelOnDisconnect: false,
-              });
-
-              const humanQty = fromLots(Number(wsResult.quantity), market.quantityTickSize);
-              const humanPrice = wsResult.price ? fromLots(Number(wsResult.price), market.priceTickSize) : undefined;
-
-              return {
-                content: [{
-                  type: 'text' as const,
-                  text: JSON.stringify({
-                    status: 'executed',
-                    venue: 'orderbook',
-                    trade: tradeLabel,
-                    market: market.symbol,
-                    price: humanPrice,
-                    quantity: humanQty,
-                    clientOrderId: wsResult.clientOrderId,
-                    exchangeOrderId: wsResult.exchangeOrderId,
-                    ...(onchainPrice ? { onchainPriceWas: onchainPrice.toFixed(6) } : {}),
-                    ...(orderbookPrice && onchainPrice ? { savingBps: Math.abs(Math.round((orderbookPrice - onchainPrice) / orderbookPrice * 10000)) } : {}),
-                  }, null, 2),
-                }],
-              };
-            } catch {
-              // Fall through to REST
-            }
+          if (!osmium) {
+            return {
+              content: [{ type: 'text' as const, text: 'WebSocket trading is unavailable. `trade execute` only submits live orderbook trades over WebSocket.' }],
+              isError: true,
+            };
           }
 
-          // REST fallback
-          const result = await iridium.placeOrderRest({
-            marketId: market.marketId,
-            side: SIDE_MAP[normalizedSide],
-            quantity: quantityLots,
-            orderType: ORDER_TYPE_MAP['MARKET_WITH_PROTECTION'],
-            timeInForce: TIF_MAP['IOC'],
-            postOnly: 0,
-            cancelOnDisconnect: false,
-          });
+          try {
+            if (!osmium.isConnected) {
+              const subId = await iridium.getDefaultSubaccountId();
+              osmium.setSubaccountId(subId);
+              await osmium.connect();
+            }
+            const wsResult = await osmium.placeOrder({
+              marketId: market.marketId,
+              side: normalizedSide,
+              quantity: String(quantityLots),
+              orderType: 'MARKET_WITH_PROTECTION',
+              timeInForce: 'IOC',
+              postOnly: false,
+              cancelOnDisconnect: false,
+            });
 
-          const humanQty = fromLots(result.quantity, market.quantityTickSize);
-          const humanPrice = result.price ? fromLots(result.price, market.priceTickSize) : undefined;
+            const humanQty = fromLots(Number(wsResult.quantity), market.quantityTickSize);
+            const humanPrice = wsResult.price ? fromLots(Number(wsResult.price), market.priceTickSize) : undefined;
 
-          return {
-            content: [{
-              type: 'text' as const,
-              text: JSON.stringify({
-                status: 'executed',
-                venue: 'orderbook',
-                trade: tradeLabel,
-                market: market.symbol,
-                price: humanPrice,
-                quantity: humanQty,
-                clientOrderId: result.clientOrderId,
-                exchangeOrderId: result.exchangeOrderId,
-              }, null, 2),
-            }],
-          };
+            // Build human-readable fills
+            const humanFills = wsResult.fills?.map(f => ({
+              price: fromLots(Number(f.fillPrice), market.priceTickSize),
+              quantity: fromLots(Number(f.fillQuantity), market.quantityTickSize),
+              quoteQuantity: fromLots(Number(f.fillQuoteQuantity), market.quoteLotSize),
+            }));
+
+            const isFilled = wsResult.status === 'filled' || wsResult.status === 'partial_fill';
+            const resultStatus = wsResult.status === 'canceled' ? 'no_fill' : wsResult.status === 'partial_fill' ? 'partial_fill' : 'executed';
+
+            return {
+              content: [{
+                type: 'text' as const,
+                text: JSON.stringify({
+                  status: resultStatus,
+                  via: 'websocket',
+                  venue: 'orderbook',
+                  trade: tradeLabel,
+                  market: market.symbol,
+                  price: humanPrice,
+                  quantity: humanQty,
+                  ...(humanFills && humanFills.length > 0 ? { fills: humanFills } : {}),
+                  ...(wsResult.canceledQuantity ? { canceledQuantity: fromLots(Number(wsResult.canceledQuantity), market.quantityTickSize) } : {}),
+                  clientOrderId: wsResult.clientOrderId,
+                  exchangeOrderId: wsResult.exchangeOrderId,
+                  ...(onchainPrice ? { onchainPriceWas: onchainPrice.toFixed(6) } : {}),
+                  ...(orderbookPrice && onchainPrice ? { savingBps: Math.abs(Math.round((orderbookPrice - onchainPrice) / orderbookPrice * 10000)) } : {}),
+                }, null, 2),
+              }],
+              ...(resultStatus === 'no_fill' ? { isError: true } : {}),
+            };
+          } catch (wsError: any) {
+            return {
+              content: [{ type: 'text' as const, text: `WebSocket order submission failed for ${market.symbol}: ${wsError.message}` }],
+              isError: true,
+            };
+          }
         }
 
         // ── Execute on-chain ──
@@ -343,46 +386,35 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
 
         const signingCreds = await getSigningCredentials();
 
-        if (signingCreds && osmium) {
-          try {
-            const subaccountId = await iridium.getDefaultSubaccountId();
-            const result = await osmium.submitIntent({
-              subaccountId,
-              sourceId: 3,
-              intentType: 1,
-              intentBytes: new TextEncoder().encode(JSON.stringify({
-                tokenIn, tokenOut,
-                direction: params.side === 'buy' ? 'out' : 'in',
-                amount: rawAmount,
-                slippageBps: params.slippageBps,
-              })),
-            });
-
-            return {
-              content: [{
-                type: 'text' as const,
-                text: JSON.stringify({
-                  status: 'executed',
-                  venue: 'onchain',
-                  trade: tradeLabel,
-                  intentId: result.intentId,
-                  txnHash: result.txnHash,
-                  deltas: result.deltas,
-                  ...(orderbookPrice ? { orderbookPriceWas: orderbookPrice } : {}),
-                }, null, 2),
-              }],
-            };
-          } catch {
-            // Fall through to REST
-          }
+        if (!signingCreds || !osmium) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({
+                status: 'not_submitted',
+                venue: 'onchain',
+                trade: tradeLabel,
+                action: signingCreds
+                  ? 'WebSocket trading client unavailable. No REST fallback attempted.'
+                  : 'Run `npm run login` to enable WebSocket trading.',
+              }, null, 2),
+            }],
+            isError: true,
+          };
         }
 
         try {
-          const executeResult = await iridium.executeSwap({
-            tokenIn, tokenOut,
-            direction: params.side === 'buy' ? 'out' : 'in',
-            ...(params.side === 'buy' ? { amountOut: rawAmount } : { amountIn: rawAmount }),
-            slippageBps: params.slippageBps,
+          const subaccountId = await iridium.getDefaultSubaccountId();
+          const result = await osmium.submitIntent({
+            subaccountId,
+            sourceId: 3,
+            intentType: 1,
+            intentBytes: new TextEncoder().encode(JSON.stringify({
+              tokenIn, tokenOut,
+              direction: params.side === 'buy' ? 'out' : 'in',
+              amount: rawAmount,
+              slippageBps: params.slippageBps,
+            })),
           });
 
           return {
@@ -390,9 +422,13 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
               type: 'text' as const,
               text: JSON.stringify({
                 status: 'executed',
+                via: 'websocket',
                 venue: 'onchain',
                 trade: tradeLabel,
-                result: executeResult,
+                intentId: result.intentId,
+                txnHash: result.txnHash,
+                deltas: result.deltas,
+                ...(orderbookPrice ? { orderbookPriceWas: orderbookPrice } : {}),
               }, null, 2),
             }],
           };
@@ -401,7 +437,7 @@ export function registerTradingTools(server: McpServer, iridium: IridiumClient, 
             content: [{
               type: 'text' as const,
               text: JSON.stringify({
-                status: 'estimate_only',
+                status: 'not_submitted',
                 trade: tradeLabel,
                 venue: 'onchain',
                 estimatedPrice: onchainPrice?.toFixed(6),

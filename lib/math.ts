@@ -69,6 +69,8 @@ export function maxDrawdown(values: number[]): {
       peak = values[i];
       peakIndex = i;
     }
+    // Guard: drawdown ratio is only meaningful when peak > 0
+    if (peak <= 0) continue;
     const dd = (peak - values[i]) / peak;
     if (dd > maxDD) {
       maxDD = dd;

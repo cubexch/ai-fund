@@ -16,6 +16,7 @@ function createMockIridium(overrides: Record<string, any> = {}) {
   return {
     getDefaultSubaccountId: vi.fn().mockResolvedValue(1),
     getMarkets: vi.fn().mockResolvedValue([]),
+    getActiveMarkets: vi.fn().mockResolvedValue([]),
     getTickers: vi.fn().mockResolvedValue([]),
     getPositions: vi.fn().mockResolvedValue({}),
     getOrderHistory: vi.fn().mockResolvedValue([]),
@@ -45,7 +46,7 @@ describe('registerMarketResources', () => {
   describe('markets resource', () => {
     it('returns markets data as JSON', async () => {
       const markets = [{ marketId: 1, symbol: 'BTCUSDC' }, { marketId: 2, symbol: 'ETHUSDC' }];
-      iridium.getMarkets.mockResolvedValue(markets);
+      iridium.getActiveMarkets.mockResolvedValue(markets);
 
       const handler = server.getHandler('markets')!;
       const result = await handler();

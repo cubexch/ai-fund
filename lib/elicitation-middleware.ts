@@ -342,6 +342,8 @@ export function withElicitation<P>(
     }
 
     // All policies passed — execute the original handler
+    // Note: orderCount tracks all invocations through this middleware, not just order placements.
+    // Only wrap order-related tools (place_order, cancel_order, etc.) with this middleware.
     config.session.orderCount++;
     return handler(params, extra);
   };

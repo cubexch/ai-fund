@@ -135,7 +135,7 @@ export function resolvePrice(
   if (currency === 'USDT' || currency === 'USD' || currency === 'USDC') return 1;
   const symbol = `${currency}/USDT`;
   const ticker = tickers.find(t => t.symbol === symbol);
-  return ticker?.last || 0;
+  return ticker?.last ?? 0;
 }
 
 // ── Portfolio exposure ───────────────────────────────────
@@ -564,8 +564,8 @@ export function monitorDrawdown(
   peakEstimate?: number,
 ): DrawdownMonitorResult {
   const peak = peakEstimate ?? currentEquity * 1.05;
-  const drawdownPct = ((peak - currentEquity) / peak) * 100;
-  const recoveryNeeded = ((peak / currentEquity) - 1) * 100;
+  const drawdownPct = peak > 0 ? ((peak - currentEquity) / peak) * 100 : 0;
+  const recoveryNeeded = currentEquity > 0 ? ((peak / currentEquity) - 1) * 100 : Infinity;
 
   const status: DrawdownMonitorResult['status'] = drawdownPct > maxDrawdownPct ? 'CRITICAL'
     : drawdownPct > maxDrawdownPct * 0.7 ? 'WARNING' : 'OK';

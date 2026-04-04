@@ -13,6 +13,7 @@ import type { ZodRawShape, ZodTypeAny } from 'zod';
 import { IridiumClient } from '../client/iridium';
 import { MendelevClient } from '../client/mendelev';
 import { OsmiumClient } from '../client/osmium';
+import type { OrderProgressEvent } from '../client/osmium';
 import { registerAccountTools } from '../tools/account';
 import { registerAnalysisTools } from '../tools/analysis';
 import { registerTradingTools } from '../tools/defi';
@@ -90,6 +91,7 @@ interface CliCommandSpec {
   renderer: RendererId;
   destructive?: boolean;
   hidden?: boolean;
+  examples?: string[];
 }
 
 interface GlobalFlags {
@@ -174,6 +176,10 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'get_positions',
     renderer: 'positions',
+    examples: [
+      'cube account positions',
+      'cube account positions --subaccountId 1',
+    ],
   },
   {
     path: ['account', 'summary'],
@@ -181,6 +187,10 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'get_account',
     renderer: 'accountSummary',
+    examples: [
+      'cube account summary',
+      'cube account summary --subaccountId 1',
+    ],
   },
   {
     path: ['account', 'orders'],
@@ -188,6 +198,11 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'get_order_history',
     renderer: 'orders',
+    examples: [
+      'cube account orders',
+      'cube account orders --symbol tSOLtUSDC',
+      'cube account orders --limit 50',
+    ],
   },
   {
     path: ['account', 'fills'],
@@ -195,6 +210,11 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'get_fills',
     renderer: 'fills',
+    examples: [
+      'cube account fills',
+      'cube account fills --symbol tSOLtUSDC',
+      'cube account fills --limit 20',
+    ],
   },
   {
     path: ['account', 'subaccounts'],
@@ -202,6 +222,9 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'get_subaccounts',
     renderer: 'subaccounts',
+    examples: [
+      'cube account subaccounts',
+    ],
   },
   {
     path: ['account', 'deposit'],
@@ -209,6 +232,11 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'get_account_deposit',
     renderer: 'deposit',
+    examples: [
+      'cube account deposit USDC',
+      'cube account deposit SOL',
+      'cube account deposit --asset BTC',
+    ],
   },
   {
     path: ['account', 'portfolio'],
@@ -216,6 +244,9 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'get_portfolio',
     renderer: 'portfolio',
+    examples: [
+      'cube account portfolio',
+    ],
   },
   {
     path: ['market', 'list'],
@@ -223,6 +254,9 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'get_assets',
     renderer: 'marketList',
+    examples: [
+      'cube market list',
+    ],
   },
   {
     path: ['market', 'tickers'],
@@ -230,6 +264,9 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'get_tickers',
     renderer: 'tickers',
+    examples: [
+      'cube market tickers',
+    ],
   },
   {
     path: ['market', 'book'],
@@ -237,6 +274,10 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'get_order_book',
     renderer: 'orderBook',
+    examples: [
+      'cube market book --symbol tSOLtUSDC',
+      'cube market book --symbol tBTCtUSDC --depth 20',
+    ],
   },
   {
     path: ['market', 'trades'],
@@ -244,6 +285,10 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'get_trades',
     renderer: 'generic',
+    examples: [
+      'cube market trades --symbol tSOLtUSDC',
+      'cube market trades --symbol tBTCtUSDC',
+    ],
   },
   {
     path: ['market', 'candles'],
@@ -251,6 +296,10 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'get_bars',
     renderer: 'generic',
+    examples: [
+      'cube market candles --symbol tSOLtUSDC',
+      'cube market candles --symbol tBTCtUSDC --interval 1d',
+    ],
   },
   {
     path: ['market', 'fees'],
@@ -258,6 +307,10 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'get_fees',
     renderer: 'generic',
+    examples: [
+      'cube market fees --symbol tSOLtUSDC --side Bid --price 80',
+      'cube market fees --symbol tBTCtUSDC --side Ask --price 85000 --quantity 0.01',
+    ],
   },
   {
     path: ['market', 'ta'],
@@ -265,6 +318,10 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'get_technical_analysis',
     renderer: 'generic',
+    examples: [
+      'cube market ta --symbol tSOLtUSDC',
+      'cube market ta --symbol tBTCtUSDC --interval 4h',
+    ],
   },
   {
     path: ['market', 'confluence'],
@@ -272,6 +329,10 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'detect_confluence',
     renderer: 'generic',
+    examples: [
+      'cube market confluence --symbol tSOLtUSDC',
+      'cube market confluence --symbol tBTCtUSDC',
+    ],
   },
   {
     path: ['market', 'squeeze'],
@@ -279,6 +340,10 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'detect_bb_squeeze',
     renderer: 'generic',
+    examples: [
+      'cube market squeeze --symbol tSOLtUSDC',
+      'cube market squeeze --symbol tBTCtUSDC --interval 4h',
+    ],
   },
   {
     path: ['market', 'microstructure'],
@@ -286,6 +351,9 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'get_market_microstructure',
     renderer: 'generic',
+    examples: [
+      'cube market microstructure --symbol tSOLtUSDC',
+    ],
   },
   {
     path: ['market', 'search'],
@@ -293,6 +361,10 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'search_assets',
     renderer: 'generic',
+    examples: [
+      'cube market search BONK',
+      'cube market search --query jupiter --limit 5',
+    ],
   },
   {
     path: ['market', 'trending'],
@@ -300,6 +372,9 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'get_trending',
     renderer: 'generic',
+    examples: [
+      'cube market trending',
+    ],
   },
   {
     path: ['order', 'place'],
@@ -308,6 +383,12 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetName: 'place_order',
     renderer: 'generic',
     destructive: true,
+    examples: [
+      'cube order place --symbol tSOLtUSDC --side BID --price 70 --quantity 1',
+      'cube order place --symbol tBTCtUSDC --side ASK --price 90000 --quantity 0.01',
+      'cube order place --symbol tSOLtUSDC --side buy --price 75 --quantity 2 --postOnly',
+      'cube order place --symbol tSOLtUSDC --side BID --price 70 --quantity 1 --yes',
+    ],
   },
   {
     path: ['order', 'cancel'],
@@ -316,6 +397,10 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetName: 'cancel_order',
     renderer: 'generic',
     destructive: true,
+    examples: [
+      'cube order cancel --symbol tSOLtUSDC --clientOrderId 1234567890',
+      'cube order cancel --marketId 200028 --clientOrderId 1234567890',
+    ],
   },
   {
     path: ['order', 'modify'],
@@ -324,6 +409,10 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetName: 'modify_order',
     renderer: 'generic',
     destructive: true,
+    examples: [
+      'cube order modify --symbol tSOLtUSDC --clientOrderId 123 --newQuantity 2 --newPrice 72',
+      'cube order modify --symbol tBTCtUSDC --clientOrderId 456 --newQuantity 0.02',
+    ],
   },
   {
     path: ['order', 'cancel-all'],
@@ -332,6 +421,11 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetName: 'cancel_all_orders',
     renderer: 'generic',
     destructive: true,
+    examples: [
+      'cube order cancel-all',
+      'cube order cancel-all --symbol tSOLtUSDC',
+      'cube order cancel-all --side Bid',
+    ],
   },
   {
     path: ['order', 'close'],
@@ -340,6 +434,10 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetName: 'close_position',
     renderer: 'generic',
     destructive: true,
+    examples: [
+      'cube order close --symbol SOL',
+      'cube order close --symbol BTC --percentage 50',
+    ],
   },
   {
     path: ['order', 'list'],
@@ -347,6 +445,11 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'get_orders',
     renderer: 'orders',
+    examples: [
+      'cube order list',
+      'cube order list --symbol tSOLtUSDC',
+      'cube order list --status all',
+    ],
   },
   {
     path: ['risk', 'size'],
@@ -354,6 +457,10 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'calculate_position_size',
     renderer: 'generic',
+    examples: [
+      'cube risk size --portfolioValue 10000 --entryPrice 80 --stopLossPrice 75',
+      'cube risk size --portfolioValue 50000 --entryPrice 85000 --stopLossPrice 80000 --riskPerTrade 0.01',
+    ],
   },
   {
     path: ['risk', 'portfolio'],
@@ -361,6 +468,10 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'assess_portfolio_risk',
     renderer: 'generic',
+    examples: [
+      'cube risk portfolio',
+      'cube risk portfolio --symbol tSOLtUSDC',
+    ],
   },
   {
     path: ['risk', 'stress-test'],
@@ -368,6 +479,10 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'simulate_stress_test',
     renderer: 'generic',
+    examples: [
+      'cube risk stress-test',
+      'cube risk stress-test --scenario btc_crash_2022',
+    ],
   },
   {
     path: ['trade', 'execute'],
@@ -376,6 +491,11 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetName: 'execute_trade',
     renderer: 'generic',
     destructive: true,
+    examples: [
+      'cube trade execute --base SOL --side buy --amount 1.5',
+      'cube trade execute --base BTC --side sell --amount 0.01 --slippageBps 100',
+      'cube trade execute --base BONK --side buy --amount 100000 --venue onchain',
+    ],
   },
   {
     path: ['trade', 'twap'],
@@ -383,6 +503,10 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'plan_twap',
     renderer: 'generic',
+    examples: [
+      'cube trade twap --symbol tSOLtUSDC --totalAmount 100',
+      'cube trade twap --symbol tBTCtUSDC --totalAmount 1 --durationMinutes 120 --numSlices 20',
+    ],
   },
   {
     path: ['trade', 'impact'],
@@ -390,6 +514,10 @@ const PUBLIC_COMMANDS: CliCommandSpec[] = [
     targetKind: 'tool',
     targetName: 'simulate_market_impact',
     renderer: 'impact',
+    examples: [
+      'cube trade impact --symbol tSOLtUSDC --side buy --amount 1000',
+      'cube trade impact --symbol tBTCtUSDC --side sell --amount 10',
+    ],
   },
 ];
 
@@ -611,10 +739,17 @@ export function parseToolParams(commandArgs: string[], schema: ZodTypeAny | unde
     }
   }
 
-  // Fill required params first, then optional params, from positional args
+  // Fill required params first, then optional params, from positional args.
+  // For optional params, skip number fields when the next positional value isn't numeric
+  // to avoid coercing strings like "SOL" to NaN when they belong to a later string param.
   const optional = Object.keys(shape).filter(key => isOptional(shape[key]));
   for (const key of [...required, ...optional]) {
     if (params[key] === undefined && positional.length > 0) {
+      const baseKind = schemaKind(unwrapSchema(shape[key]));
+      const isNumeric = baseKind === 'ZodNumber' || baseKind === 'number';
+      if (isNumeric && isOptional(shape[key]) && isNaN(Number(positional[0]))) {
+        continue;
+      }
       params[key] = coerceValueBySchema(positional.shift(), shape[key]);
     }
   }
@@ -1122,6 +1257,14 @@ function printCommandHelp(spec: CliCommandSpec, catalog: Catalog, output: CliOut
     return [flag, type, required ? 'required' : 'optional', detail || ''];
   });
   output.stdout.push(...renderTable(['Option', 'Type', 'Required', 'Description'], rows));
+
+  if (spec.examples && spec.examples.length > 0) {
+    output.stdout.push('');
+    output.stdout.push(section('Examples'));
+    for (const ex of spec.examples) {
+      output.stdout.push(`  ${c.dim}$${c.reset} ${ex}`);
+    }
+  }
 }
 
 function printLegacyToolList(output: CliOutput, catalog: Catalog): void {
@@ -1190,6 +1333,28 @@ function listMcpResources(catalog: Catalog): Array<{ name: string; uri: string; 
 
 function printWarning(message: string, output: CliOutput): void {
   output.stderr.push(`${c.yellow}warning:${c.reset} ${message}`);
+}
+
+/** Format and write order progress events directly to stderr for real-time feedback */
+function formatOrderProgress(event: OrderProgressEvent): string {
+  switch (event.stage) {
+    case 'submitted':
+      return `${c.dim}⟶${c.reset} ${c.cyan}submitted${c.reset} ${event.side} ${event.orderType} ${event.timeInForce}`;
+    case 'ack':
+      return `${c.dim}⟶${c.reset} ${c.green}accepted${c.reset} oid=${event.exchangeOrderId}`;
+    case 'fill':
+      return `${c.dim}⟶${c.reset} ${c.green}${c.bold}fill${c.reset} qty=${event.fillQuantity} @ ${event.fillPrice}  leaves=${event.leavesQuantity}`;
+    case 'canceled':
+      return `${c.dim}⟶${c.reset} ${c.yellow}canceled${c.reset} qty=${event.canceledQuantity}`;
+    case 'modified':
+      return `${c.dim}⟶${c.reset} ${c.cyan}modified${c.reset}`;
+    case 'rejected':
+      return `${c.dim}⟶${c.reset} ${c.red}rejected${c.reset} ${event.reason}`;
+    case 'done': {
+      const statusColor = event.status === 'filled' ? c.green : event.status === 'canceled' ? c.red : c.yellow;
+      return `${c.dim}⟶${c.reset} ${statusColor}${c.bold}${event.status}${c.reset}`;
+    }
+  }
 }
 
 function printError(message: string, output: CliOutput, errorCode = 1): number {
@@ -1338,7 +1503,7 @@ function renderAccountSummary(data: any): string[] {
 }
 
 function renderOrders(data: any): string[] {
-  const rows = Array.isArray(data) ? data : [];
+  const rows = Array.isArray(data) ? data : (data?.orders ?? []);
   if (rows.length === 0) return ['No orders found.'];
 
   const tableRows = rows.map((order: any) => [
@@ -1360,7 +1525,7 @@ function renderOrders(data: any): string[] {
 }
 
 function renderFills(data: any): string[] {
-  const rows = Array.isArray(data) ? data : [];
+  const rows = Array.isArray(data) ? data : (data?.fills ?? []);
   if (rows.length === 0) return ['No fills found.'];
 
   const tableRows = rows.map((fill: any) => [
@@ -1826,6 +1991,10 @@ export async function runCli(
         output,
       };
     }
+    // Enable real-time order progress on stderr for destructive trade commands
+    catalog.clients.osmium.onOrderProgress = (event) => {
+      process.stderr.write(`${formatOrderProgress(event)}\n`);
+    };
   }
 
   if (resolved.exactToolName) {
