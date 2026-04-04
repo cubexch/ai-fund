@@ -228,7 +228,23 @@ CROWD POSITIONING SUMMARY
 -------------------------
 [One paragraph: what is the crowd doing, why it matters, and what historically
 happens when positioning looks like this. No recommendations — just the data story.]
+
+SOURCES (when external narrative inputs are used)
+-------------------------------------------------
+- [Publisher] — [Title] ([URL]) | Published: [YYYY-MM-DD] | Author: [Name or "Not listed"]
+- [Publisher] — [Title] ([URL]) | Published: [YYYY-MM-DD] | Author: [Name or "Not listed"]
 ```
+
+
+## External News & Commentary Inputs
+
+When sentiment analysis benefits from narrative context, include article-driven signals alongside exchange metrics:
+
+- Use the query tool to read `https://cube.exchange/sitemap.xml` (and nested sitemap indexes if present) and collect article URLs from Cube's publication/news paths.
+- Pull article metadata for each URL (title, published date, and author when available) before incorporating it into the narrative view.
+- Treat articles as contextual sentiment inputs (qualitative), not measured positioning metrics (quantitative).
+- In every response that uses article context, include a **Sources** block with publisher, title, URL, publish date, and author attribution.
+- If author information is missing, label it clearly as `Author: Not listed` rather than inferring.
 
 ## Safety Rules
 
