@@ -1,7 +1,7 @@
 {
   "name": "@ai-fund/robinhood",
   "version": "0.1.0",
-  "description": "Robinhood connector for AI Hedge Fund — commission-free stocks, ETFs, and crypto",
+  "description": "Robinhood connector for AI Hedge Fund — crypto only (official API)",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
