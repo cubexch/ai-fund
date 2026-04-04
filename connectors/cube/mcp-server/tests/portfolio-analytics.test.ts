@@ -4,6 +4,8 @@ import {
   computePortfolioExposure,
   checkPreTrade,
   simulateStressTest,
+  checkConfidenceRails,
+  SAFETY_PROFILES,
 } from '@ai-fund/lib/portfolio-analytics';
 
 // ── Helpers ───────────────────────────────────────────────
@@ -201,5 +203,134 @@ describe('simulateStressTest', () => {
     const result = simulateStressTest([], tickers, { BTC: -0.5 }, 10);
     expect(result.totalLoss).toBe(0);
     expect(result.survivable).toBe(true);
+  });
+});
+
+// ── checkConfidenceRails ──────────────────────────────────
+
+describe('checkConfidenceRails', () => {
+  it('approves small order with safe profile', () => {
+    const result = checkConfidenceRails(
+      balances,
+      tickers,
+      { symbol: 'ETH/USDT', side: 'buy', amount: 0.1, price: 3000 },
+      'safe',
+      { mode: 'paper' },
+    );
+    expect(result.decision).toBe('GO');
+    expect(result.profile).toBe('safe');
+  });
+
+  it('blocks oversized position in safe mode', () => {
+    const result = checkConfidenceRails(
+      balances,
+      tickers,
+      { symbol: 'ETH/USDT', side: 'buy', amount: 10, price: 3000 },
+      'safe',
+      { mode: 'paper' },
+    );
+    // 30000/100000 = 30%, safe max is 2%
+    expect(result.decision).toBe('BLOCKED');
+    const posRail = result.rails.find(r => r.name === 'position_size');
+    expect(posRail?.passed).toBe(false);
+    expect(posRail?.explanation).toContain('Reduce size');
+  });
+
+  it('blocks live trading in safe mode', () => {
+    const result = checkConfidenceRails(
+      balances,
+      tickers,
+      { symbol: 'ETH/USDT', side: 'buy', amount: 0.01, price: 3000 },
+      'safe',
+      { mode: 'live' },
+    );
+    expect(result.decision).toBe('BLOCKED');
+    const paperRail = result.rails.find(r => r.name === 'paper_mode');
+    expect(paperRail?.passed).toBe(false);
+  });
+
+  it('allows live trading in moderate profile', () => {
+    const result = checkConfidenceRails(
+      balances,
+      tickers,
+      { symbol: 'ETH/USDT', side: 'buy', amount: 0.1, price: 3000 },
+      'moderate',
+      { mode: 'live' },
+    );
+    // No paper_mode rail should appear for moderate profile
+    expect(result.rails.find(r => r.name === 'paper_mode')).toBeUndefined();
+  });
+
+  it('blocks when daily loss limit exceeded', () => {
+    const result = checkConfidenceRails(
+      balances,
+      tickers,
+      { symbol: 'ETH/USDT', side: 'buy', amount: 0.01, price: 3000 },
+      'safe',
+      { mode: 'paper', dailyPnlPct: -2 },
+    );
+    expect(result.decision).toBe('BLOCKED');
+    const dailyRail = result.rails.find(r => r.name === 'daily_loss');
+    expect(dailyRail?.passed).toBe(false);
+    expect(dailyRail?.explanation).toContain('Stop trading');
+  });
+
+  it('warns on too many open orders', () => {
+    const result = checkConfidenceRails(
+      balances,
+      tickers,
+      { symbol: 'ETH/USDT', side: 'buy', amount: 0.01, price: 3000 },
+      'safe',
+      { mode: 'paper', openOrderCount: 10 },
+    );
+    expect(result.decision).toBe('WARNING');
+    const ordersRail = result.rails.find(r => r.name === 'open_orders');
+    expect(ordersRail?.passed).toBe(false);
+    expect(ordersRail?.severity).toBe('warn');
+  });
+
+  it('blocks excessive leverage', () => {
+    const result = checkConfidenceRails(
+      balances,
+      tickers,
+      { symbol: 'ETH/USDT', side: 'buy', amount: 0.01, price: 3000 },
+      'safe',
+      { mode: 'paper', leverage: 5 },
+    );
+    expect(result.decision).toBe('BLOCKED');
+    const levRail = result.rails.find(r => r.name === 'leverage');
+    expect(levRail?.passed).toBe(false);
+  });
+
+  it('accepts custom safety profile', () => {
+    const result = checkConfidenceRails(
+      balances,
+      tickers,
+      { symbol: 'ETH/USDT', side: 'sell', amount: 5, price: 3000 },
+      { maxPositionPct: 20, maxPortfolioDrawdownPct: 30, maxDailyLossPct: 10, requirePaperMode: false, maxOpenOrders: 100, maxLeverage: 20 },
+      { mode: 'live' },
+    );
+    expect(result.profile).toBe('custom');
+    expect(result.decision).toBe('GO');
+  });
+
+  it('provides human-readable explanations for all rails', () => {
+    const result = checkConfidenceRails(
+      balances,
+      tickers,
+      { symbol: 'ETH/USDT', side: 'buy', amount: 0.01, price: 3000 },
+      'safe',
+      { mode: 'paper', dailyPnlPct: 0.5, openOrderCount: 2, leverage: 1 },
+    );
+    for (const rail of result.rails) {
+      expect(rail.explanation.length).toBeGreaterThan(10);
+    }
+  });
+
+  it('safety profiles have correct defaults', () => {
+    expect(SAFETY_PROFILES.safe.requirePaperMode).toBe(true);
+    expect(SAFETY_PROFILES.safe.maxLeverage).toBe(1);
+    expect(SAFETY_PROFILES.moderate.requirePaperMode).toBe(false);
+    expect(SAFETY_PROFILES.aggressive.maxPositionPct).toBe(15);
   });
 });
