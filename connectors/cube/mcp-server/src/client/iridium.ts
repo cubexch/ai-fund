@@ -122,7 +122,7 @@ export class IridiumClient {
     if (this._assetRegistry) return this._assetRegistry;
 
     if (!this._assetRegistryPromise) {
-      this._assetRegistryPromise = this.getMarkets().then(markets => {
+      this._assetRegistryPromise = this.getActiveMarkets().then(markets => {
         const registry = new AssetRegistry();
         registry.buildFromMarkets(markets);
         this._assetRegistry = registry;
@@ -209,6 +209,12 @@ export class IridiumClient {
       this._sources = new Map(data.sources.map(s => [s.sourceId, s]));
     }
     return data.markets;
+  }
+
+  /** Get only active markets (status === 1). Use this for all trading and market selection. */
+  async getActiveMarkets(): Promise<Market[]> {
+    const markets = await this.getMarkets();
+    return markets.filter(m => m.status === 1);
   }
 
   /** Get all chain/network sources. Cached from the /markets response. */
@@ -380,9 +386,12 @@ export class IridiumClient {
     if (params.marketId) qs.set('marketId', String(params.marketId));
     if (params.limit) qs.set('limit', String(params.limit));
     const query = qs.toString() ? `?${qs}` : '';
-    return this.request<HistoricalOrder[]>(
+    const raw = await this.request<any>(
       `/users/subaccount/${subaccountId}/orders${query}`, {}, { authenticated: 'iridium' }
     );
+    if (Array.isArray(raw)) return raw;
+    if (raw?.orders && Array.isArray(raw.orders)) return raw.orders;
+    return [];
   }
 
   async getFills(subaccountId: number, params: { marketId?: number; limit?: number } = {}): Promise<Fill[]> {
@@ -390,9 +399,12 @@ export class IridiumClient {
     if (params.marketId) qs.set('marketId', String(params.marketId));
     if (params.limit) qs.set('limit', String(params.limit));
     const query = qs.toString() ? `?${qs}` : '';
-    return this.request<Fill[]>(
+    const raw = await this.request<any>(
       `/users/subaccount/${subaccountId}/fills${query}`, {}, { authenticated: 'iridium' }
     );
+    if (Array.isArray(raw)) return raw;
+    if (raw?.fills && Array.isArray(raw.fills)) return raw.fills;
+    return [];
   }
 
   // ── AUTHENTICATED: Fees (/ir/v0, requires login) ──────

@@ -10,10 +10,10 @@ export function registerAccountTools(server: McpServer, iridium: IridiumClient) 
   async function resolveMarketId(symbol?: string, marketId?: number): Promise<number | undefined> {
     if (marketId !== undefined) return marketId;
     if (!symbol) return undefined;
-    const markets = await iridium.getMarkets();
+    const markets = await iridium.getActiveMarkets();
     const upper = symbol.toUpperCase();
     const market = markets.find(m => m.symbol.toUpperCase() === upper);
-    if (!market) throw new Error(`Market not found for symbol: ${symbol}. Use get_assets to list available markets.`);
+    if (!market) throw new Error(`Market not found for symbol: ${symbol}. Use get_assets to list active markets.`);
     return market.marketId;
   }
 

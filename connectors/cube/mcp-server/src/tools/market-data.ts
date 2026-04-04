@@ -10,15 +10,15 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
 
   // Helper: resolve a symbol string to a market object
   async function resolveMarket(params: { symbol?: string; marketId?: number }) {
-    const markets = await iridium.getMarkets();
+    const markets = await iridium.getActiveMarkets();
     if (params.symbol) {
       const market = markets.find(m => m.symbol === params.symbol);
-      if (!market) throw new Error(`Unknown symbol: ${params.symbol}`);
+      if (!market) throw new Error(`Unknown symbol: ${params.symbol}. Use get_assets to list active markets.`);
       return { market, markets };
     }
     if (params.marketId !== undefined) {
       const market = markets.find(m => m.marketId === params.marketId);
-      if (!market) throw new Error(`Unknown marketId: ${params.marketId}`);
+      if (!market) throw new Error(`Unknown marketId: ${params.marketId}. Market may be inactive.`);
       return { market, markets };
     }
     throw new Error('Either symbol or marketId must be provided');
@@ -30,7 +30,7 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
     {},
     async () => {
       try {
-        const markets = await iridium.getMarkets();
+        const markets = await iridium.getActiveMarkets();
         return {
           content: [
             {
@@ -61,7 +61,7 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
           const tops = mendelev.getTops();
           if (tops.length > 0) {
             // Get markets to map marketId → symbol
-            const markets = await iridium.getMarkets();
+            const markets = await iridium.getActiveMarkets();
             const marketMap = new Map(markets.map(m => [m.marketId, m]));
 
             for (const top of tops) {
@@ -342,8 +342,11 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
           ],
         };
       } catch (error: any) {
+        const msg = error.message?.includes('verification-key auth not allowed')
+          ? 'Fee estimation requires API key auth — not available with verification-key login. Use get_order_book to estimate fees from spread instead.'
+          : `Failed: ${error.message}`;
         return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
+          content: [{ type: 'text' as const, text: msg }],
           isError: true,
         };
       }

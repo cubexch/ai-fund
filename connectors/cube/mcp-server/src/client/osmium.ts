@@ -1,6 +1,6 @@
 import { WebSocket } from 'ws';
-import { buildWsVerificationKeyCredentials, getEnvironment, getSigningCredentials, getSigningKey, hasAuth } from './auth';
-import { signMessage } from './signing';
+import { buildWsVerificationKeyCredentials, getEnvironment, getSigningCredentials, getSigningKey, hasAuth, resolveAuth } from './auth';
+import { signMessage, encodePublicKey, fromHex } from './signing';
 import {
   CredentialsMethods,
   OrderRequestMethods,
@@ -16,10 +16,16 @@ import {
   TimeInForce,
   OrderType,
   PostOnly,
+  ConnectionFlags,
 } from '@cubexch/client/lib/trade.js';
 import type {
   Credentials,
   OrderResponse,
+  OrderRequest,
+  AssetPosition,
+  Fill,
+  SignatureInfo,
+  Bootstrap,
 } from '@cubexch/client/lib/trade.js';
 import type {
   WalletEvent,
@@ -59,9 +65,30 @@ export class OsmiumClient {
   private requestIdCounter = 1n;
   private clientOrderIdCounter = BigInt(Date.now()) * 1000n;
   private pendingRequests = new Map<bigint, { resolve: (v: any) => void; reject: (e: Error) => void; timeout: ReturnType<typeof setTimeout> }>();
+  /** Track IOC/FOK orders awaiting fills + cancel to report full execution result */
+  private pendingIocOrders = new Map<bigint, {
+    resolve: (v: OrderResult) => void;
+    reject: (e: Error) => void;
+    timeout: ReturnType<typeof setTimeout>;
+    ack: { clientOrderId: string; exchangeOrderId: string; marketId: number; side: string; transactTime: string };
+    fills: Array<{ fillPrice: string; fillQuantity: string; fillQuoteQuantity: string }>;
+    totalFillQuantity: bigint;
+  }>();
   private connected = false;
   private connecting: Promise<void> | null = null;
   private subaccountId: number | null = null;
+  private signingKey: CryptoKey | null = null;
+  private verificationKeyEncoded: string | null = null;
+
+  // Bootstrap data from connection
+  private _bootstrapOrders: BootstrapOrder[] = [];
+  private _bootstrapPositions: AssetPosition[] = [];
+
+  // Event callbacks for live updates
+  onFill?: (fill: Fill) => void;
+  onPositionUpdate?: (position: AssetPosition) => void;
+  /** Progress callback for order lifecycle events (submitted, ack, fill, cancel) */
+  onOrderProgress?: (event: OrderProgressEvent) => void;
 
   setSubaccountId(id: number): void {
     this.subaccountId = id;
@@ -100,7 +127,18 @@ export class OsmiumClient {
   private async _connect(): Promise<void> {
     const env = getEnvironment(process.env.CUBE_ENV);
 
+    // Resolve signing key for order signatures
+    const auth = await resolveAuth();
+    if (auth) {
+      this.signingKey = auth.privateKey;
+      this.verificationKeyEncoded = encodePublicKey(fromHex(auth.publicKeyHex));
+    }
+
     const wsCreds = await buildWsVerificationKeyCredentials();
+
+    // Reset bootstrap state
+    this._bootstrapOrders = [];
+    this._bootstrapPositions = [];
 
     return new Promise((resolve, reject) => {
       if (this.ws) {
@@ -124,7 +162,7 @@ export class OsmiumClient {
           accessKeyId: wsCreds.accessKeyId,
           signature: wsCreds.signature,
           timestamp: wsCreds.timestamp,
-          flags: wsCreds.flags,
+          flags: BigInt(ConnectionFlags.CF_WALLET_EVENTS),
           verificationKey: wsCreds.verificationKey,
           userKey: wsCreds.userKey,
         };
@@ -135,10 +173,11 @@ export class OsmiumClient {
       this.ws.on('message', (data: ArrayBuffer | Buffer) => {
         const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
 
-        // Try to decode as Bootstrap first (during connection phase)
+        // During connection phase, decode as Bootstrap
         if (!this.connected) {
           try {
             const bootstrap = BootstrapMethods.decode(bytes);
+            this.handleBootstrap(bootstrap);
             if (bootstrap.done) {
               clearTimeout(connectTimeout);
               this.connected = true;
@@ -147,7 +186,7 @@ export class OsmiumClient {
               return;
             }
           } catch {
-            // Not a bootstrap message, try as OrderResponse
+            // Not a bootstrap message — skip during connect phase
           }
           return;
         }
@@ -181,6 +220,13 @@ export class OsmiumClient {
         }
         this.pendingRequests.clear();
 
+        // Reject all pending IOC orders
+        for (const [, pending] of this.pendingIocOrders) {
+          clearTimeout(pending.timeout);
+          pending.reject(new Error(`WebSocket closed: ${code} ${reason?.toString()}`));
+        }
+        this.pendingIocOrders.clear();
+
         if (!wasConnected) {
           reject(new Error(`WebSocket closed during connect: ${code} ${reason?.toString()}`));
         }
@@ -204,7 +250,7 @@ export class OsmiumClient {
     const requestId = this.nextRequestId();
     const clientOrderId = this.nextClientOrderId();
 
-    const msg = OrderRequestMethods.encode({
+    const request: OrderRequest = {
       new: {
         clientOrderId,
         requestId,
@@ -216,14 +262,26 @@ export class OsmiumClient {
         orderType: ORDER_TYPE_MAP[params.orderType ?? 'LIMIT'] ?? OrderType.LIMIT,
         subaccountId: this.getSubaccountId(),
         postOnly: params.postOnly ? PostOnly.ENABLED : PostOnly.DISABLED,
-        cancelOnDisconnect: params.cancelOnDisconnect ?? true,
+        cancelOnDisconnect: params.cancelOnDisconnect ?? false,
         quoteQuantity: params.quoteQuantity !== undefined ? BigInt(params.quoteQuantity) : undefined,
         stopPrice: params.stopPrice !== undefined ? BigInt(params.stopPrice) : undefined,
       },
-    }).finish();
+    };
 
+    const isIoc = (params.timeInForce === 'IOC' || params.timeInForce === 'FOK');
+
+    // For IOC/FOK: register tracking BEFORE sending so fills/cancels aren't missed
+    if (isIoc) {
+      const iocPromise = this.setupIocTracking(requestId, clientOrderId, 30_000);
+      const msg = await this.encodeAndSign(request);
+      this.ws!.send(msg);
+      this.onOrderProgress?.({ stage: 'submitted', clientOrderId: clientOrderId.toString(), side: params.side, orderType: params.orderType ?? 'LIMIT', timeInForce: params.timeInForce ?? 'GFS' });
+      return iocPromise;
+    }
+
+    const msg = await this.encodeAndSign(request);
     this.ws!.send(msg);
-
+    this.onOrderProgress?.({ stage: 'submitted', clientOrderId: clientOrderId.toString(), side: params.side, orderType: params.orderType ?? 'LIMIT', timeInForce: params.timeInForce ?? 'GFS' });
     return this.waitForResponse<OrderResult>(requestId, clientOrderId, 30_000);
   }
 
@@ -231,15 +289,16 @@ export class OsmiumClient {
     await this.ensureConnected();
     const requestId = this.nextRequestId();
 
-    const msg = OrderRequestMethods.encode({
+    const request: OrderRequest = {
       cancel: {
         marketId: BigInt(params.marketId),
         clientOrderId: BigInt(params.clientOrderId),
         requestId,
         subaccountId: this.getSubaccountId(),
       },
-    }).finish();
+    };
 
+    const msg = await this.encodeAndSign(request);
     this.ws!.send(msg);
 
     return this.waitForResponse<CancelResult>(requestId, BigInt(params.clientOrderId), 30_000);
@@ -249,7 +308,7 @@ export class OsmiumClient {
     await this.ensureConnected();
     const requestId = this.nextRequestId();
 
-    const msg = OrderRequestMethods.encode({
+    const request: OrderRequest = {
       modify: {
         marketId: BigInt(params.marketId),
         clientOrderId: BigInt(params.clientOrderId),
@@ -259,8 +318,9 @@ export class OsmiumClient {
         newQuantity: BigInt(params.newQuantity),
         postOnly: params.postOnly ? PostOnly.ENABLED : PostOnly.DISABLED,
       },
-    }).finish();
+    };
 
+    const msg = await this.encodeAndSign(request);
     this.ws!.send(msg);
 
     return this.waitForResponse<OrderResult>(requestId, BigInt(params.clientOrderId), 30_000);
@@ -270,15 +330,16 @@ export class OsmiumClient {
     await this.ensureConnected();
     const requestId = this.nextRequestId();
 
-    const msg = OrderRequestMethods.encode({
+    const request: OrderRequest = {
       mc: {
         subaccountId: this.getSubaccountId(),
         marketId: params.marketId !== undefined ? BigInt(params.marketId) : undefined,
         side: params.side !== undefined ? (SIDE_MAP[params.side] ?? undefined) : undefined,
         requestId,
       },
-    }).finish();
+    };
 
+    const msg = await this.encodeAndSign(request);
     this.ws!.send(msg);
 
     return this.waitForResponse<MassCancelResult>(requestId, 0n, 30_000);
@@ -527,6 +588,16 @@ export class OsmiumClient {
     });
   }
 
+  // ── Getters for bootstrap data ────────────────────────────
+
+  get bootstrapOrders(): BootstrapOrder[] {
+    return this._bootstrapOrders;
+  }
+
+  get bootstrapPositions(): AssetPosition[] {
+    return this._bootstrapPositions;
+  }
+
   // ── Internals ────────────────────────────────────────────
 
   private async ensureConnected(): Promise<void> {
@@ -541,6 +612,41 @@ export class OsmiumClient {
 
   private nextClientOrderId(): bigint {
     return this.clientOrderIdCounter++;
+  }
+
+  /**
+   * Encode an OrderRequest and sign it with Ed25519 if signing key is available.
+   * Follows the same pattern as the app and core test helpers:
+   * 1. Encode request WITHOUT signatureInfo
+   * 2. Sign the encoded bytes
+   * 3. Re-encode WITH signatureInfo
+   */
+  private async encodeAndSign(request: OrderRequest): Promise<Uint8Array> {
+    if (!this.signingKey || !this.verificationKeyEncoded) {
+      // No signing key — send unsigned (will fail if server requires signatures)
+      return OrderRequestMethods.encode(request).finish();
+    }
+
+    // 1. Encode without signatureInfo
+    const unsignedBytes = OrderRequestMethods.encode({
+      ...request,
+      signatureInfo: undefined,
+    }).finish();
+
+    // 2. Sign the encoded bytes with Ed25519
+    const signature = await signMessage(unsignedBytes, this.signingKey);
+
+    // 3. Re-encode with signatureInfo
+    const signatureInfo: SignatureInfo = {
+      signature: Buffer.from(signature).toString('base64').replace(/=+$/, ''),
+      verificationKey: this.verificationKeyEncoded,
+      timestamp: 0n,
+    };
+
+    return OrderRequestMethods.encode({
+      ...request,
+      signatureInfo,
+    }).finish();
   }
 
   private startHeartbeat(): void {
@@ -564,7 +670,101 @@ export class OsmiumClient {
     }
   }
 
+  /**
+   * Process bootstrap messages received during connection.
+   * Bootstrap contains: active orders, asset positions, contract positions, done.
+   */
+  private handleBootstrap(bootstrap: Bootstrap): void {
+    if (bootstrap.active) {
+      for (const order of bootstrap.active.orders) {
+        this._bootstrapOrders.push({
+          clientOrderId: order.clientOrderId.toString(),
+          exchangeOrderId: order.exchangeOrderId.toString(),
+          marketId: Number(order.marketId),
+          price: order.price?.toString() ?? '',
+          quantity: order.orderQuantity.toString(),
+          side: order.side === Side.BID ? 'BID' : 'ASK',
+          orderType: order.orderType,
+          timeInForce: order.timeInForce,
+        });
+      }
+    }
+    if (bootstrap.position) {
+      for (const pos of bootstrap.position.positions) {
+        this._bootstrapPositions.push(pos);
+      }
+    }
+  }
+
   private handleResponse(response: OrderResponse): void {
+    // Handle live position updates (no requestId matching needed)
+    if (response.position) {
+      this.onPositionUpdate?.(response.position);
+      return;
+    }
+
+    // Handle fill notifications
+    if (response.fill) {
+      this.onFill?.(response.fill);
+      this.onOrderProgress?.({
+        stage: 'fill',
+        clientOrderId: response.fill.clientOrderId.toString(),
+        fillPrice: response.fill.fillPrice.toString(),
+        fillQuantity: response.fill.fillQuantity.toString(),
+        leavesQuantity: response.fill.leavesQuantity.toString(),
+        cumulativeQuantity: response.fill.cumulativeQuantity.toString(),
+      });
+      // Accumulate fill for pending IOC orders
+      const iocPending = this.pendingIocOrders.get(response.fill.clientOrderId);
+      if (iocPending) {
+        iocPending.fills.push({
+          fillPrice: response.fill.fillPrice.toString(),
+          fillQuantity: response.fill.fillQuantity.toString(),
+          fillQuoteQuantity: response.fill.fillQuoteQuantity.toString(),
+        });
+        iocPending.totalFillQuantity += response.fill.fillQuantity;
+        // If fully filled (leavesQuantity === 0), resolve immediately — no cancel will come
+        if (response.fill.leavesQuantity === 0n) {
+          this.pendingIocOrders.delete(response.fill.clientOrderId);
+          clearTimeout(iocPending.timeout);
+          this.onOrderProgress?.({ stage: 'done', clientOrderId: response.fill.clientOrderId.toString(), status: 'filled' });
+          iocPending.resolve({
+            type: 'newOrderAck',
+            ...iocPending.ack,
+            status: 'filled',
+            quantity: iocPending.totalFillQuantity.toString(),
+            price: iocPending.fills[0].fillPrice,
+            fills: iocPending.fills,
+          } as OrderResult);
+        }
+      }
+      return;
+    }
+
+    // IOC cancel: resolve the pending IOC order with execution results.
+    // Match ANY cancel against pending IOC orders — reason can be IOC(3),
+    // WOULD_EXCEED_PROTECTION_RANGE(10), or others depending on market conditions.
+    if (response.cancelAck) {
+      const iocPending = this.pendingIocOrders.get(response.cancelAck.clientOrderId);
+      if (iocPending) {
+        this.pendingIocOrders.delete(response.cancelAck.clientOrderId);
+        clearTimeout(iocPending.timeout);
+        const filled = iocPending.totalFillQuantity > 0n;
+        const status = filled ? 'partial_fill' : 'canceled';
+        this.onOrderProgress?.({ stage: 'done', clientOrderId: response.cancelAck.clientOrderId.toString(), status, canceledQuantity: response.cancelAck.baseQuantityCanceled.toString() });
+        iocPending.resolve({
+          type: 'newOrderAck',
+          ...iocPending.ack,
+          status,
+          quantity: iocPending.totalFillQuantity.toString(),
+          price: iocPending.fills.length > 0 ? iocPending.fills[0].fillPrice : '',
+          fills: iocPending.fills,
+          canceledQuantity: response.cancelAck.baseQuantityCanceled.toString(),
+        } as OrderResult);
+        return;
+      }
+    }
+
     let requestId: bigint | undefined;
 
     if (response.newAck) {
@@ -593,14 +793,17 @@ export class OsmiumClient {
 
     // Rejects
     if (response.newReject) {
+      this.onOrderProgress?.({ stage: 'rejected', reason: `reason=${response.newReject.reason}` });
       pending.reject(new Error(`Order rejected: reason=${response.newReject.reason}`));
       return;
     }
     if (response.cancelReject) {
+      this.onOrderProgress?.({ stage: 'rejected', reason: `cancel rejected: reason=${response.cancelReject.reason}` });
       pending.reject(new Error(`Cancel rejected: reason=${response.cancelReject.reason}`));
       return;
     }
     if (response.modifyReject) {
+      this.onOrderProgress?.({ stage: 'rejected', reason: `modify rejected: reason=${response.modifyReject.reason}` });
       pending.reject(new Error(`Modify rejected: reason=${response.modifyReject.reason}`));
       return;
     }
@@ -608,6 +811,7 @@ export class OsmiumClient {
     // Acks
     if (response.newAck) {
       const ack = response.newAck;
+      this.onOrderProgress?.({ stage: 'ack', clientOrderId: ack.clientOrderId.toString(), exchangeOrderId: ack.exchangeOrderId.toString() });
       pending.resolve({
         type: 'newOrderAck',
         clientOrderId: ack.clientOrderId.toString(),
@@ -624,6 +828,7 @@ export class OsmiumClient {
 
     if (response.cancelAck) {
       const ack = response.cancelAck;
+      this.onOrderProgress?.({ stage: 'canceled', clientOrderId: ack.clientOrderId.toString(), canceledQuantity: ack.baseQuantityCanceled.toString() });
       pending.resolve({
         type: 'cancelOrderAck',
         clientOrderId: ack.clientOrderId.toString(),
@@ -636,6 +841,7 @@ export class OsmiumClient {
 
     if (response.modifyAck) {
       const ack = response.modifyAck;
+      this.onOrderProgress?.({ stage: 'modified', clientOrderId: ack.clientOrderId.toString() });
       pending.resolve({
         type: 'modifyOrderAck',
         clientOrderId: ack.clientOrderId.toString(),
@@ -669,6 +875,63 @@ export class OsmiumClient {
       }, timeoutMs);
 
       this.pendingRequests.set(requestId, { resolve, reject, timeout });
+    });
+  }
+
+  /**
+   * Set up IOC/FOK order tracking BEFORE sending the order.
+   * Registers both the ack listener (pendingRequests) and the IOC lifecycle tracker
+   * (pendingIocOrders) atomically so that fills/cancels arriving immediately after
+   * the ack are never missed.
+   */
+  private setupIocTracking(requestId: bigint, clientOrderId: bigint, timeoutMs: number): Promise<OrderResult> {
+    return new Promise<OrderResult>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingRequests.delete(requestId);
+        this.pendingIocOrders.delete(clientOrderId);
+        reject(new Error('IOC order timed out after 30s'));
+      }, timeoutMs);
+
+      // Register IOC fill/cancel tracker keyed by clientOrderId
+      this.pendingIocOrders.set(clientOrderId, {
+        resolve,
+        reject,
+        timeout,
+        ack: {
+          clientOrderId: clientOrderId.toString(),
+          exchangeOrderId: '',
+          marketId: 0,
+          side: '',
+          transactTime: '',
+        },
+        fills: [],
+        totalFillQuantity: 0n,
+      });
+
+      // Register ack listener keyed by requestId — updates the IOC tracker with ack data.
+      // Uses a dummy timeout since the real timeout lives on the IOC entry.
+      this.pendingRequests.set(requestId, {
+        resolve: (ackResult: OrderResult) => {
+          const iocEntry = this.pendingIocOrders.get(clientOrderId);
+          if (iocEntry) {
+            iocEntry.ack = {
+              clientOrderId: ackResult.clientOrderId,
+              exchangeOrderId: ackResult.exchangeOrderId,
+              marketId: ackResult.marketId,
+              side: ackResult.side,
+              transactTime: ackResult.transactTime,
+            };
+          }
+          // Don't resolve the outer promise — wait for fills + cancel
+        },
+        reject: (err: Error) => {
+          // Order rejected — clean up IOC tracking and reject
+          this.pendingIocOrders.delete(clientOrderId);
+          clearTimeout(timeout);
+          reject(err);
+        },
+        timeout: setTimeout(() => {}, 0), // dummy — real timeout on IOC entry
+      });
     });
   }
 }
@@ -716,6 +979,10 @@ export interface OrderResult {
   quantity: string;
   side: string;
   transactTime: string;
+  /** Fills for IOC/FOK orders */
+  fills?: Array<{ fillPrice: string; fillQuantity: string; fillQuoteQuantity: string }>;
+  /** Quantity canceled (unfilled) for IOC orders */
+  canceledQuantity?: string;
 }
 
 export interface CancelResult {
@@ -747,3 +1014,24 @@ export interface IntentResult {
   txnHash?: string;
   deltas: Array<{ assetId: number; delta: string }>;
 }
+
+export interface BootstrapOrder {
+  clientOrderId: string;
+  exchangeOrderId: string;
+  marketId: number;
+  price: string;
+  quantity: string;
+  side: string;
+  orderType: number;
+  timeInForce: number;
+}
+
+/** Progress events emitted during order lifecycle */
+export type OrderProgressEvent =
+  | { stage: 'submitted'; clientOrderId: string; side: string; orderType: string; timeInForce: string }
+  | { stage: 'ack'; clientOrderId: string; exchangeOrderId: string }
+  | { stage: 'fill'; clientOrderId: string; fillPrice: string; fillQuantity: string; leavesQuantity: string; cumulativeQuantity: string }
+  | { stage: 'canceled'; clientOrderId: string; canceledQuantity: string }
+  | { stage: 'modified'; clientOrderId: string }
+  | { stage: 'rejected'; reason: string }
+  | { stage: 'done'; clientOrderId: string; status: string; canceledQuantity?: string };

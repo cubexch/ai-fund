@@ -10,7 +10,7 @@ export function registerMarketResources(server: McpServer, iridium: IridiumClien
       mimeType: 'application/json',
     },
     async () => {
-      const markets = await iridium.getMarkets();
+      const markets = await iridium.getActiveMarkets();
       return {
         contents: [
           {

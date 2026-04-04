@@ -50,17 +50,26 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
   // ── Helper: resolve symbol to market ──────────────────────
 
   async function resolveMarket(symbol?: string, marketId?: number) {
-    const markets = await iridium.getMarkets();
+    const markets = await iridium.getActiveMarkets();
     if (marketId !== undefined) {
       const m = markets.find(mk => mk.marketId === marketId);
-      if (!m) throw new Error(`Unknown marketId: ${marketId}`);
+      if (!m) throw new Error(`Unknown marketId: ${marketId}. Market may be inactive.`);
       return m;
     }
     if (!symbol) throw new Error('Either symbol or marketId must be provided');
     const upper = symbol.toUpperCase();
-    // Try exact match first, then prefix match
+    // Try exact match, then prefix match, then fuzzy base-asset match
+    // Staging symbols are "tBTCtUSDC", production "BTCUSDC". Bare "BTC" should match both.
     const m = markets.find(mk => mk.symbol.toUpperCase() === upper)
-      ?? markets.find(mk => mk.symbol.toUpperCase().startsWith(upper));
+      ?? markets.find(mk => mk.symbol.toUpperCase().startsWith(upper))
+      ?? markets.find(mk => {
+        const sym = mk.symbol.toUpperCase();
+        // Strip staging prefix (t/g) and match against primary quote (USDC)
+        const stripped = sym.replace(/^[TG]/, '');
+        const searchStripped = upper.replace(/^[TG]/, '');
+        return stripped.startsWith(searchStripped)
+          && (sym.includes('USDC') || sym.includes('USDT'));
+      });
     if (!m) throw new Error(`No market found for "${symbol}". Use get_assets to list available markets.`);
     return m;
   }
@@ -175,7 +184,7 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
           iridium.getPositions(subId),
           iridium.getTickers(),
           iridium.getAssetRegistry(),
-          iridium.getMarkets(),
+          iridium.getActiveMarkets(),
         ]);
 
         const tickerMap = new Map(tickers.map(t => [t.symbol, t]));
@@ -385,15 +394,7 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
     },
     async params => {
       try {
-        const markets = await iridium.getMarkets();
-        const upper = params.symbol.toUpperCase();
-        const market = markets.find(m => m.symbol.toUpperCase().startsWith(upper));
-        if (!market) {
-          return {
-            content: [{ type: 'text' as const, text: `No market found for "${params.symbol}". Use get_assets to list available markets.` }],
-            isError: true,
-          };
-        }
+        const market = await resolveMarket(params.symbol);
 
         const [tickers, ohlcv] = await Promise.all([
           iridium.getTickers(),

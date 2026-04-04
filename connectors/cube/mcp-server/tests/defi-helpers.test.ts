@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isMintAddress, KNOWN_MINTS, formatToken } from '../src/tools/defi';
+import { isMintAddress, KNOWN_MINTS, formatToken, assetSymbolMatches, findMatchingTickerSymbol } from '../src/tools/defi';
 
 // ── isMintAddress ────────────────────────────────────────────
 
@@ -117,5 +117,41 @@ describe('formatToken', () => {
       metadata: { currencyName: 'Jupiter' },
     } as any);
     expect(result).toContain('(Jupiter)');
+  });
+});
+
+describe('assetSymbolMatches', () => {
+  it('matches exact symbols case-insensitively', () => {
+    expect(assetSymbolMatches('sol', 'SOL')).toBe(true);
+  });
+
+  it('matches Cube prefixed orderbook symbols against plain inputs', () => {
+    expect(assetSymbolMatches('SOL', 'tSOL')).toBe(true);
+    expect(assetSymbolMatches('USDC', 'tUSDC')).toBe(true);
+    expect(assetSymbolMatches('gETH', 'ETH')).toBe(true);
+  });
+
+  it('does not match unrelated assets', () => {
+    expect(assetSymbolMatches('SOL', 'tBTC')).toBe(false);
+    expect(assetSymbolMatches('USDC', 'tPYUSD')).toBe(false);
+  });
+});
+
+describe('findMatchingTickerSymbol', () => {
+  const tickers = [
+    { symbol: 'tSOLtUSDC', baseAsset: 'tSOL', quoteAsset: 'tUSDC' },
+    { symbol: 'tBTCtUSDC', baseAsset: 'tBTC', quoteAsset: 'tUSDC' },
+  ];
+
+  it('finds an exact symbol match first', () => {
+    expect(findMatchingTickerSymbol(tickers as any, 'tBTC', 'tUSDC')).toBe('tBTCtUSDC');
+  });
+
+  it('finds a prefixed market for plain token inputs', () => {
+    expect(findMatchingTickerSymbol(tickers as any, 'SOL', 'USDC')).toBe('tSOLtUSDC');
+  });
+
+  it('returns null when no market matches', () => {
+    expect(findMatchingTickerSymbol(tickers as any, 'BONK', 'USDC')).toBeNull();
   });
 });

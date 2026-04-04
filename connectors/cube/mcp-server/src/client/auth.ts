@@ -126,6 +126,10 @@ export function resetAuth(): void {
  * Uses Ed25519 verification key signing.
  *
  * Used by: /os/v0/* endpoints (order placement, cancellation, etc.)
+ *
+ * Some deployments expect the verification key ID in `x-api-key`, while
+ * older integrations used `x-verification-key-id`. Send both for
+ * compatibility; both carry the same verification key ID value.
  */
 export async function buildOsmiumAuthHeaders(): Promise<Record<string, string>> {
   const auth = await resolveAuth();
@@ -138,6 +142,7 @@ export async function buildOsmiumAuthHeaders(): Promise<Record<string, string>> 
   const sig = await signMessage(new Uint8Array(payload), auth.privateKey);
 
   return {
+    'x-api-key': auth.verificationKeyId,
     'x-verification-key-id': auth.verificationKeyId,
     'x-api-signature': Buffer.from(sig).toString('base64'),
     'x-api-timestamp': String(timestamp),
