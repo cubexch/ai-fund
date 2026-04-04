@@ -29,7 +29,8 @@
     "test:platform": "npm run test:platform --workspace=connectors/cube/mcp-server && npm run test:platform --workspace=connectors/robinhood/mcp-server && npm run test:platform --workspace=connectors/alpaca/mcp-server && npm run test:platform --workspace=connectors/ccxt/mcp-server",
     "test:live": "npm run test:live --workspace=connectors/cube/mcp-server && npm run test:live --workspace=connectors/robinhood/mcp-server && npm run test:live --workspace=connectors/alpaca/mcp-server && npm run test:live --workspace=connectors/ccxt/mcp-server",
     "test:evals": "vitest run --config evals/vitest.config.ts",
-    "repo:map": "node scripts/repo-map.js"
+    "repo:map": "node scripts/repo-map.js",
+    "repo:map:json": "node scripts/repo-map.js --json --context"
   },
   "dependencies": {
     "duckdb": "^1.2.0",
