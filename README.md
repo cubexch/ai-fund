@@ -2,18 +2,18 @@
 
 ### Hire your AI trading desk. Fire the ones that miss KPIs.
 
-> 45 AI trading agents. 22 named personas (Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Warren Buffett, Peter Lynch…). 150 MCP tools. 28 shared analysis libraries. 100+ exchanges via plugins. Paper trading by default. MIT licensed. Runs on [Claude Code](https://claude.ai/code).
+> 45 AI trading agents. 21 named personas (Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Warren Buffett, Peter Lynch…). 147 built-in MCP tools across Cube (31), CCXT (92), and Alpaca (24), plus 110 CCXT exchanges. Paper trading by default. MIT licensed. Runs on [Claude Code](https://claude.ai/code).
 
 <!-- GitHub Topics (set these in repo Settings > Topics):
 ai-trading, crypto-trading-bot, hedge-fund, ai-hedge-fund, trading-agents, mcp, claude-code, algorithmic-trading, market-making, arbitrage, quantitative-trading, risk-management, multi-exchange, defi, bitcoin, ethereum, crypto-fund -->
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/built%20for-Claude%20Code-blueviolet)](https://claude.ai/code)
-[![Exchanges](https://img.shields.io/badge/exchanges-100%2B%20supported-green)](connectors/README.md)
-[![Agents](https://img.shields.io/badge/agents-44%20hedge%20fund%20roles-orange)](#44-ai-trading-agents--the-full-roster)
+[![Exchanges](https://img.shields.io/badge/exchanges-110%20CCXT%20venues-green)](connectors/README.md)
+[![Agents](https://img.shields.io/badge/agents-45%20hedge%20fund%20roles-orange)](#45-ai-trading-agents--the-full-roster)
 
 <p align="center">
-  <img src="docs/architecture-light.svg" alt="How AI Fund works — You talk to Claude Code, which orchestrates 42 trading agents across cube.exchange, Binance, Coinbase, Kraken, OKX, and 100+ exchanges via MCP connectors" width="100%">
+  <img src="docs/architecture-light.svg" alt="How AI Fund works — You talk to Claude Code, which orchestrates 45 trading agents across cube.exchange, Binance, Coinbase, Kraken, OKX, and 110 CCXT exchanges via MCP connectors" width="100%">
 </p>
 
 ```
@@ -31,11 +31,21 @@ ai-trading, crypto-trading-bot, hedge-fund, ai-hedge-fund, trading-agents, mcp, 
 
 ## What Is ai-fund?
 
-45 autonomous trading agents inside Claude Code. 150 MCP tools across 3 built-in connectors. 28 shared analysis libraries with 250+ pure functions.
+45 autonomous trading agents inside Claude Code, with built-in MCP connectors and broad multi-exchange support via CCXT. Shared analysis libraries cover indicators, execution, portfolio analytics, and risk tooling.
 
-21 are named personas — Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Stanley Druckenmiller, Warren Buffett. The other 23 are role-based: scalpers, market makers, risk managers, quants, arbitrageurs.
+21 are named personas — Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Stanley Druckenmiller, Warren Buffett. The other 24 are role-based: scalpers, market makers, risk managers, quants, arbitrageurs.
 
 No config files. No YAML. You hire agents that fit your thesis and fire the ones that don't deliver. Each one carries its own personality, philosophy, and KPIs.
+
+### Count Snapshot (from this repo)
+
+- **45 agents total** in `skills/` (`_template` excluded)
+- **21 named personas** + **24 role-based specialists**
+- **147 built-in MCP tools** across active servers
+  - Cube: 31 tools
+  - CCXT: 92 tools
+  - Alpaca: 24 tools
+- **110 exchanges via CCXT** (from the installed `ccxt` package in this repo)
 
 ### How is this different from a grid bot?
 
@@ -80,12 +90,12 @@ YOU (trader)
   ▼
 CLAUDE CODE (AI runtime)
   │
-  ├── Skills (42 SKILL.md files)  ← agent personas, strategies, KPIs
+  ├── Skills (45 SKILL.md files)  ← agent personas, strategies, KPIs
   │
   ├── Exchange Connectors (MCP)   ← connect any exchange
   │   ├── Cube (built-in)
   │   ├── Binance, Coinbase, Kraken, OKX...
-  │   └── 100+ via CCXT
+  │   └── 110 via CCXT
   │
   ▼
 YOUR EXCHANGES (paper or live)
@@ -103,10 +113,23 @@ The two layers don't know about each other. Add an exchange, don't touch agent c
 
 | You are a... | ai-fund gives you... |
 |-------------|---------------------|
-| Crypto trader | 42 agents, natural language |
+| Crypto trader | 45 agents, natural language |
 | Quant | Backtest, stat tools, multi-exchange |
 | Fund operator | KPIs, hire/fire, risk controls |
 | Developer | MIT skill system, any exchange |
+
+---
+
+## AI Contributor Path (for faster maintenance)
+
+If you are modifying this repo with an AI coding agent, follow the maintainer guide:
+
+- [`docs/ai-maintainer-path.md`](docs/ai-maintainer-path.md)
+- `npm run repo:map` for live architecture + risk hotspots
+- `npm run repo:map:json` to generate `.ai/repo-map.json` and `.ai/context-pack.md`
+
+This gives agents a machine-readable architecture map, dependency-cycle detection, and a prompt-ready context pack for safer edits.
+PRs also run the **AI Repo Intelligence** workflow to publish these artifacts automatically.
 
 ---
 
@@ -141,9 +164,31 @@ Put them to work:
 > @risk-manager size a long position given current portfolio
 ```
 
+### Cube CLI + Expanded Tool Surface
+
+Recent Cube connector updates added a first-party `cube` CLI and expanded analysis/trade tooling.
+
+```bash
+cd connectors/cube/mcp-server
+npm run login
+npm run status
+npm run cube -- --help
+```
+
+Use the command groups directly (`cube account ...`, `cube market ...`, `cube order ...`, `cube risk ...`, `cube trade ...`) or call MCP tools from Claude Code. Full reference: [connectors/cube/README.md](connectors/cube/README.md).
+
+#### Advanced Tool Families (Cube)
+
+- **Portfolio/Risk intelligence:** `assess_portfolio_risk`, `simulate_stress_test`
+- **Signal intelligence:** `detect_confluence`, `detect_bb_squeeze`, `get_market_microstructure`
+- **Execution planning:** `plan_twap`, `simulate_market_impact`
+- **Smart routing/discovery:** `search_assets`, `get_trending`, `execute_trade`
+
+These tools are designed to be chained (scan → validate → risk-check → execution plan → route).
+
 ---
 
-## Supported Exchanges
+## Supported Exchanges (Counted)
 
 Connect any exchange via MCP plugins. Each connector handles authentication differently — some use API keys, others use local auth. See [connectors/README.md](connectors/README.md) for setup details.
 
@@ -185,7 +230,7 @@ AI agents can read files, call tools, log output, and spawn processes. Your API 
 
 Some connectors (like Cube's built-in MCP) use local auth with no API keys. Others require key+secret in config files. Choose connectors that match your security requirements.
 
-> 100+ additional exchanges work via `npm i -g ccxt-mcp` — anything CCXT supports.
+> 110 additional exchanges work via `npm i -g ccxt-mcp` — anything CCXT supports in this repo's pinned CCXT version.
 
 More venues = more strategies. Cross-exchange arb doesn't work with one exchange.
 
@@ -193,7 +238,7 @@ See [connectors/README.md](connectors/README.md) for setup details.
 
 ---
 
-## 44 AI Trading Agents — The Full Roster
+## 45 AI Trading Agents — The Full Roster
 
 ### Named Personas
 
@@ -335,10 +380,10 @@ What ships with each agent:
 | | ai-fund | ai-hedge-fund | Freqtrade | Hummingbot |
 |---|---|---|---|---|
 | **LLM-native** | ✅ Claude | ✅ Multi-LLM | ❌ | ❌ |
-| **Agents** | 44 | 18 | User-defined | ~12 |
+| **Agents** | 45 | 18 | User-defined | ~12 |
 | **Hire/fire** | ✅ | ❌ | ❌ | ❌ |
 | **Personas** | 21 | ✅ | ❌ | ❌ |
-| **Exchanges** | 100+ | Stocks only | 30+ | 20+ |
+| **Exchanges** | 110+ | Stocks only | 30+ | 20+ |
 | **Cross-arb** | ✅ | ❌ | ❌ | ❌ |
 | **SOR** | ✅ | ❌ | ❌ | ❌ |
 | **Crypto** | ✅ | ❌ | ✅ | ✅ |
@@ -379,12 +424,12 @@ What ships with each agent:
 
 ```
 ai-fund/
-├── connectors/              # Exchange connections (3 built-in, 100+ via CCXT)
-│   ├── cube/                # Built-in: cube.exchange (32 tools)
-│   ├── ccxt/                # Built-in: Coinbase, Binance, 100+ (92 tools)
+├── connectors/              # Exchange connections (built-in + beta, 110 via CCXT)
+│   ├── cube/                # Built-in: cube.exchange (CLI + MCP tool surface)
+│   ├── ccxt/                # Built-in: Coinbase, Binance, 110 exchanges (92 tools)
 │   ├── alpaca/              # Built-in: stocks, ETFs, crypto (24 tools)
 │   └── README.md            # How to add more exchanges
-├── skills/                  # 44 agent personas (exchange-agnostic)
+├── skills/                  # 45 agent personas (exchange-agnostic)
 ├── lib/                     # 28 shared libraries, 250+ pure functions
 │   ├── indicators.ts        # SMA, EMA, RSI, MACD, BB, ATR, ADX, OBV, Stochastic
 │   ├── math.ts              # Kelly, VaR, Sharpe, Sortino, correlation, drawdown
@@ -402,8 +447,8 @@ ai-fund/
 
 | Layer | Role |
 |-------|------|
-| `skills/` | 44 agent personalities, strategies, KPIs |
-| `connectors/` | 3 built-in exchange MCP servers (150 tools total) |
+| `skills/` | 45 agent personalities, strategies, KPIs |
+| `connectors/` | Built-in and beta exchange MCP servers with capability-gated surfaces |
 | `lib/` | 28 shared libraries — indicators, risk, execution, portfolio, options, stat-arb, microstructure |
 | `.claude/commands/` | Slash commands |
 
@@ -414,13 +459,13 @@ Add an exchange — no agent files change. Write an agent — no exchange code i
 ## FAQ
 
 ### What is ai-fund?
-An open-source AI crypto trading framework with 45 agents and 150 MCP tools running inside Claude Code. You hire the ones that match your strategy, fire the ones that miss KPIs. Think of it as a trading desk, not a bot.
+An open-source AI crypto trading framework with 45 agents running inside Claude Code. You hire the ones that match your strategy and fire the ones that miss KPIs. Think of it as a trading desk, not a bot.
 
 ### How many trading agents does ai-fund have?
-44. 21 named personas (Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Warren Buffett, and 16 more) plus 23 role-based agents across six desks. They share 16 analysis libraries with 120+ pure functions for indicators, risk, execution, and portfolio analytics.
+45. 21 named personas (Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Warren Buffett, and more) plus role-based agents across desk functions. They share analysis libraries for indicators, risk, execution, portfolio analytics, market microstructure, and stat-arb workflows.
 
 ### What exchanges work with ai-fund?
-100+ exchanges via plugin connectors. Cube ships built-in. Binance, Coinbase, Kraken, OKX, and many more work via CCXT or dedicated MCP servers.
+110 exchanges via CCXT in the pinned dependency, plus dedicated connectors for Cube, Alpaca, Robinhood, Hyperliquid, and gateway orchestration.
 
 ### Is ai-fund free?
 MIT-licensed, fully open source. You need Claude Pro or Team ($20/month) for the Claude Code runtime.
@@ -429,7 +474,7 @@ MIT-licensed, fully open source. You need Claude Pro or Team ($20/month) for the
 Yes. The Arbitrageur scans for price gaps. The Execution Trader routes to the best venue. The Market Maker quotes across venues at once. It's one of the main reasons to use this.
 
 ### How is ai-fund different from virattt's ai-hedge-fund?
-virattt's project does stocks with investor personas (Buffett, etc.). ai-fund is crypto, works with any exchange, has 44 agents with 134 tools and 16 shared analysis libraries, and fires them when they underperform. [Comparison table.](#ai-fund-vs-other-ai-trading-bots)
+virattt's project does stocks with investor personas (Buffett, etc.). ai-fund is crypto, works with any exchange, has 45 agents with connector-backed tool surfaces, and fires them when they underperform. [Comparison table.](#ai-fund-vs-other-ai-trading-bots)
 
 ### Can ai-fund trade live?
 Yes. Everything starts in paper/testnet. The Risk Manager reviews all trades. You have to explicitly confirm before anything goes live.
@@ -505,7 +550,7 @@ MIT.
 - [cube.exchange — built-in connector](https://cube.exchange)
 - [OKX Trade Kit — 107 trading tools via MCP](https://github.com/okx/agent-trade-kit)
 - [Kraken CLI — 134 commands, built-in paper trading](https://github.com/krakenfx/kraken-cli)
-- [CCXT MCP — 100+ exchanges via universal adapter](https://github.com/lazy-dinosaur/ccxt-mcp)
-- [CCXT — universal exchange adapter (Coinbase, Binance, 100+)](https://github.com/ccxt/ccxt)
+- [CCXT MCP — 110 exchanges via universal adapter](https://github.com/lazy-dinosaur/ccxt-mcp)
+- [CCXT — universal exchange adapter (Coinbase, Binance, 110)](https://github.com/ccxt/ccxt)
 - [Claude Code — AI runtime that powers the desk](https://claude.ai/code)
 - [Connectors Guide — how to add any exchange](connectors/README.md)

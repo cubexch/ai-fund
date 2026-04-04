@@ -13,12 +13,18 @@ ai-fund connects to exchanges via typed connectors that implement `ExchangeConne
 | **[Coinbase](https://coinbase.com)** | Built-in (CCXT) | Ships with this repo | ✅ Ready — default exchange for CCXT connector |
 | **[Binance](https://binance.com)** | Built-in (CCXT) | Ships with this repo | ✅ Ready — via `--exchange binance` |
 | **[Bybit](https://bybit.com)** | Built-in (CCXT) | Ships with this repo | ✅ Ready — via `--exchange bybit` |
-| **100+ more** | Built-in (CCXT) | Ships with this repo | ✅ Any CCXT-supported exchange |
+| **110 more** | Built-in (CCXT) | Ships with this repo | ✅ Any CCXT-supported exchange in pinned ccxt |
 | **[Robinhood](https://robinhood.com)** | Built-in | Ships with this repo | 🧪 Beta — crypto-focused connector, narrower coverage than Cube/Alpaca/CCXT |
 | **[Hyperliquid](https://hyperliquid.xyz)** | Built-in | Ships with this repo | 🧪 Beta — read-only until EIP-712 signing is implemented |
 | **Gateway** | Experimental | `connectors/gateway/index.ts` | ⚠️ Experimental — not part of default PR CI yet |
 
 ## Capability Matrix
+
+### Counted Surface Snapshot
+
+- **147 active built-in MCP tools** in this repo: Cube (31) + CCXT (92) + Alpaca (24)
+- **110 exchanges via pinned CCXT** (`ccxt.exchanges.length`)
+- Robinhood and Hyperliquid are currently capability-limited beta surfaces
 
 Connectors now declare their governed status plus a capability matrix in `ConnectorMeta`. The gateway uses that matrix to avoid registering unsupported tools.
 
@@ -69,7 +75,10 @@ Environment variables are accepted as a fallback for CI/testing only.
 
 ```bash
 cd connectors/cube/mcp-server && npm run login
+npm run status
 ```
+
+The Cube connector includes a first-party `cube` CLI for command groups across account/market/order/risk/trade flows. Use `npm run cube -- --help` for the full command catalog.
 
 ### Alpaca (US equities)
 
@@ -79,7 +88,7 @@ Run `/setup` → select Alpaca → enter paper API keys. See `connectors/alpaca/
 
 Run `/setup` → select Hyperliquid → enter wallet address and private key. The current repo exposes Hyperliquid as read-only beta until EIP-712 signing lands. See `connectors/hyperliquid/README.md`.
 
-### Any CCXT Exchange (Binance, Bybit, 100+ more)
+### Any CCXT Exchange (Binance, Bybit, 110 more)
 
 ```bash
 # Install Kraken CLI: https://github.com/krakenfx/kraken-cli
@@ -98,7 +107,7 @@ Then enable it in `.mcp.json`:
 
 ### 4. Add Coinbase (or any CCXT exchange)
 
-The built-in CCXT connector supports Coinbase, Binance, Bybit, and 100+ exchanges. No extra install needed.
+The built-in CCXT connector supports Coinbase, Binance, Bybit, and 110 exchanges in the pinned `ccxt` dependency. No extra install needed.
 
 Credentials are per-exchange via env vars: `<EXCHANGE>_API_KEY`, `<EXCHANGE>_SECRET`, `<EXCHANGE>_PASSWORD`. Falls back to generic `CCXT_*` vars.
 

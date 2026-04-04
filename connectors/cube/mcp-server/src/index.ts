@@ -14,6 +14,7 @@ import { registerOrderTools } from './tools/orders';
 import { registerRiskTools } from './tools/risk';
 import { registerAnalysisTools } from './tools/analysis';
 import { registerTradingTools } from './tools/defi';
+import { registerContentTools } from './tools/content';
 
 const server = new McpServer({
   name: 'cube-trading',
@@ -88,6 +89,9 @@ registerAnalysisTools(server, iridium);
 
 // DeFi: REST via Iridium + WebSocket via Osmium wallet (requires auth)
 registerTradingTools(server, iridium, osmium);
+
+// Content: Cube article discovery + metadata from sitemap
+registerContentTools(server);
 
 // ── Register resources ──────────────────────────────────────
 
