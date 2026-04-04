@@ -38,3 +38,6 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# AI-generated repo intelligence artifacts
+.ai/

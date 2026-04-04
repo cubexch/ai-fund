@@ -120,6 +120,19 @@ The two layers don't know about each other. Add an exchange, don't touch agent c
 
 ---
 
+## AI Contributor Path (for faster maintenance)
+
+If you are modifying this repo with an AI coding agent, follow the maintainer guide:
+
+- [`docs/ai-maintainer-path.md`](docs/ai-maintainer-path.md)
+- `npm run repo:map` for live architecture + risk hotspots
+- `npm run repo:map:json` to generate `.ai/repo-map.json` and `.ai/context-pack.md`
+
+This gives agents a machine-readable architecture map, dependency-cycle detection, and a prompt-ready context pack for safer edits.
+PRs also run the **AI Repo Intelligence** workflow to publish these artifacts automatically.
+
+---
+
 ## Quick Start
 
 ```bash
