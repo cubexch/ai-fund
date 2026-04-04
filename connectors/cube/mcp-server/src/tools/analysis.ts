@@ -12,6 +12,10 @@ import {
 } from '@ai-fund/lib/portfolio-analytics';
 import {
   planTwap,
+  planVwap,
+  planIceberg,
+  analyzeSniper,
+  compareExecutionPlans,
   estimateMarketImpact,
   realizedVolatility,
 } from '@ai-fund/lib/execution-planner';
@@ -529,6 +533,182 @@ export function registerAnalysisTools(server: McpServer, iridium: IridiumClient)
           content: [{
             type: 'text' as const,
             text: JSON.stringify(result, null, 2),
+          }],
+        };
+      } catch (error) {
+        return toolError(error);
+      }
+    }
+  );
+
+  // ── 8. plan_vwap ──────────────────────────────────────────
+
+  server.tool(
+    'plan_vwap',
+    'Plan a VWAP (Volume-Weighted Average Price) execution. Distributes order slices proportionally to historical volume buckets.',
+    {
+      symbol: z.string().describe('Asset symbol (e.g. "SOL", "BTC", "SOLUSDC")'),
+      totalAmount: z.number().describe('Total quantity to execute (in base asset)'),
+      durationMinutes: z.number().default(60).describe('Execution window in minutes'),
+      numSlices: z.number().default(10).describe('Number of order slices'),
+    },
+    async params => {
+      try {
+        const market = await resolveMarket(params.symbol);
+        const ohlcv = await fetchOhlcv(market.marketId, '1h', Math.max(params.numSlices * 2, 24));
+
+        if (ohlcv.length < params.numSlices) {
+          return {
+            content: [{ type: 'text' as const, text: `Need at least ${params.numSlices} bars for ${params.numSlices} slices, got ${ohlcv.length}` }],
+            isError: true,
+          };
+        }
+
+        const bars = ohlcv.map(c => ({ volume: c.volume }));
+
+        const result = planVwap({
+          totalAmount: params.totalAmount,
+          durationMinutes: params.durationMinutes,
+          numSlices: params.numSlices,
+          bars,
+          nowMs: Date.now(),
+        });
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({ market: market.symbol, ...result }, null, 2),
+          }],
+        };
+      } catch (error) {
+        return toolError(error);
+      }
+    }
+  );
+
+  // ── 9. plan_iceberg ───────────────────────────────────────
+
+  server.tool(
+    'plan_iceberg',
+    'Plan an iceberg order. Splits a large order into visible clips to hide total size from the order book.',
+    {
+      symbol: z.string().describe('Asset symbol (e.g. "SOL", "BTC", "SOLUSDC")'),
+      totalAmount: z.number().describe('Total quantity to execute (in base asset)'),
+      clipSize: z.number().describe('Visible clip size per order'),
+    },
+    async params => {
+      try {
+        const market = await resolveMarket(params.symbol);
+
+        const result = planIceberg({
+          totalAmount: params.totalAmount,
+          clipSize: params.clipSize,
+        });
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({ market: market.symbol, ...result }, null, 2),
+          }],
+        };
+      } catch (error) {
+        return toolError(error);
+      }
+    }
+  );
+
+  // ── 10. analyze_sniper ────────────────────────────────────
+
+  server.tool(
+    'analyze_sniper',
+    'Analyze a sniper (immediate fill) order against the current order book. Shows fill probability, price impact, and levels consumed.',
+    {
+      symbol: z.string().describe('Asset symbol (e.g. "SOL", "BTC", "SOLUSDC")'),
+      amount: z.number().describe('Quantity to fill'),
+      side: z.enum(['buy', 'sell']).describe('Order side'),
+    },
+    async params => {
+      try {
+        const market = await resolveMarket(params.symbol);
+        const book = await iridium.getOrderBook(market.symbol);
+
+        // Use asks for buy orders, bids for sell orders
+        const levels: [number, number][] = params.side === 'buy' ? book.asks : book.bids;
+        const bestPrice = levels.length > 0 ? levels[0][0] : 0;
+
+        const result = analyzeSniper({
+          amount: params.amount,
+          side: params.side,
+          levels,
+          bestPrice,
+        });
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({ market: market.symbol, side: params.side, ...result }, null, 2),
+          }],
+        };
+      } catch (error) {
+        return toolError(error);
+      }
+    }
+  );
+
+  // ── 11. compare_execution_plans ───────────────────────────
+
+  server.tool(
+    'compare_execution_plans',
+    'Compare TWAP, VWAP, and Iceberg execution strategies side by side. Recommends the lowest-cost approach.',
+    {
+      symbol: z.string().describe('Asset symbol (e.g. "SOL", "BTC", "SOLUSDC")'),
+      totalAmount: z.number().describe('Total quantity to execute'),
+      durationMinutes: z.number().default(60).describe('Execution window in minutes'),
+    },
+    async params => {
+      try {
+        const market = await resolveMarket(params.symbol);
+        const [tickers, ohlcv] = await Promise.all([
+          iridium.getTickers(),
+          fetchOhlcv(market.marketId, '1d', 30),
+        ]);
+
+        const ticker = tickers.find(t => t.symbol === market.symbol);
+        const currentPrice = ticker?.lastPrice ?? 0;
+        if (currentPrice === 0) {
+          return {
+            content: [{ type: 'text' as const, text: `No price data for ${market.symbol}` }],
+            isError: true,
+          };
+        }
+
+        const dailyVolume = ohlcv.length > 0
+          ? ohlcv.reduce((sum, c) => sum + c.volume, 0) / ohlcv.length
+          : 1;
+
+        const book = await iridium.getOrderBook(market.symbol);
+        const spreadBps = book.asks.length > 0 && book.bids.length > 0
+          ? ((book.asks[0][0] - book.bids[0][0]) / currentPrice) * 10000
+          : 5;
+
+        const result = compareExecutionPlans({
+          totalAmount: params.totalAmount,
+          durationMinutes: params.durationMinutes,
+          price: currentPrice,
+          dailyVolume,
+          spreadBps,
+        });
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              market: market.symbol,
+              price: currentPrice,
+              avgDailyVolume: dailyVolume.toFixed(2),
+              spreadBps: spreadBps.toFixed(1),
+              ...result,
+            }, null, 2),
           }],
         };
       } catch (error) {
