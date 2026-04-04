@@ -3,6 +3,17 @@ import { z } from 'zod';
 import type { IridiumClient, Market } from '../client/iridium';
 import type { OsmiumClient } from '../client/osmium';
 import { toolError } from '@ai-fund/lib/tool-errors';
+import {
+  canElicit,
+  buildOrderConfirmation,
+  buildDestructiveConfirmation,
+  buildLiveModeConfirmation,
+  isConfirmed,
+  cancelledResponse,
+  riskSummaryText,
+  type ElicitationResult,
+} from '@ai-fund/lib/elicitation';
+import { checkConfidenceRails, type SafetyProfileName } from '@ai-fund/lib/portfolio-analytics';
 
 /**
  * Convert a human-readable price/quantity to lot units using market tick sizes.
@@ -42,6 +53,68 @@ function normalizeSide(side: string): 'BID' | 'ASK' {
 }
 
 export function registerOrderTools(server: McpServer, osmium: OsmiumClient | null, iridium: IridiumClient) {
+  // ── Elicitation session state ──────────────────────────
+  let liveAcknowledged = false;
+  let safetyProfile: SafetyProfileName = 'safe';
+
+  const isLive = () => (process.env.CUBE_ENV || 'staging') === 'production';
+
+  /** Send an elicitation form and return the user's response (or null). */
+  async function elicitUser(extra: unknown, form: { message: string; requestedSchema: object }): Promise<ElicitationResult | null> {
+    if (!canElicit(extra)) return null;
+    try {
+      const e = extra as { sendRequest: (...args: unknown[]) => Promise<unknown> };
+      const result = await e.sendRequest(
+        { method: 'elicitation/create', params: form },
+        { parse: (v: unknown) => v },
+      );
+      return result as ElicitationResult;
+    } catch {
+      return null;
+    }
+  }
+
+  type GateResult = { proceed: true } | { proceed: false; response: { content: { type: 'text'; text: string }[]; isError?: boolean } };
+
+  /** Gate: require live-mode acknowledgment before first live order. */
+  async function checkLiveModeGate(extra: unknown): Promise<GateResult> {
+    if (!isLive() || liveAcknowledged) return { proceed: true };
+    const form = buildLiveModeConfirmation('Cube Exchange');
+    const result = await elicitUser(extra, form);
+    if (!result) {
+      // Client doesn't support elicitation in live mode — block
+      return {
+        proceed: false as const,
+        response: {
+          content: [{ type: 'text' as const, text: JSON.stringify({
+            status: 'blocked', reason: 'live_mode_unacknowledged',
+            message: 'Live trading requires explicit user confirmation. Use a client that supports MCP elicitation.',
+          }, null, 2) }],
+          isError: true,
+        },
+      };
+    }
+    if (result.action !== 'accept' || !result.content?.confirm_live) {
+      return { proceed: false as const, response: cancelledResponse(result.action === 'accept' ? 'decline' : result.action) };
+    }
+    liveAcknowledged = true;
+    if (result.content.safety_profile && typeof result.content.safety_profile === 'string') {
+      safetyProfile = result.content.safety_profile as SafetyProfileName;
+    }
+    return { proceed: true };
+  }
+
+  /** Gate: confirm destructive action. Returns true to proceed. */
+  async function confirmDestructive(extra: unknown, action: string, details: string): Promise<GateResult> {
+    const form = buildDestructiveConfirmation(action, details);
+    const result = await elicitUser(extra, form);
+    if (!result) return { proceed: true }; // no elicitation → proceed (non-blocking)
+    if (!isConfirmed(result)) {
+      return { proceed: false as const, response: cancelledResponse(result.action === 'accept' ? 'decline' : result.action) };
+    }
+    return { proceed: true };
+  }
+
   // Cache markets for lot size lookups and symbol resolution
   let marketsCache: Market[] | null = null;
   let marketsCacheTime = 0;
@@ -94,8 +167,12 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
       postOnly: z.boolean().default(false).describe('If true, order will only be placed as maker'),
       stopPrice: z.string().optional().describe('Stop trigger price in human-readable units (for STOP_LOSS/STOP_LIMIT)'),
     },
-    async params => {
+    async (params, extra) => {
       try {
+        // ── Elicitation: live mode gate ──
+        const gate = await checkLiveModeGate(extra);
+        if (!gate.proceed) return gate.response;
+
         const resolvedMarketId = await resolveMarketId(params.symbol, params.marketId);
         const market = await getMarket(resolvedMarketId);
         const normalizedSide = normalizeSide(params.side);
@@ -199,7 +276,7 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
       } catch (error) {
         return toolError(error, 'Order failed');
       }
-    }
+    },
   );
 
   server.tool(
@@ -210,8 +287,13 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
       marketId: z.number().optional().describe('Numeric market ID (alternative to symbol)'),
       clientOrderId: z.number().describe('Client-assigned order ID to cancel'),
     },
-    async params => {
+    async (params, extra) => {
       try {
+        // ── Elicitation: confirm cancel ──
+        const conf = await confirmDestructive(extra, 'Cancel order',
+          `Order #${params.clientOrderId}${params.symbol ? ` on ${params.symbol}` : ''}`);
+        if (!conf.proceed) return conf.response;
+
         const resolvedMarketId = await resolveMarketId(params.symbol, params.marketId);
 
         // Try WebSocket first
@@ -248,7 +330,7 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
       } catch (error) {
         return toolError(error, 'Cancel failed');
       }
-    }
+    },
   );
 
   server.tool(
@@ -262,8 +344,13 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
       newQuantity: z.string().describe('New quantity in human-readable units'),
       postOnly: z.boolean().default(false).describe('If true, modified order will only rest as maker'),
     },
-    async params => {
+    async (params, extra) => {
       try {
+        // ── Elicitation: confirm modify ──
+        const conf = await confirmDestructive(extra, 'Modify order',
+          `Order #${params.clientOrderId}: qty → ${params.newQuantity}${params.newPrice ? `, price → ${params.newPrice}` : ''}`);
+        if (!conf.proceed) return conf.response;
+
         const resolvedMarketId = await resolveMarketId(params.symbol, params.marketId);
         const market = await getMarket(resolvedMarketId);
 
@@ -311,7 +398,7 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
       } catch (error) {
         return toolError(error, 'Modify failed');
       }
-    }
+    },
   );
 
   server.tool(
@@ -322,8 +409,13 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
       marketId: z.number().optional().describe('Numeric market ID to cancel on (alternative to symbol)'),
       side: z.enum(['BID', 'ASK']).optional().describe('Side to cancel (omit for both sides)'),
     },
-    async params => {
+    async (params, extra) => {
       try {
+        // ── Elicitation: confirm mass cancel ──
+        const desc = `Cancel all${params.symbol ? ` on ${params.symbol}` : ''}${params.side ? ` (${params.side} side)` : ' (both sides)'}`;
+        const conf = await confirmDestructive(extra, 'Cancel all orders', desc);
+        if (!conf.proceed) return conf.response;
+
         const resolvedMktId = params.symbol || params.marketId !== undefined
           ? await resolveMarketId(params.symbol, params.marketId)
           : undefined;
@@ -378,7 +470,7 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
       } catch (error) {
         return toolError(error, 'Mass cancel failed');
       }
-    }
+    },
   );
 
   server.tool(
@@ -438,8 +530,16 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
       symbol: z.string().describe('Asset symbol to close (e.g. "SOL", "BTC")'),
       percentage: z.number().min(1).max(100).default(100).describe('Percentage of position to close (1-100, default 100)'),
     },
-    async params => {
+    async (params, extra) => {
       try {
+        // ── Elicitation: live mode gate + confirm close ──
+        const gate = await checkLiveModeGate(extra);
+        if (!gate.proceed) return gate.response;
+
+        const conf = await confirmDestructive(extra, 'Close position',
+          `Close ${params.percentage}% of ${params.symbol} position`);
+        if (!conf.proceed) return conf.response;
+
         const symbol = params.symbol.toUpperCase();
 
         // Get positions and asset registry in parallel
@@ -572,6 +672,6 @@ export function registerOrderTools(server: McpServer, osmium: OsmiumClient | nul
       } catch (error) {
         return toolError(error, 'Close position failed');
       }
-    }
+    },
   );
 }

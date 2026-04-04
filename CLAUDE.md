@@ -85,7 +85,7 @@ After every code change, run the following before considering the work done:
 - **Imports**: ES module syntax only (`import`/`export`), no `require()`. Use `.js` extensions in import paths.
 - **Commit messages**: Conventional Commits format — `feat(skills): add new persona`, `fix(cube): correct order signing`, `docs: update exchange table`. Scopes: `skills`, `cube`, `lib`, `desk`, `commands`, `docs`
 
-## Shared Libraries (31 modules, 250+ exported functions)
+## Shared Libraries (33 modules, 270+ exported functions)
 
 - **`lib/indicators.ts`** — `sma`, `ema`, `rsi`, `macd`, `bollingerBands`, `atr`, `obv`, `stochastic`, `adx`, `vwap`, `momentum`, `hurst` + `OHLCV` interface
 - **`lib/math.ts`** — `kelly`, `fixedFractionalSize`, `valueAtRisk`, `maxDrawdown`, `sharpeRatio`, `sortinoRatio`, `calmarRatio`, `correlation`, `correlationMatrix`, `mean`, `standardDeviation`, `zScore`, `returns`, `winRate`, `profitFactor`, `annualizedVolatility`, `beta`, `alpha`, `informationRatio`, `tailRisk`
@@ -122,6 +122,8 @@ After every code change, run the following before considering the work done:
 - **`lib/regime-detector.ts`** — `RegimeDetector` class (trend/range/volatile regime classification)
 - **`lib/signal-generator.ts`** — `SignalGenerator` class (multi-indicator signal scanning)
 - **`lib/valuation.ts`** — 19 valuation functions (DCF, NVT, MVRV, stock-to-flow, etc.)
+- **`lib/elicitation.ts`** — `canElicit`, `buildOrderConfirmation`, `buildDestructiveConfirmation`, `buildLiveModeConfirmation`, `buildExecutionPlanConfirmation`, `isConfirmed`, `cancelledResponse`, `riskSummaryText`
+- **`lib/elicitation-middleware.ts`** — `withElicitation`, `LiveModeGate`, `RiskCheckPolicy`, `DestructiveActionPolicy`, `createSessionState`, `elicit`
 - **`lib/connector-registry.ts`** — Connector discovery and registration
 - **`lib/ingest/exchange.ts`** — `ingestFromExchange` (generic exchange data ingester into DuckDB)
 
