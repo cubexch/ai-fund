@@ -5,6 +5,13 @@
  */
 
 import { mean, standardDeviation, correlation, sharpeRatio } from './math.js';
+import {
+  matMultiply as _matMultiply,
+  matTranspose as _matTranspose,
+  matInverse as _matInverse,
+  matVecMultiply as _matVecMultiply,
+  vecDot,
+} from './matrix.js';
 
 // ── Public Types ─────────────────────────────────────────
 
@@ -76,104 +83,21 @@ export interface RebalanceResult {
 
 // ── Internal Matrix Helpers ──────────────────────────────
 
+// Aliases for imported matrix operations — used throughout this module.
+const matMultiply = _matMultiply;
+const matTranspose = _matTranspose;
+const matInverse = _matInverse;
+const matVecMultiply = _matVecMultiply;
+const dot = vecDot;
+
 function matCreate(rows: number, cols: number, fill: number = 0): number[][] {
   return Array.from({ length: rows }, () => Array(cols).fill(fill));
-}
-
-function matMultiply(a: number[][], b: number[][]): number[][] {
-  const rows = a.length;
-  const cols = b[0].length;
-  const inner = b.length;
-  const result = matCreate(rows, cols);
-  for (let i = 0; i < rows; i++) {
-    for (let j = 0; j < cols; j++) {
-      let sum = 0;
-      for (let k = 0; k < inner; k++) {
-        sum += a[i][k] * b[k][j];
-      }
-      result[i][j] = sum;
-    }
-  }
-  return result;
-}
-
-function matTranspose(a: number[][]): number[][] {
-  const rows = a.length;
-  const cols = a[0].length;
-  const result = matCreate(cols, rows);
-  for (let i = 0; i < rows; i++) {
-    for (let j = 0; j < cols; j++) {
-      result[j][i] = a[i][j];
-    }
-  }
-  return result;
 }
 
 function matIdentity(n: number): number[][] {
   const result = matCreate(n, n);
   for (let i = 0; i < n; i++) result[i][i] = 1;
   return result;
-}
-
-/**
- * Matrix inverse via Gauss-Jordan elimination.
- */
-function matInverse(m: number[][]): number[][] {
-  const n = m.length;
-  const aug = matCreate(n, 2 * n);
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j < n; j++) aug[i][j] = m[i][j];
-    aug[i][n + i] = 1;
-  }
-
-  for (let col = 0; col < n; col++) {
-    // Partial pivoting
-    let maxRow = col;
-    for (let row = col + 1; row < n; row++) {
-      if (Math.abs(aug[row][col]) > Math.abs(aug[maxRow][col])) maxRow = row;
-    }
-    [aug[col], aug[maxRow]] = [aug[maxRow], aug[col]];
-
-    const pivot = aug[col][col];
-    if (Math.abs(pivot) < 1e-12) {
-      // Singular — add small regularization
-      aug[col][col] += 1e-8;
-    }
-    const pivotVal = aug[col][col];
-    for (let j = 0; j < 2 * n; j++) aug[col][j] /= pivotVal;
-
-    for (let row = 0; row < n; row++) {
-      if (row === col) continue;
-      const factor = aug[row][col];
-      for (let j = 0; j < 2 * n; j++) {
-        aug[row][j] -= factor * aug[col][j];
-      }
-    }
-  }
-
-  const inv = matCreate(n, n);
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j < n; j++) {
-      inv[i][j] = aug[i][n + j];
-    }
-  }
-  return inv;
-}
-
-/**
- * Matrix-vector multiply: M * v -> vector.
- */
-function matVecMultiply(m: number[][], v: number[]): number[] {
-  return m.map(row => row.reduce((s, val, j) => s + val * v[j], 0));
-}
-
-/**
- * Dot product of two vectors.
- */
-function dot(a: number[], b: number[]): number {
-  let s = 0;
-  for (let i = 0; i < a.length; i++) s += a[i] * b[i];
-  return s;
 }
 
 /**
