@@ -1,6 +1,6 @@
 # AI Fund
 
-An AI trading desk with 45 hedge fund agent personas (including 22 named personas like Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Warren Buffett, and Peter Lynch) for Claude Code. 150 MCP tools across 3 built-in connectors. 28 shared analysis libraries. Trade on any exchange — Cube, OKX, Kraken, Binance, Coinbase, and 100+ more via CCXT.
+An AI trading desk with 45 hedge fund agent personas (including 22 named personas like Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Warren Buffett, and Peter Lynch) for Claude Code. 150 MCP tools across 3 built-in connectors. 31 shared analysis libraries. Trade on any exchange — Cube, OKX, Kraken, Binance, Coinbase, and 100+ more via CCXT.
 
 ## Project Structure
 
@@ -85,7 +85,7 @@ After every code change, run the following before considering the work done:
 - **Imports**: ES module syntax only (`import`/`export`), no `require()`. Use `.js` extensions in import paths.
 - **Commit messages**: Conventional Commits format — `feat(skills): add new persona`, `fix(cube): correct order signing`, `docs: update exchange table`. Scopes: `skills`, `cube`, `lib`, `desk`, `commands`, `docs`
 
-## Shared Libraries (28 modules, 250+ exported functions)
+## Shared Libraries (31 modules, 250+ exported functions)
 
 - **`lib/indicators.ts`** — `sma`, `ema`, `rsi`, `macd`, `bollingerBands`, `atr`, `obv`, `stochastic`, `adx`, `vwap`, `momentum`, `hurst` + `OHLCV` interface
 - **`lib/math.ts`** — `kelly`, `fixedFractionalSize`, `valueAtRisk`, `maxDrawdown`, `sharpeRatio`, `sortinoRatio`, `calmarRatio`, `correlation`, `correlationMatrix`, `mean`, `standardDeviation`, `zScore`, `returns`, `winRate`, `profitFactor`, `annualizedVolatility`, `beta`, `alpha`, `informationRatio`, `tailRisk`
@@ -113,7 +113,10 @@ After every code change, run the following before considering the work done:
 - **`lib/grid-trading.ts`** — `computeDcaSchedule`, `optimizeGridParams`, `analyzeBasisTrade`, `classifyVolRegime`
 - **`lib/volume-profile.ts`** — `computeVolumeProfile`, `detectCorrelationRegime`
 - **`lib/datastore.ts`** — `MarketDataStore` (DuckDB columnar store for OHLCV data with SQL queries, Parquet I/O, incremental updates)
-- **`lib/analytics-store.ts`** — `AnalyticsStore` class (DuckDB-powered: rolling correlations, cross-sectional sorts, factor returns, covariance, rolling beta, risk reports, universe screening, pairwise correlations, regime stats)
+- **`lib/analytics-store.ts`** — `AnalyticsStore` class (barrel re-export of submodules below, backward-compatible)
+- **`lib/analytics-correlation.ts`** — `getReturnsSeries`, `rollingCorrelationMatrix`, `pairwiseCorrelations`
+- **`lib/analytics-factor.ts`** — `factorReturnsFromDB`, `covarianceFromDB`, `riskReport`, `reorderCovMatrix`
+- **`lib/analytics-screening.ts`** — `crossSectionalSort`, `screenUniverse`, `rollingBeta`, `regimeStats`
 - **`lib/backtester.ts`** — `Backtester` class (run, runAll, optimize, walkForward) — imports strategies from submodule
 - **`lib/backtest-strategies.ts`** — 9 built-in strategies (`STRATEGIES` registry, `DEFAULT_PARAMS`): SMA crossover, RSI mean reversion, MACD momentum, Bollinger breakout/mean-reversion, EMA trend, stochastic, ADX, multi-indicator confluence
 - **`lib/regime-detector.ts`** — `RegimeDetector` class (trend/range/volatile regime classification)
