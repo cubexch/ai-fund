@@ -1,5 +1,7 @@
 # Agent Auth: Browser-Based Key Registration for AI Agents
 
+> Implementation note as of April 8, 2026: the Cube MCP connector now uses OAuth-style callback `code` + `state` validation and PKCE (`codeChallenge` / `codeVerifier`) for `/agent/authorize`. Historical `callbackToken` references below describe the older flow and should be reconciled before this doc is treated as the source of truth.
+
 ## Overview
 
 Build a login flow that lets AI agents (MCP servers, Claude Code, CLI tools) register Ed25519 signing keys with Cube Exchange. Modeled after [Cloudflare's `wrangler login`](https://blog.cloudflare.com/wrangler-oauth/) — the agent opens a browser, the user approves with one click, the browser redirects to localhost, and the CLI picks it up instantly. No manual codes, no copy-paste, no API tokens.

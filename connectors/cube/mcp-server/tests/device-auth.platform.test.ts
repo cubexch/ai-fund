@@ -1,17 +1,26 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as signing from '../src/client/signing';
 import {
-  startCallbackServer,
+  CONNECTED_HTML,
+  type CallbackServer,
+  DeviceAuthError,
+  deviceAuthFlow,
+  pollForToken,
   requestDeviceCode,
   requestDeviceToken,
-  pollForToken,
-  deviceAuthFlow,
-  DeviceAuthError,
-  CONNECTED_HTML,
+  startCallbackServer,
   type DeviceCodeResponse,
   type DeviceTokenResponse,
-  type CallbackServer,
 } from '../src/client/device-auth';
 import { generateKeyPair } from '../src/client/signing';
+
+vi.mock('../src/client/signing', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/client/signing')>();
+  return {
+    ...actual,
+    saveCredentials: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -31,7 +40,7 @@ function mockFetch(responses: Array<{ status: number; body: unknown }>): typeof 
     const resp = responses[callIndex++] ?? { status: 500, body: { error: 'no_more_responses' } };
     return mockResponse(resp.status, resp.body);
   });
-  return fn;
+  return fn as typeof globalThis.fetch;
 }
 
 function getRequestBody(fetchFn: ReturnType<typeof vi.fn>, callIndex = 0): Record<string, unknown> {
@@ -62,6 +71,14 @@ const MOCK_TOKEN_RESPONSE: DeviceTokenResponse = {
   registrationMethod: 'device',
 };
 
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 // ── requestDeviceCode ────────────────────────────────────────
 
 describe('requestDeviceCode', () => {
@@ -73,7 +90,10 @@ describe('requestDeviceCode', () => {
       {
         verificationKey: 'base64key==',
         clientName: 'AI Fund',
-        callbackUrl: 'http://localhost:9876/callback',
+        codeChallenge: 'pkce-challenge',
+        codeChallengeMethod: 'S256',
+        redirectUri: 'http://127.0.0.1:9876/callback',
+        state: 'oauth-state-123',
       },
       fetchFn,
     );
@@ -86,15 +106,18 @@ describe('requestDeviceCode', () => {
         body: JSON.stringify({
           verificationKey: 'base64key==',
           clientName: 'AI Fund',
-          callbackUrl: 'http://localhost:9876/callback',
+          codeChallenge: 'pkce-challenge',
+          codeChallengeMethod: 'S256',
+          redirectUri: 'http://127.0.0.1:9876/callback',
+          state: 'oauth-state-123',
         }),
       }),
     );
-    expect(result.deviceCode).toBe('a1b2c3d4-e5f6-7890-abcd-ef1234567890');
+    expect(result.deviceCode).toBe(MOCK_DEVICE_CODE_RESPONSE.deviceCode);
     expect(result.authorizeUrl).toContain('cube.exchange');
   });
 
-  it('sends correct request for headless mode (no callbackUrl)', async () => {
+  it('sends correct request for headless mode without redirect state', async () => {
     const fetchFn = mockFetch([{ status: 200, body: MOCK_HEADLESS_CODE_RESPONSE }]);
 
     const result = await requestDeviceCode(
@@ -102,12 +125,17 @@ describe('requestDeviceCode', () => {
       {
         verificationKey: 'base64key==',
         clientName: 'AI Fund',
+        codeChallenge: 'pkce-challenge',
+        codeChallengeMethod: 'S256',
       },
       fetchFn,
     );
 
-    const body = JSON.parse((fetchFn as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
-    expect(body.callbackUrl).toBeUndefined();
+    const body = getRequestBody(fetchFn as ReturnType<typeof vi.fn>);
+    expect(body.redirectUri).toBeUndefined();
+    expect(body.state).toBeUndefined();
+    expect(body.codeChallenge).toBe('pkce-challenge');
+    expect(body.codeChallengeMethod).toBe('S256');
     expect(result.userCode).toBe('brave-solar-mint-echo');
   });
 
@@ -118,6 +146,8 @@ describe('requestDeviceCode', () => {
       requestDeviceCode('https://api.cube.exchange/ir/v0', {
         verificationKey: 'garbage',
         clientName: 'Test',
+        codeChallenge: 'challenge',
+        codeChallengeMethod: 'S256',
       }, fetchFn),
     ).rejects.toThrow(DeviceAuthError);
 
@@ -125,7 +155,10 @@ describe('requestDeviceCode', () => {
       await requestDeviceCode('https://api.cube.exchange/ir/v0', {
         verificationKey: 'garbage',
         clientName: 'Test',
+        codeChallenge: 'challenge',
+        codeChallengeMethod: 'S256',
       }, mockFetch([{ status: 400, body: { error: 'invalid_verification_key' } }]));
+      expect.fail('should have thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(DeviceAuthError);
       expect((err as DeviceAuthError).code).toBe('invalid_verification_key');
@@ -140,18 +173,8 @@ describe('requestDeviceCode', () => {
       requestDeviceCode('https://api.cube.exchange/ir/v0', {
         verificationKey: 'base64key==',
         clientName: '',
-      }, fetchFn),
-    ).rejects.toThrow(DeviceAuthError);
-  });
-
-  it('throws DeviceAuthError on invalid_callback_url', async () => {
-    const fetchFn = mockFetch([{ status: 400, body: { error: 'invalid_callback_url' } }]);
-
-    await expect(
-      requestDeviceCode('https://api.cube.exchange/ir/v0', {
-        verificationKey: 'base64key==',
-        clientName: 'Test',
-        callbackUrl: 'https://evil.com/callback',
+        codeChallenge: 'challenge',
+        codeChallengeMethod: 'S256',
       }, fetchFn),
     ).rejects.toThrow(DeviceAuthError);
   });
@@ -163,6 +186,8 @@ describe('requestDeviceCode', () => {
       requestDeviceCode('https://api.cube.exchange/ir/v0', {
         verificationKey: 'base64key==',
         clientName: 'Test',
+        codeChallenge: 'challenge',
+        codeChallengeMethod: 'S256',
       }, fetchFn),
     ).rejects.toThrow(DeviceAuthError);
   });
@@ -177,6 +202,8 @@ describe('requestDeviceCode', () => {
       await requestDeviceCode('https://api.cube.exchange/ir/v0', {
         verificationKey: 'garbage',
         clientName: 'Test',
+        codeChallenge: 'challenge',
+        codeChallengeMethod: 'S256',
       }, fetchFn);
       expect.fail('should have thrown');
     } catch (err) {
@@ -195,6 +222,8 @@ describe('requestDeviceCode', () => {
       await requestDeviceCode('https://api.cube.exchange/ir/v0', {
         verificationKey: 'base64key==',
         clientName: '',
+        codeChallenge: 'challenge',
+        codeChallengeMethod: 'S256',
       }, fetchFn);
       expect.fail('should have thrown');
     } catch (err) {
@@ -212,6 +241,8 @@ describe('requestDeviceCode', () => {
     const result = await requestDeviceCode('https://api.cube.exchange/ir/v0', {
       verificationKey: 'base64key==',
       clientName: 'Test',
+      codeChallenge: 'challenge',
+      codeChallengeMethod: 'S256',
     }, fetchFn);
 
     expect(result.deviceCode).toBe(MOCK_DEVICE_CODE_RESPONSE.deviceCode);
@@ -226,7 +257,7 @@ describe('requestDeviceToken', () => {
 
     const result = await requestDeviceToken(
       'https://api.cube.exchange/ir/v0',
-      { deviceCode: 'abc123', callbackToken: 'jwt-token' },
+      { deviceCode: 'abc123', codeVerifier: 'pkce-verifier', code: 'authorization-code-123' },
       fetchFn,
     );
 
@@ -234,10 +265,14 @@ describe('requestDeviceToken', () => {
       'https://api.cube.exchange/ir/v0/agent/device/token',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ deviceCode: 'abc123', callbackToken: 'jwt-token' }),
+        body: JSON.stringify({
+          deviceCode: 'abc123',
+          codeVerifier: 'pkce-verifier',
+          code: 'authorization-code-123',
+        }),
       }),
     );
-    expect(result.verificationKeyId).toBe('d97c889a-fbd8-471d-955d-acc2829dffa5');
+    expect(result.verificationKeyId).toBe(MOCK_TOKEN_RESPONSE.verificationKeyId);
     expect(result.subaccountId).toBe(1);
   });
 
@@ -245,7 +280,7 @@ describe('requestDeviceToken', () => {
     const fetchFn = mockFetch([{ status: 400, body: { error: 'authorization_pending' } }]);
 
     try {
-      await requestDeviceToken('https://api.cube.exchange/ir/v0', { deviceCode: 'abc' }, fetchFn);
+      await requestDeviceToken('https://api.cube.exchange/ir/v0', { deviceCode: 'abc', codeVerifier: 'verifier' }, fetchFn);
       expect.fail('should have thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(DeviceAuthError);
@@ -257,7 +292,7 @@ describe('requestDeviceToken', () => {
     const fetchFn = mockFetch([{ status: 400, body: { error: 'access_denied' } }]);
 
     try {
-      await requestDeviceToken('https://api.cube.exchange/ir/v0', { deviceCode: 'abc' }, fetchFn);
+      await requestDeviceToken('https://api.cube.exchange/ir/v0', { deviceCode: 'abc', codeVerifier: 'verifier' }, fetchFn);
       expect.fail('should have thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(DeviceAuthError);
@@ -269,7 +304,7 @@ describe('requestDeviceToken', () => {
     const fetchFn = mockFetch([{ status: 400, body: { error: 'expired_token' } }]);
 
     try {
-      await requestDeviceToken('https://api.cube.exchange/ir/v0', { deviceCode: 'abc' }, fetchFn);
+      await requestDeviceToken('https://api.cube.exchange/ir/v0', { deviceCode: 'abc', codeVerifier: 'verifier' }, fetchFn);
       expect.fail('should have thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(DeviceAuthError);
@@ -281,7 +316,7 @@ describe('requestDeviceToken', () => {
     const fetchFn = mockFetch([{ status: 400, body: { error: 'slow_down' } }]);
 
     try {
-      await requestDeviceToken('https://api.cube.exchange/ir/v0', { deviceCode: 'abc' }, fetchFn);
+      await requestDeviceToken('https://api.cube.exchange/ir/v0', { deviceCode: 'abc', codeVerifier: 'verifier' }, fetchFn);
       expect.fail('should have thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(DeviceAuthError);
@@ -297,7 +332,7 @@ describe('requestDeviceToken', () => {
 
     const result = await requestDeviceToken(
       'https://api.cube.exchange/ir/v0',
-      { deviceCode: 'abc123' },
+      { deviceCode: 'abc123', codeVerifier: 'pkce-verifier' },
       fetchFn,
     );
 
@@ -314,7 +349,8 @@ describe('pollForToken', () => {
     const result = await pollForToken({
       apiBase: 'https://api.cube.exchange/ir/v0',
       deviceCode: 'abc123',
-      interval: 0, // no delay for tests
+      codeVerifier: 'pkce-verifier',
+      interval: 0,
       expiresIn: 60,
       fetchFn,
     });
@@ -333,6 +369,7 @@ describe('pollForToken', () => {
     const result = await pollForToken({
       apiBase: 'https://api.cube.exchange/ir/v0',
       deviceCode: 'abc123',
+      codeVerifier: 'pkce-verifier',
       interval: 0,
       expiresIn: 60,
       fetchFn,
@@ -352,13 +389,13 @@ describe('pollForToken', () => {
     const result = await pollForToken({
       apiBase: 'https://api.cube.exchange/ir/v0',
       deviceCode: 'abc123',
+      codeVerifier: 'pkce-verifier',
       interval: 0,
       expiresIn: 60,
       fetchFn,
     });
 
     expect(result.verificationKeyId).toBe(MOCK_TOKEN_RESPONSE.verificationKeyId);
-    // The second call should have been delayed longer (interval went from 0 to 5)
     expect(fetchFn).toHaveBeenCalledTimes(2);
   }, 10_000);
 
@@ -372,25 +409,24 @@ describe('pollForToken', () => {
       pollForToken({
         apiBase: 'https://api.cube.exchange/ir/v0',
         deviceCode: 'abc123',
+        codeVerifier: 'pkce-verifier',
         interval: 0,
         expiresIn: 60,
         fetchFn,
       }),
     ).rejects.toThrow(DeviceAuthError);
 
-    // Should have stopped after access_denied (2 calls total)
     expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 
   it('throws on expired_token without retrying', async () => {
-    const fetchFn = mockFetch([
-      { status: 400, body: { error: 'expired_token' } },
-    ]);
+    const fetchFn = mockFetch([{ status: 400, body: { error: 'expired_token' } }]);
 
     await expect(
       pollForToken({
         apiBase: 'https://api.cube.exchange/ir/v0',
         deviceCode: 'abc123',
+        codeVerifier: 'pkce-verifier',
         interval: 0,
         expiresIn: 60,
         fetchFn,
@@ -408,6 +444,7 @@ describe('pollForToken', () => {
       pollForToken({
         apiBase: 'https://api.cube.exchange/ir/v0',
         deviceCode: 'abc123',
+        codeVerifier: 'pkce-verifier',
         interval: 0,
         expiresIn: 60,
         fetchFn,
@@ -419,7 +456,6 @@ describe('pollForToken', () => {
   });
 
   it('throws expired_token when deadline exceeded', async () => {
-    // expiresIn: 0 means immediate expiry
     const fetchFn = mockFetch([
       { status: 400, body: { error: 'authorization_pending' } },
     ]);
@@ -428,6 +464,7 @@ describe('pollForToken', () => {
       pollForToken({
         apiBase: 'https://api.cube.exchange/ir/v0',
         deviceCode: 'abc123',
+        codeVerifier: 'pkce-verifier',
         interval: 0,
         expiresIn: 0,
         fetchFn,
@@ -441,78 +478,110 @@ describe('pollForToken', () => {
 describe('startCallbackServer', () => {
   let server: CallbackServer | null = null;
 
-  afterEach(() => {
-    server?.close();
-    server = null;
+  afterEach(async () => {
+    if (server) {
+      await server.close();
+      server = null;
+    }
   });
 
-  it('starts and returns a valid port and URL', async () => {
+  it('starts and returns a valid port and redirect URI', async () => {
     server = await startCallbackServer(19876);
     expect(server.port).toBeGreaterThan(0);
-    expect(server.url).toBe(`http://localhost:${server.port}/callback`);
+    expect(server.redirectUri).toBe(`http://127.0.0.1:${server.port}/callback`);
+    expect(server.url).toBe(server.redirectUri);
+    expect(server.state).toBeTruthy();
   });
 
-  it('serves connected HTML on /callback with token', async () => {
+  it('serves connected HTML after successful completion', async () => {
     server = await startCallbackServer(19877);
 
-    const res = await fetch(`http://127.0.0.1:${server.port}/callback?token=test-jwt-token`);
-    const html = await res.text();
+    const waitForCode = server.waitForCode();
+    const responsePromise = fetch(`${server.redirectUri}?code=test-auth-code&state=${server.state}`);
 
-    expect(res.status).toBe(200);
-    expect(html).toBe(CONNECTED_HTML);
-    expect(html).toContain('Connected');
-    expect(html).toContain('You can close this tab');
+    expect(await waitForCode).toBe('test-auth-code');
+    expect(
+      await Promise.race([
+        responsePromise.then(() => 'resolved'),
+        new Promise(resolve => setTimeout(() => resolve('pending'), 25)),
+      ]),
+    ).toBe('pending');
+
+    await server.completeSuccess();
+
+    const response = await responsePromise;
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(CONNECTED_HTML);
   });
 
-  it('resolves waitForCallback with the token', async () => {
+  it('shows a failure page when setup fails after the callback arrives', async () => {
     server = await startCallbackServer(19878);
 
-    const tokenPromise = server.waitForCallback();
-    await fetch(`http://127.0.0.1:${server.port}/callback?token=my-secret-token`).catch(() => { });
+    const waitForCode = server.waitForCode();
+    const responsePromise = fetch(`${server.redirectUri}?code=test-auth-code&state=${server.state}`);
 
-    const token = await tokenPromise;
-    expect(token).toBe('my-secret-token');
+    expect(await waitForCode).toBe('test-auth-code');
+    await server.completeFailure('Remote exchange failed.');
+
+    const response = await responsePromise;
+    expect(response.status).toBe(502);
+    expect(await response.text()).toContain('Remote exchange failed.');
   });
 
-  it('rejects waitForCallback when no token param', async () => {
+  it('rejects callbacks with the wrong state and keeps waiting for the real code', async () => {
     server = await startCallbackServer(19879);
 
-    // Attach rejection handler immediately to prevent unhandled rejection
-    const tokenPromise = server.waitForCallback();
-    const caughtPromise = tokenPromise.catch((err) => err);
+    const waitForCode = server.waitForCode();
 
-    await fetch(`http://127.0.0.1:${server.port}/callback`).catch(() => { });
+    const invalidResponse = await fetch(`${server.redirectUri}?code=wrong-code&state=wrong-state`);
+    expect(invalidResponse.status).toBe(400);
+    expect(await invalidResponse.text()).toContain('Invalid authorization state.');
 
-    const err = await caughtPromise;
-    expect(err).toBeInstanceOf(Error);
-    expect(err.message).toContain('without token');
+    const validResponsePromise = fetch(`${server.redirectUri}?code=good-code&state=${server.state}`);
+    expect(await waitForCode).toBe('good-code');
+    await server.completeSuccess();
+
+    const validResponse = await validResponsePromise;
+    expect(validResponse.status).toBe(200);
+  });
+
+  it('rejects waitForCode when no code param is provided', async () => {
+    server = await startCallbackServer(19880);
+
+    const waitForCode = server.waitForCode(100).catch((err) => err);
+    const response = await fetch(`${server.redirectUri}?state=${server.state}`);
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain('Missing authorization code.');
+    const err = await waitForCode;
+    expect(err).toBeInstanceOf(DeviceAuthError);
+    expect((err as DeviceAuthError).code).toBe('callback_timeout');
   });
 
   it('returns 404 for non-callback paths', async () => {
-    server = await startCallbackServer(19880);
+    server = await startCallbackServer(19881);
 
     const res = await fetch(`http://127.0.0.1:${server.port}/other`);
     expect(res.status).toBe(404);
   });
 
-  it('times out waitForCallback when no redirect arrives', async () => {
+  it('times out waitForCode when no redirect arrives', async () => {
     server = await startCallbackServer(19882);
 
-    const result = server.waitForCallback(100).catch((err) => err); // 100ms timeout
-    const err = await result;
+    const err = await server.waitForCode(100).catch((caught) => caught);
     expect(err).toBeInstanceOf(DeviceAuthError);
     expect((err as DeviceAuthError).code).toBe('callback_timeout');
   });
 
   it('retries on port conflict', async () => {
-    const server1 = await startCallbackServer(19881);
+    const server1 = await startCallbackServer(19883);
     const usedPort = server1.port;
 
     try {
       server = await startCallbackServer(usedPort, 3);
       expect(server.port).toBe(usedPort + 1);
     } finally {
-      server1.close();
+      await server1.close();
     }
   });
 });
@@ -555,46 +624,53 @@ describe('CONNECTED_HTML', () => {
 // ── deviceAuthFlow (integration-style with mocks) ────────────
 
 describe('deviceAuthFlow', () => {
-  // Mock saveCredentials to avoid touching filesystem
-  vi.mock('../src/client/signing.js', async (importOriginal) => {
-    const actual = await importOriginal() as Record<string, unknown>;
-    return {
-      ...actual,
-      saveCredentials: vi.fn().mockResolvedValue(undefined),
-    };
-  });
-
-  it('interactive flow: generates key, starts server, opens browser, exchanges token', async () => {
-    const browserUrls: string[] = [];
-    const logs: string[] = [];
-
+  it('interactive flow uses callback state and PKCE, then exchanges with the authorization code', async () => {
+    const events: string[] = [];
+    const tokenBodies: Array<Record<string, unknown>> = [];
     let callbackPort = 0;
+    let callbackState = '';
+
     const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
       const urlStr = url.toString();
 
       if (urlStr.includes('/agent/device/code')) {
-        const body = JSON.parse(init?.body as string);
-        callbackPort = parseInt(new URL(body.callbackUrl).port, 10);
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, string>;
+        callbackPort = parseInt(new URL(body.redirectUri).port, 10);
+        callbackState = body.state;
+
+        expect(body.clientName).toBe('AI Fund');
+        expect(body.verificationKey).toBeTruthy();
+        expect(body.codeChallenge).toBeTruthy();
+        expect(body.codeChallengeMethod).toBe('S256');
+        expect(body.redirectUri).toBeTruthy();
+        expect(body.state).toBeTruthy();
 
         return mockResponse(200, {
           ...MOCK_DEVICE_CODE_RESPONSE,
-          authorizeUrl: `https://cube.exchange/agent/authorize?code=test`,
+          authorizeUrl: 'https://cube.exchange/agent/authorize?code=test',
         });
       }
 
       if (urlStr.includes('/agent/device/token')) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+        tokenBodies.push(body);
+        if (!body.code) {
+          expect(body.codeVerifier).toBeTruthy();
+          return mockResponse(400, { error: 'authorization_pending' });
+        }
+
+        expect(body.code).toBe('authorization-code-123');
+        expect(body.codeVerifier).toBeTruthy();
         return mockResponse(200, MOCK_TOKEN_RESPONSE);
       }
 
       return mockResponse(404, {});
     });
 
-    const openBrowser = vi.fn(async (url: string) => {
-      browserUrls.push(url);
-      // Simulate the browser redirect after a short delay
+    const openBrowser = vi.fn(async () => {
       setTimeout(async () => {
         try {
-          await fetch(`http://127.0.0.1:${callbackPort}/callback?token=test-callback-token`);
+          await fetch(`http://127.0.0.1:${callbackPort}/callback?code=authorization-code-123&state=${callbackState}`);
         } catch {
           // ignore
         }
@@ -607,7 +683,9 @@ describe('deviceAuthFlow', () => {
       headless: false,
       callbackPort: 19890,
       openBrowser,
-      log: (msg) => logs.push(msg),
+      onEvent: async (event) => {
+        events.push(event.type);
+      },
       fetch: fetchFn as typeof globalThis.fetch,
     });
 
@@ -618,37 +696,33 @@ describe('deviceAuthFlow', () => {
     expect(result.verificationKeyBase64).toBeTruthy();
 
     expect(openBrowser).toHaveBeenCalledOnce();
-    expect(browserUrls[0]).toContain('cube.exchange');
-
-    expect(fetchFn).toHaveBeenCalledTimes(2);
-
-    const codeCallBody = getRequestBody(fetchFn);
-    expect(codeCallBody.callbackUrl).toContain('localhost');
-    expect(codeCallBody.clientName).toBe('AI Fund');
-    expect(codeCallBody.verificationKey).toBeTruthy();
-
-    const tokenCallBody = getRequestBody(fetchFn, 1);
-    expect(tokenCallBody.deviceCode).toBe(MOCK_DEVICE_CODE_RESPONSE.deviceCode);
-    expect(tokenCallBody.callbackToken).toBe('test-callback-token');
-
-    expect(logs.some(l => l.includes('Generating'))).toBe(true);
-    expect(logs.some(l => l.includes('Successfully logged in'))).toBe(true);
+    expect(tokenBodies).toHaveLength(2);
+    expect(tokenBodies[0].code).toBeUndefined();
+    expect(tokenBodies[0].codeVerifier).toBeTruthy();
+    expect(tokenBodies[1].code).toBe('authorization-code-123');
+    expect(events).toContain('callback_server_started');
+    expect(events).toContain('browser_opened');
+    expect(events).toContain('approved');
   });
 
-  it('headless flow: generates key, prints URL, polls until approved', async () => {
-    const logs: string[] = [];
-    const onPending = vi.fn();
-
-    const fetchFn = vi.fn(async (url: string, _init?: RequestInit) => {
+  it('headless flow sends PKCE and polls with the verifier until approved', async () => {
+    const events: string[] = [];
+    const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
       const urlStr = url.toString();
 
       if (urlStr.includes('/agent/device/code')) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+        expect(body.redirectUri).toBeUndefined();
+        expect(body.state).toBeUndefined();
+        expect(body.codeChallenge).toBeTruthy();
+        expect(body.codeChallengeMethod).toBe('S256');
         return mockResponse(200, MOCK_HEADLESS_CODE_RESPONSE);
       }
 
       if (urlStr.includes('/agent/device/token')) {
-        // First call: pending. Second call: approved.
-        if (fetchFn.mock.calls.filter((c: unknown[]) => (c[0] as string).includes('/agent/device/token')).length <= 1) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+        expect(body.codeVerifier).toBeTruthy();
+        if (fetchFn.mock.calls.filter((call: unknown[]) => String(call[0]).includes('/agent/device/token')).length <= 1) {
           return mockResponse(400, { error: 'authorization_pending' });
         }
         return mockResponse(200, MOCK_TOKEN_RESPONSE);
@@ -657,7 +731,6 @@ describe('deviceAuthFlow', () => {
       return mockResponse(404, {});
     });
 
-    // Suppress stdout.write in polling
     const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
 
     const result = await deviceAuthFlow({
@@ -665,38 +738,37 @@ describe('deviceAuthFlow', () => {
       clientName: 'AI Fund',
       headless: true,
       openBrowser: vi.fn(),
-      log: (msg) => logs.push(msg),
+      onEvent: async (event) => {
+        events.push(event.type);
+      },
       fetch: fetchFn as typeof globalThis.fetch,
     });
 
     stdoutSpy.mockRestore();
 
     expect(result.verificationKeyId).toBe(MOCK_TOKEN_RESPONSE.verificationKeyId);
-
-    // Verify no callbackUrl in device code request
-    const codeCallBody = getRequestBody(fetchFn);
-    expect(codeCallBody.callbackUrl).toBeUndefined();
-
-    // Verify URL was printed
-    expect(logs.some(l => l.includes('Open this URL'))).toBe(true);
-    expect(logs.some(l => l.includes(MOCK_HEADLESS_CODE_RESPONSE.authorizeUrl))).toBe(true);
+    expect(events).toContain('device_code_received');
+    expect(events).toContain('polling');
   });
 
   it('falls back to headless when callback server fails', async () => {
-    const logs: string[] = [];
-
-    // Token poll responses: pending, then approved
+    const events: string[] = [];
     let tokenCalls = 0;
-    const fetchFn = vi.fn(async (url: string, _init?: RequestInit) => {
+
+    const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
       const urlStr = url.toString();
 
       if (urlStr.includes('/agent/device/code')) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+        expect(body.redirectUri).toBeUndefined();
+        expect(body.state).toBeUndefined();
+        expect(body.codeChallenge).toBeTruthy();
         return mockResponse(200, MOCK_HEADLESS_CODE_RESPONSE);
       }
 
       if (urlStr.includes('/agent/device/token')) {
         tokenCalls++;
-        if (tokenCalls <= 1) {
+        if (tokenCalls === 1) {
           return mockResponse(400, { error: 'authorization_pending' });
         }
         return mockResponse(200, MOCK_TOKEN_RESPONSE);
@@ -707,46 +779,56 @@ describe('deviceAuthFlow', () => {
 
     const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
 
-    // Use an invalid port range to force server failure -> headless fallback
     const result = await deviceAuthFlow({
       apiBase: 'https://api.cube.exchange/ir/v0',
       clientName: 'AI Fund',
       headless: false,
-      callbackPort: -1, // will fail to bind
+      callbackPort: -1,
       callbackPortRetries: 0,
       openBrowser: vi.fn(),
-      log: (msg) => logs.push(msg),
+      onEvent: async (event) => {
+        events.push(event.type);
+      },
       fetch: fetchFn as typeof globalThis.fetch,
     });
 
     stdoutSpy.mockRestore();
 
     expect(result.verificationKeyId).toBe(MOCK_TOKEN_RESPONSE.verificationKeyId);
-    expect(logs.some(l => l.includes('falling back to headless'))).toBe(true);
+    expect(events).toContain('callback_server_failed');
   });
 
-  it('handles browser open failure gracefully', async () => {
-    const logs: string[] = [];
-
+  it('handles browser open failure gracefully and still completes the callback flow', async () => {
+    const events: string[] = [];
     let callbackPort = 0;
+    let callbackState = '';
+
     const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
       const urlStr = url.toString();
 
       if (urlStr.includes('/agent/device/code')) {
-        const body = JSON.parse(init?.body as string);
-        callbackPort = parseInt(new URL(body.callbackUrl).port, 10);
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, string>;
+        callbackPort = parseInt(new URL(body.redirectUri).port, 10);
+        callbackState = body.state;
 
-        // Simulate manual browser redirect after delay
         setTimeout(async () => {
           try {
-            await fetch(`http://127.0.0.1:${callbackPort}/callback?token=manual-token`);
-          } catch { /* ignore */ }
+            await fetch(`http://127.0.0.1:${callbackPort}/callback?code=manual-code-123&state=${callbackState}`);
+          } catch {
+            // ignore
+          }
         }, 100);
 
         return mockResponse(200, MOCK_DEVICE_CODE_RESPONSE);
       }
 
       if (urlStr.includes('/agent/device/token')) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+        if (!body.code) {
+          return mockResponse(400, { error: 'authorization_pending' });
+        }
+        expect(body.code).toBe('manual-code-123');
+        expect(body.codeVerifier).toBeTruthy();
         return mockResponse(200, MOCK_TOKEN_RESPONSE);
       }
 
@@ -763,60 +845,14 @@ describe('deviceAuthFlow', () => {
       headless: false,
       callbackPort: 19892,
       openBrowser,
-      log: (msg) => logs.push(msg),
+      onEvent: async (event) => {
+        events.push(event.type);
+      },
       fetch: fetchFn as typeof globalThis.fetch,
     });
 
     expect(result.verificationKeyId).toBe(MOCK_TOKEN_RESPONSE.verificationKeyId);
-    expect(logs.some(l => l.includes('Browser failed to open'))).toBe(true);
-    expect(logs.some(l => l.includes('open this URL manually'))).toBe(true);
-  });
-
-  it('falls back to headless when all ports exhausted', async () => {
-    const logs: string[] = [];
-
-    // Occupy a port range
-    const blockers = await Promise.all([
-      startCallbackServer(19893),
-      startCallbackServer(19894),
-    ]);
-
-    let tokenCalls = 0;
-    const fetchFn = vi.fn(async (url: string, _init?: RequestInit) => {
-      const urlStr = url.toString();
-      if (urlStr.includes('/agent/device/code')) {
-        return mockResponse(200, MOCK_HEADLESS_CODE_RESPONSE);
-      }
-      if (urlStr.includes('/agent/device/token')) {
-        tokenCalls++;
-        if (tokenCalls <= 1) {
-          return mockResponse(400, { error: 'authorization_pending' });
-        }
-        return mockResponse(200, MOCK_TOKEN_RESPONSE);
-      }
-      return mockResponse(404, {});
-    });
-
-    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-
-    try {
-      const result = await deviceAuthFlow({
-        apiBase: 'https://api.cube.exchange/ir/v0',
-        clientName: 'Test',
-        headless: false,
-        callbackPort: 19893, // occupied
-        callbackPortRetries: 1, // only try 19893 and 19894 — both occupied
-        openBrowser: vi.fn(),
-        log: (msg) => logs.push(msg),
-        fetch: fetchFn as typeof globalThis.fetch,
-      });
-
-      expect(result.verificationKeyId).toBe(MOCK_TOKEN_RESPONSE.verificationKeyId);
-      expect(logs.some(l => l.includes('falling back to headless'))).toBe(true);
-    } finally {
-      blockers.forEach(b => b.close());
-      stdoutSpy.mockRestore();
-    }
+    expect(events).toContain('browser_failed');
   });
 
   it('propagates device code request errors', async () => {
@@ -828,14 +864,13 @@ describe('deviceAuthFlow', () => {
         clientName: 'Test',
         headless: true,
         openBrowser: vi.fn(),
-        log: vi.fn(),
         fetch: fetchFn,
       }),
     ).rejects.toThrow(DeviceAuthError);
   });
 
   it('propagates access_denied from polling', async () => {
-    const fetchFn = vi.fn(async (url: string, _init?: RequestInit) => {
+    const fetchFn = vi.fn(async (url: string) => {
       const urlStr = url.toString();
       if (urlStr.includes('/agent/device/code')) {
         return mockResponse(200, MOCK_HEADLESS_CODE_RESPONSE);
@@ -854,7 +889,6 @@ describe('deviceAuthFlow', () => {
         clientName: 'Test',
         headless: true,
         openBrowser: vi.fn(),
-        log: vi.fn(),
         fetch: fetchFn as typeof globalThis.fetch,
       }),
     ).rejects.toThrow(DeviceAuthError);
@@ -870,10 +904,15 @@ describe('deviceAuthFlow', () => {
       const urlStr = url.toString();
 
       if (urlStr.includes('/agent/device/code')) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+        expect(body.codeChallenge).toBeTruthy();
+        expect(body.codeChallengeMethod).toBe('S256');
         return mockResponse(200, MOCK_HEADLESS_CODE_RESPONSE);
       }
 
       if (urlStr.includes('/agent/device/token')) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+        expect(body.codeVerifier).toBeTruthy();
         return mockResponse(200, MOCK_TOKEN_RESPONSE);
       }
 
@@ -887,25 +926,45 @@ describe('deviceAuthFlow', () => {
       clientName: 'AI Fund',
       headless: true,
       openBrowser: vi.fn(),
-      log: vi.fn(),
       fetch: fetchFn as typeof globalThis.fetch,
       existingKeyPair,
     });
 
     stdoutSpy.mockRestore();
 
-    // The returned keypair should be the same object we passed in
     expect(result.keyPair).toBe(existingKeyPair);
     expect(Buffer.from(result.keyPair.publicKey).toString('hex')).toBe(existingPubHex);
     expect(result.verificationKeyId).toBe(MOCK_TOKEN_RESPONSE.verificationKeyId);
 
-    // The verification key in the device code request should use the existing public key
     const codeCallBody = getRequestBody(fetchFn);
     expect(codeCallBody.verificationKey).toBeTruthy();
-    // Decode the base64 verification key and check it contains our public key bytes
-    // Protobuf layout: outer(0x0a, len) -> V0(0x0a, len) -> PublicKey(0x12, 0x20, <32 bytes>)
     const vkBytes = Buffer.from(String(codeCallBody.verificationKey), 'base64');
     const pubKeyInVk = vkBytes.subarray(6, 38);
     expect(Buffer.from(existingKeyPair.publicKey).equals(pubKeyInVk)).toBe(true);
+  });
+
+  it('saves credentials after a successful login', async () => {
+    const saveCredentialsSpy = vi.mocked(signing.saveCredentials);
+
+    const fetchFn = vi.fn(async (url: string) => {
+      const urlStr = url.toString();
+      if (urlStr.includes('/agent/device/code')) {
+        return mockResponse(200, MOCK_HEADLESS_CODE_RESPONSE);
+      }
+      if (urlStr.includes('/agent/device/token')) {
+        return mockResponse(200, MOCK_TOKEN_RESPONSE);
+      }
+      return mockResponse(404, {});
+    });
+
+    await deviceAuthFlow({
+      apiBase: 'https://api.cube.exchange/ir/v0',
+      clientName: 'AI Fund',
+      headless: true,
+      openBrowser: vi.fn(),
+      fetch: fetchFn as typeof globalThis.fetch,
+    });
+
+    expect(saveCredentialsSpy).toHaveBeenCalledOnce();
   });
 });

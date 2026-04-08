@@ -8,16 +8,27 @@
  * See docs/agent-auth-brief.md for the full spec.
  */
 
-import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
-import { generateKeyPair, encodeVerificationKey, saveCredentials, toHex, type Ed25519KeyPair } from './signing';
-import { CUBE_HOST, rewriteUrl } from './auth';
+import { createHash, randomBytes } from 'node:crypto';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { Socket } from 'node:net';
+import { CUBE_HOST } from './auth';
+import {
+  encodeVerificationKey,
+  generateKeyPair,
+  saveCredentials,
+  toHex,
+  type Ed25519KeyPair,
+} from './signing';
 
 // ── Types ────────────────────────────────────────────────────
 
 export interface DeviceCodeRequest {
   verificationKey: string;
   clientName: string;
-  callbackUrl?: string;
+  codeChallenge: string;
+  codeChallengeMethod: 'S256';
+  redirectUri?: string;
+  state?: string;
 }
 
 export interface DeviceCodeResponse {
@@ -30,7 +41,8 @@ export interface DeviceCodeResponse {
 
 export interface DeviceTokenRequest {
   deviceCode: string;
-  callbackToken?: string;
+  codeVerifier: string;
+  code?: string;
 }
 
 export interface DeviceTokenResponse {
@@ -84,12 +96,55 @@ export interface DeviceAuthResult {
   verificationKeyBase64: string;
 }
 
+export interface CallbackServer {
+  /** @deprecated Use redirectUri instead. */
+  url: string;
+  redirectUri: string;
+  port: number;
+  server: Server;
+  state: string;
+  /** Wait for the browser redirect callback. Rejects after timeoutMs (default 10 min). */
+  waitForCode: (timeoutMs?: number) => Promise<string>;
+  /** @deprecated Use waitForCode instead. */
+  waitForCallback: (timeoutMs?: number) => Promise<string>;
+  completeSuccess: () => Promise<void>;
+  completeFailure: (message?: string) => Promise<void>;
+  close: () => Promise<void>;
+}
+
+export interface PollOptions {
+  apiBase: string;
+  deviceCode: string;
+  codeVerifier: string;
+  interval: number;
+  expiresIn: number;
+  fetchFn?: typeof globalThis.fetch;
+  onPending?: () => void;
+  signal?: AbortSignal;
+}
+
+interface PkcePair {
+  codeChallenge: string;
+  codeChallengeMethod: 'S256';
+  codeVerifier: string;
+}
+
+interface WaitForApprovalOptions extends PollOptions {
+  waitForCode?: () => Promise<string>;
+}
+
+type BrowserCompletion =
+  | { status: 'success' }
+  | { status: 'failure'; message: string };
+
 // ── Constants ────────────────────────────────────────────────
 
 const DEFAULT_KEY_EXPIRY_SECONDS = 518400; // 6 days
 const DEFAULT_CALLBACK_PORT = 9876;
 const DEFAULT_PORT_RETRIES = 3;
 const POLL_JITTER_MS = 500;
+const DEFAULT_CALLBACK_TIMEOUT_MS = 600_000; // 10 minutes (matches device code expiry)
+const CALLBACK_SERVER_FORCE_CLOSE_TIMEOUT_MS = 1_000;
 
 // ── Connected Page HTML ──────────────────────────────────────
 
@@ -104,20 +159,23 @@ export const CONNECTED_HTML = `<!DOCTYPE html>
 </body>
 </html>`;
 
-// ── Localhost Callback Server ────────────────────────────────
+const renderFailureHtml = (message: string) => `<!DOCTYPE html>
+<html>
+<body style="font-family: system-ui; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #0a0a0a; color: #fff;">
+  <div style="max-width: 560px; padding: 24px; text-align: center;">
+    <div style="font-size: 48px; margin-bottom: 16px;">!</div>
+    <h1 style="margin: 0 0 8px;">Connection failed</h1>
+    <p style="color: #b3b3b3; line-height: 1.6;">${message}</p>
+    <p style="color: #888; line-height: 1.6;">Return to your terminal and start a fresh authorization request if needed.</p>
+  </div>
+</body>
+</html>`;
 
-export interface CallbackServer {
-  url: string;
-  port: number;
-  server: Server;
-  /** Wait for the browser redirect callback. Rejects after timeoutMs (default 10 min). */
-  waitForCallback: (timeoutMs?: number) => Promise<string>;
-  close: () => void;
-}
+// ── Localhost Callback Server ────────────────────────────────
 
 /**
  * Start a localhost HTTP server that waits for the browser redirect callback.
- * Returns the callback token from the query param `?token=...`.
+ * Returns the authorization code from the query params `?code=...&state=...`.
  *
  * Tries ports starting from `startPort`, retrying up to `maxRetries` times
  * on EADDRINUSE.
@@ -126,54 +184,184 @@ export async function startCallbackServer(
   startPort: number = DEFAULT_CALLBACK_PORT,
   maxRetries: number = DEFAULT_PORT_RETRIES,
 ): Promise<CallbackServer> {
-  let resolveToken: (token: string) => void;
-  let rejectToken: (err: Error) => void;
-  const tokenPromise = new Promise<string>((resolve, reject) => {
-    resolveToken = resolve;
-    rejectToken = reject;
+  const state = createAuthorizationState();
+  const sockets = new Set<Socket>();
+  let resolveCode: ((code: string) => void) | undefined;
+  let rejectCode: ((err: Error) => void) | undefined;
+  let codeSettled = false;
+  let pendingBrowserResponse: { res: ServerResponse<IncomingMessage> } | null = null;
+  let browserCompletion: BrowserCompletion | null = null;
+
+  const codePromise = new Promise<string>((resolve, reject) => {
+    resolveCode = resolve;
+    rejectCode = reject;
   });
+  // Avoid unhandled rejections when the server closes after no caller is awaiting the code.
+  void codePromise.catch(() => undefined);
+
+  const settleCodeSuccess = (code: string) => {
+    if (codeSettled) {
+      return;
+    }
+    codeSettled = true;
+    resolveCode?.(code);
+  };
+
+  const settleCodeFailure = (err: Error) => {
+    if (codeSettled) {
+      return;
+    }
+    codeSettled = true;
+    rejectCode?.(err);
+  };
+
+  const sendBrowserCompletion = (
+    res: ServerResponse<IncomingMessage>,
+    completion: BrowserCompletion,
+  ) => {
+    if (completion.status === 'success') {
+      res.writeHead(200, {
+        'cache-control': 'no-store',
+        'content-type': 'text/html; charset=utf-8',
+        connection: 'close',
+      });
+      res.end(CONNECTED_HTML);
+      return;
+    }
+
+    res.writeHead(502, {
+      'cache-control': 'no-store',
+      'content-type': 'text/html; charset=utf-8',
+      connection: 'close',
+    });
+    res.end(renderFailureHtml(completion.message));
+  };
+
+  const settleBrowserCompletion = async (completion: BrowserCompletion) => {
+    browserCompletion = completion;
+    if (!pendingBrowserResponse) {
+      return;
+    }
+
+    const { res } = pendingBrowserResponse;
+    pendingBrowserResponse = null;
+    sendBrowserCompletion(res, completion);
+  };
 
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
-    const url = new URL(req.url ?? '/', `http://localhost`);
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
 
-    if (url.pathname === '/callback') {
-      const token = url.searchParams.get('token');
-      // Serve the connected page regardless
-      res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end(CONNECTED_HTML);
-
-      if (token) {
-        resolveToken!(token);
-      } else {
-        rejectToken!(new Error('Callback received without token parameter'));
-      }
-    } else {
-      res.writeHead(404);
+    if (url.pathname !== '/callback') {
+      res.writeHead(404, {
+        'content-type': 'text/plain; charset=utf-8',
+        connection: 'close',
+      });
       res.end('Not found');
+      return;
     }
+
+    if (req.method !== 'GET') {
+      res.writeHead(405, {
+        'content-type': 'text/plain; charset=utf-8',
+        connection: 'close',
+      });
+      res.end('Method not allowed.');
+      return;
+    }
+
+    const receivedState = url.searchParams.get('state');
+    if (receivedState !== state) {
+      res.writeHead(400, {
+        'content-type': 'text/plain; charset=utf-8',
+        connection: 'close',
+      });
+      res.end('Invalid authorization state.');
+      return;
+    }
+
+    const code = url.searchParams.get('code');
+    if (!code) {
+      res.writeHead(400, {
+        'content-type': 'text/plain; charset=utf-8',
+        connection: 'close',
+      });
+      res.end('Missing authorization code.');
+      return;
+    }
+
+    if (browserCompletion) {
+      sendBrowserCompletion(res, browserCompletion);
+      settleCodeSuccess(code);
+      return;
+    }
+
+    pendingBrowserResponse = { res };
+    res.on('close', () => {
+      if (pendingBrowserResponse?.res === res) {
+        pendingBrowserResponse = null;
+      }
+    });
+    settleCodeSuccess(code);
+  });
+
+  server.on('connection', (socket) => {
+    sockets.add(socket);
+    socket.on('close', () => {
+      sockets.delete(socket);
+    });
   });
 
   const port = await listenWithRetry(server, startPort, maxRetries);
+  const redirectUri = `http://127.0.0.1:${port}/callback`;
 
-  const DEFAULT_CALLBACK_TIMEOUT_MS = 600_000; // 10 minutes (matches device code expiry)
+  const waitForCode = (timeoutMs: number = DEFAULT_CALLBACK_TIMEOUT_MS) => Promise.race([
+    codePromise,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new DeviceAuthError('callback_timeout', 0, 'Browser callback timed out. The user may not have completed approval, or localhost may be unreachable.')),
+        timeoutMs,
+      ),
+    ),
+  ]);
 
   return {
-    url: `http://localhost:${port}/callback`,
+    url: redirectUri,
+    redirectUri,
     port,
     server,
-    waitForCallback: (timeoutMs: number = DEFAULT_CALLBACK_TIMEOUT_MS) => {
-      return Promise.race([
-        tokenPromise,
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new DeviceAuthError('callback_timeout', 0, 'Browser callback timed out. The user may not have completed approval, or localhost may be unreachable.')),
-            timeoutMs,
-          ),
-        ),
-      ]);
+    state,
+    waitForCode,
+    waitForCallback: waitForCode,
+    completeSuccess: async () => {
+      await settleBrowserCompletion({ status: 'success' });
     },
-    close: () => {
-      server.close();
+    completeFailure: async (message = 'Cube could not finish setup for this authorization.') => {
+      await settleBrowserCompletion({ status: 'failure', message });
+    },
+    close: async () => {
+      if (!browserCompletion) {
+        await settleBrowserCompletion({
+          status: 'failure',
+          message: 'The local callback server stopped before setup completed.',
+        });
+      }
+
+      const closePromise = new Promise<void>((resolve, reject) => {
+        server.close((err) => err ? reject(err) : resolve());
+      });
+      const forceCloseTimer = setTimeout(() => {
+        for (const socket of sockets) {
+          socket.destroy();
+        }
+      }, CALLBACK_SERVER_FORCE_CLOSE_TIMEOUT_MS);
+
+      try {
+        await closePromise;
+      } finally {
+        clearTimeout(forceCloseTimer);
+      }
+
+      settleCodeFailure(new Error('callback_server_closed'));
     },
   };
 }
@@ -259,16 +447,6 @@ export async function requestDeviceToken(
 
 // ── Polling ──────────────────────────────────────────────────
 
-export interface PollOptions {
-  apiBase: string;
-  deviceCode: string;
-  interval: number;
-  expiresIn: number;
-  fetchFn?: typeof globalThis.fetch;
-  onPending?: () => void;
-  signal?: AbortSignal;
-}
-
 /**
  * Poll POST /agent/device/token until approved, denied, or expired.
  * Respects the `slow_down` response by increasing the interval.
@@ -277,6 +455,7 @@ export async function pollForToken(options: PollOptions): Promise<DeviceTokenRes
   const {
     apiBase,
     deviceCode,
+    codeVerifier,
     expiresIn,
     fetchFn = globalThis.fetch,
     onPending,
@@ -294,10 +473,11 @@ export async function pollForToken(options: PollOptions): Promise<DeviceTokenRes
     await sleep(interval * 1000 + Math.random() * POLL_JITTER_MS);
 
     try {
-      const result = await requestDeviceToken(apiBase, { deviceCode }, fetchFn);
-      return result;
+      return await requestDeviceToken(apiBase, { deviceCode, codeVerifier }, fetchFn);
     } catch (err) {
-      if (!(err instanceof DeviceAuthError)) throw err;
+      if (!(err instanceof DeviceAuthError)) {
+        throw err;
+      }
 
       switch (err.code) {
         case 'authorization_pending':
@@ -314,6 +494,74 @@ export async function pollForToken(options: PollOptions): Promise<DeviceTokenRes
           throw err;
       }
     }
+  }
+
+  throw new DeviceAuthError('expired_token', 400, 'Device code has expired (timeout)');
+}
+
+async function waitForApproval(options: WaitForApprovalOptions): Promise<DeviceTokenResponse> {
+  const {
+    apiBase,
+    deviceCode,
+    codeVerifier,
+    expiresIn,
+    fetchFn = globalThis.fetch,
+    onPending,
+    signal,
+    waitForCode,
+  } = options;
+  let interval = options.interval;
+  let authorizationCode: string | undefined;
+
+  const deadline = Date.now() + expiresIn * 1000;
+  const callbackPromise = waitForCode?.()
+    .then((code) => {
+      authorizationCode = code;
+      return code;
+    })
+    .catch(() => undefined);
+
+  while (Date.now() < deadline) {
+    if (signal?.aborted) {
+      throw new DeviceAuthError('aborted', 0);
+    }
+
+    try {
+      return await requestDeviceToken(
+        apiBase,
+        {
+          deviceCode,
+          codeVerifier,
+          ...(authorizationCode ? { code: authorizationCode } : {}),
+        },
+        fetchFn,
+      );
+    } catch (err) {
+      if (!(err instanceof DeviceAuthError)) {
+        throw err;
+      }
+
+      switch (err.code) {
+        case 'authorization_pending':
+          onPending?.();
+          break;
+        case 'slow_down':
+          interval += 5;
+          break;
+        case 'access_denied':
+          throw new DeviceAuthError('access_denied', 400, 'User denied the authorization request');
+        case 'expired_token':
+          throw new DeviceAuthError('expired_token', 400, 'Device code has expired');
+        default:
+          throw err;
+      }
+    }
+
+    const waiters: Promise<unknown>[] = [sleep(interval * 1000 + Math.random() * POLL_JITTER_MS)];
+    if (callbackPromise) {
+      waiters.push(callbackPromise);
+    }
+    await Promise.race(waiters);
   }
 
   throw new DeviceAuthError('expired_token', 400, 'Device code has expired (timeout)');
@@ -345,17 +593,17 @@ export async function openBrowserDefault(url: string): Promise<void> {
  * Interactive mode (default):
  *   1. Generate Ed25519 keypair
  *   2. Start localhost callback server
- *   3. POST /agent/device/code with callbackUrl
+ *   3. POST /agent/device/code with redirectUri + state + PKCE challenge
  *   4. Open browser to authorizeUrl
  *   5. Wait for browser redirect to localhost
- *   6. POST /agent/device/token with callbackToken
+ *   6. POST /agent/device/token with PKCE verifier and optional callback code
  *   7. Save credentials
  *
  * Headless mode:
  *   1. Generate Ed25519 keypair
- *   2. POST /agent/device/code (no callbackUrl)
+ *   2. POST /agent/device/code with PKCE challenge only
  *   3. Print URL with user code
- *   4. Poll /agent/device/token until approved
+ *   4. Poll /agent/device/token with PKCE verifier until approved
  *   5. Save credentials
  */
 export async function deviceAuthFlow(options: DeviceAuthOptions): Promise<DeviceAuthResult> {
@@ -375,19 +623,36 @@ export async function deviceAuthFlow(options: DeviceAuthOptions): Promise<Device
   const emit = async (event: DeviceAuthEvent) => {
     if (onEvent) {
       await onEvent(event);
-    } else {
-      // Fallback: use log for backward compat
-      switch (event.type) {
-        case 'keypair_generated': log(`Generating Ed25519 keypair...\n  Public key: ${event.publicKeyHex.slice(0, 16)}...`); break;
-        case 'callback_server_started': log(`  Callback server listening on port ${event.port}`); break;
-        case 'callback_server_failed': log('  Could not start callback server, falling back to headless mode...'); break;
-        case 'device_code_received': log(event.userCode ? `\n  Open this URL in any browser:\n\n    ${event.authorizeUrl}\n` : `\n  Opening ${event.authorizeUrl}\n`); break;
-        case 'browser_opened': log('  Waiting for approval in browser...\n'); break;
-        case 'browser_failed': log(`  Browser failed to open. Please open this URL manually:\n    ${event.url}\n`); break;
-        case 'polling': break;
-        case 'approved': log(`\n  ✓ Successfully logged in.\n    Key expires: ${new Date(event.expiresAt * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`); break;
-        case 'credentials_saved': log(`    Credentials saved to ${event.path}`); break;
-      }
+      return;
+    }
+
+    switch (event.type) {
+      case 'keypair_generated':
+        log(`Generating Ed25519 keypair...\n  Public key: ${event.publicKeyHex.slice(0, 16)}...`);
+        break;
+      case 'callback_server_started':
+        log(`  Callback server listening on port ${event.port}`);
+        break;
+      case 'callback_server_failed':
+        log('  Could not start callback server, falling back to headless mode...');
+        break;
+      case 'device_code_received':
+        log(event.userCode ? `\n  Open this URL in any browser:\n\n    ${event.authorizeUrl}\n` : `\n  Opening ${event.authorizeUrl}\n`);
+        break;
+      case 'browser_opened':
+        log('  Waiting for approval in browser...\n');
+        break;
+      case 'browser_failed':
+        log(`  Browser failed to open. Please open this URL manually:\n    ${event.url}\n`);
+        break;
+      case 'polling':
+        break;
+      case 'approved':
+        log(`\n  ✓ Successfully logged in.\n    Key expires: ${new Date(event.expiresAt * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`);
+        break;
+      case 'credentials_saved':
+        log(`    Credentials saved to ${event.path}`);
+        break;
     }
   };
 
@@ -401,6 +666,7 @@ export async function deviceAuthFlow(options: DeviceAuthOptions): Promise<Device
   const vkBytes = encodeVerificationKey(keyPair.publicKey, expiresAt);
   // Cube backend uses STANDARD_NO_PAD base64 — strip trailing '='
   const vkBase64 = Buffer.from(vkBytes).toString('base64').replace(/=+$/, '');
+  const pkce = createPkcePair();
 
   let callbackServer: CallbackServer | null = null;
   let useHeadless = headless;
@@ -421,7 +687,12 @@ export async function deviceAuthFlow(options: DeviceAuthOptions): Promise<Device
     const codeRequest: DeviceCodeRequest = {
       verificationKey: vkBase64,
       clientName,
-      ...(callbackServer ? { callbackUrl: callbackServer.url } : {}),
+      codeChallenge: pkce.codeChallenge,
+      codeChallengeMethod: pkce.codeChallengeMethod,
+      ...(callbackServer ? {
+        redirectUri: callbackServer.redirectUri,
+        state: callbackServer.state,
+      } : {}),
     };
 
     const codeResponse = await requestDeviceCode(apiBase, codeRequest, fetchFn);
@@ -450,25 +721,39 @@ export async function deviceAuthFlow(options: DeviceAuthOptions): Promise<Device
     }
 
     // 6. Wait for approval
-    let tokenResponse: DeviceTokenResponse;
     const pollStartTime = Date.now();
+    let tokenResponse: DeviceTokenResponse;
 
     if (callbackServer && !useHeadless) {
-      const callbackToken = await callbackServer.waitForCallback();
-      tokenResponse = await requestDeviceToken(
-        apiBase,
-        { deviceCode: codeResponse.deviceCode, callbackToken },
-        fetchFn,
-      );
+      try {
+        tokenResponse = await waitForApproval({
+          apiBase,
+          deviceCode: codeResponse.deviceCode,
+          codeVerifier: pkce.codeVerifier,
+          interval: codeResponse.interval,
+          expiresIn: codeResponse.expiresIn,
+          fetchFn,
+          onPending: () => {
+            void emit({ type: 'polling', elapsed: Math.floor((Date.now() - pollStartTime) / 1000) });
+          },
+          waitForCode: () => callbackServer.waitForCode(),
+        });
+        await callbackServer.completeSuccess();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        await callbackServer.completeFailure(message);
+        throw err;
+      }
     } else {
       tokenResponse = await pollForToken({
         apiBase,
         deviceCode: codeResponse.deviceCode,
+        codeVerifier: pkce.codeVerifier,
         interval: codeResponse.interval,
         expiresIn: codeResponse.expiresIn,
         fetchFn,
         onPending: () => {
-          emit({ type: 'polling', elapsed: Math.floor((Date.now() - pollStartTime) / 1000) });
+          void emit({ type: 'polling', elapsed: Math.floor((Date.now() - pollStartTime) / 1000) });
         },
       });
     }
@@ -502,7 +787,7 @@ export async function deviceAuthFlow(options: DeviceAuthOptions): Promise<Device
       verificationKeyBase64: vkBase64,
     };
   } finally {
-    callbackServer?.close();
+    await callbackServer?.close();
   }
 }
 
@@ -543,7 +828,9 @@ async function extractErrorCode(res: Response): Promise<string> {
           return (inner as Record<string, string>).reason;
         }
       }
-      if (typeof json.message === 'string') return json.message;
+      if (typeof json.message === 'string') {
+        return json.message;
+      }
     } catch {
       // Not JSON — could be HTML 404 page etc.
     }
@@ -553,6 +840,31 @@ async function extractErrorCode(res: Response): Promise<string> {
   } catch {
     return `HTTP ${res.status}`;
   }
+}
+
+function base64UrlEncode(value: Uint8Array | Buffer): string {
+  return Buffer.from(value)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function createPkcePair(): PkcePair {
+  const codeVerifier = base64UrlEncode(randomBytes(32));
+  return {
+    codeChallenge: base64UrlEncode(
+      createHash('sha256')
+        .update(codeVerifier)
+        .digest(),
+    ),
+    codeChallengeMethod: 'S256',
+    codeVerifier,
+  };
+}
+
+function createAuthorizationState(): string {
+  return base64UrlEncode(randomBytes(32));
 }
 
 function sleep(ms: number): Promise<void> {
