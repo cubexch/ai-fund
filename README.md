@@ -11,6 +11,7 @@ ai-trading, crypto-trading-bot, hedge-fund, ai-hedge-fund, trading-agents, mcp, 
 [![Claude Code](https://img.shields.io/badge/built%20for-Claude%20Code-blueviolet)](https://claude.ai/code)
 [![Exchanges](https://img.shields.io/badge/exchanges-110%20CCXT%20venues-green)](connectors/README.md)
 [![Agents](https://img.shields.io/badge/agents-45%20hedge%20fund%20roles-orange)](#45-ai-trading-agents--the-full-roster)
+[![Powered By Cube](https://www.cube.exchange/api/badge)](https://cube.exchange)
 
 <p align="center">
   <img src="docs/architecture-light.svg" alt="How AI Fund works — You talk to Claude Code, which orchestrates 45 trading agents across cube.exchange, Binance, Coinbase, Kraken, OKX, and 110 CCXT exchanges via MCP connectors" width="100%">
