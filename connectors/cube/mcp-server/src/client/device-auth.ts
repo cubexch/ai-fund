@@ -137,6 +137,11 @@ type BrowserCompletion =
   | { status: 'success' }
   | { status: 'failure'; message: string };
 
+interface PendingBrowserResponse {
+  res: ServerResponse<IncomingMessage>;
+  redirectUrl: string | null;
+}
+
 // ── Constants ────────────────────────────────────────────────
 
 const DEFAULT_KEY_EXPIRY_SECONDS = 518400; // 6 days
@@ -171,6 +176,35 @@ const renderFailureHtml = (message: string) => `<!DOCTYPE html>
 </body>
 </html>`;
 
+const DEFAULT_HOSTED_REDIRECT_ORIGINS = new Set([
+  'https://cube.exchange',
+  'https://www.cube.exchange',
+  'https://staging.cube.exchange',
+  'https://dev.cube.exchange',
+  'https://w.cube.ngrok.app',
+  'https://p.cube.ngrok.app',
+  'https://b.cube.ngrok.app',
+]);
+
+function resolveTrustedHostedRedirectUrl(redirectUrl: string | null): string | null {
+  if (!redirectUrl) {
+    return null;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(redirectUrl);
+  } catch {
+    return null;
+  }
+
+  if (CUBE_HOST && parsed.host === CUBE_HOST) {
+    return parsed.toString();
+  }
+
+  return DEFAULT_HOSTED_REDIRECT_ORIGINS.has(parsed.origin) ? parsed.toString() : null;
+}
+
 // ── Localhost Callback Server ────────────────────────────────
 
 /**
@@ -189,7 +223,7 @@ export async function startCallbackServer(
   let resolveCode: ((code: string) => void) | undefined;
   let rejectCode: ((err: Error) => void) | undefined;
   let codeSettled = false;
-  let pendingBrowserResponse: { res: ServerResponse<IncomingMessage> } | null = null;
+  let pendingBrowserResponse: PendingBrowserResponse | null = null;
   let browserCompletion: BrowserCompletion | null = null;
 
   const codePromise = new Promise<string>((resolve, reject) => {
@@ -217,15 +251,17 @@ export async function startCallbackServer(
 
   const sendBrowserCompletion = (
     res: ServerResponse<IncomingMessage>,
+    redirectUrl: string | null,
     completion: BrowserCompletion,
   ) => {
     if (completion.status === 'success') {
-      res.writeHead(200, {
+      res.writeHead(redirectUrl ? 302 : 200, {
         'cache-control': 'no-store',
+        ...(redirectUrl ? { location: redirectUrl } : {}),
         'content-type': 'text/html; charset=utf-8',
         connection: 'close',
       });
-      res.end(CONNECTED_HTML);
+      res.end(redirectUrl ? '' : CONNECTED_HTML);
       return;
     }
 
@@ -243,9 +279,9 @@ export async function startCallbackServer(
       return;
     }
 
-    const { res } = pendingBrowserResponse;
+    const { res, redirectUrl } = pendingBrowserResponse;
     pendingBrowserResponse = null;
-    sendBrowserCompletion(res, completion);
+    sendBrowserCompletion(res, redirectUrl, completion);
   };
 
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -280,6 +316,7 @@ export async function startCallbackServer(
     }
 
     const code = url.searchParams.get('code');
+    const redirectUrl = resolveTrustedHostedRedirectUrl(url.searchParams.get('cubeRedirectUrl'));
     if (!code) {
       res.writeHead(400, {
         'content-type': 'text/plain; charset=utf-8',
@@ -290,12 +327,12 @@ export async function startCallbackServer(
     }
 
     if (browserCompletion) {
-      sendBrowserCompletion(res, browserCompletion);
+      sendBrowserCompletion(res, redirectUrl, browserCompletion);
       settleCodeSuccess(code);
       return;
     }
 
-    pendingBrowserResponse = { res };
+    pendingBrowserResponse = { res, redirectUrl };
     res.on('close', () => {
       if (pendingBrowserResponse?.res === res) {
         pendingBrowserResponse = null;

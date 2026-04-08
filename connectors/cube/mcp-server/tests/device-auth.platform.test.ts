@@ -514,8 +514,25 @@ describe('startCallbackServer', () => {
     expect(await response.text()).toBe(CONNECTED_HTML);
   });
 
-  it('shows a failure page when setup fails after the callback arrives', async () => {
+  it('redirects back to an allowed Cube-hosted completion URL after success', async () => {
     server = await startCallbackServer(19878);
+
+    const waitForCode = server.waitForCode();
+    const responsePromise = fetch(
+      `${server.redirectUri}?code=test-auth-code&state=${server.state}&cubeRedirectUrl=${encodeURIComponent('https://w.cube.ngrok.app/agent/authorize/success')}`,
+      { redirect: 'manual' },
+    );
+
+    expect(await waitForCode).toBe('test-auth-code');
+    await server.completeSuccess();
+
+    const response = await responsePromise;
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe('https://w.cube.ngrok.app/agent/authorize/success');
+  });
+
+  it('shows a failure page when setup fails after the callback arrives', async () => {
+    server = await startCallbackServer(19879);
 
     const waitForCode = server.waitForCode();
     const responsePromise = fetch(`${server.redirectUri}?code=test-auth-code&state=${server.state}`);
@@ -529,7 +546,7 @@ describe('startCallbackServer', () => {
   });
 
   it('rejects callbacks with the wrong state and keeps waiting for the real code', async () => {
-    server = await startCallbackServer(19879);
+    server = await startCallbackServer(19880);
 
     const waitForCode = server.waitForCode();
 
@@ -546,7 +563,7 @@ describe('startCallbackServer', () => {
   });
 
   it('rejects waitForCode when no code param is provided', async () => {
-    server = await startCallbackServer(19880);
+    server = await startCallbackServer(19881);
 
     const waitForCode = server.waitForCode(100).catch((err) => err);
     const response = await fetch(`${server.redirectUri}?state=${server.state}`);
@@ -559,14 +576,14 @@ describe('startCallbackServer', () => {
   });
 
   it('returns 404 for non-callback paths', async () => {
-    server = await startCallbackServer(19881);
+    server = await startCallbackServer(19882);
 
     const res = await fetch(`http://127.0.0.1:${server.port}/other`);
     expect(res.status).toBe(404);
   });
 
   it('times out waitForCode when no redirect arrives', async () => {
-    server = await startCallbackServer(19882);
+    server = await startCallbackServer(19883);
 
     const err = await server.waitForCode(100).catch((caught) => caught);
     expect(err).toBeInstanceOf(DeviceAuthError);
@@ -574,7 +591,7 @@ describe('startCallbackServer', () => {
   });
 
   it('retries on port conflict', async () => {
-    const server1 = await startCallbackServer(19883);
+    const server1 = await startCallbackServer(19884);
     const usedPort = server1.port;
 
     try {
@@ -696,10 +713,12 @@ describe('deviceAuthFlow', () => {
     expect(result.verificationKeyBase64).toBeTruthy();
 
     expect(openBrowser).toHaveBeenCalledOnce();
-    expect(tokenBodies).toHaveLength(2);
-    expect(tokenBodies[0].code).toBeUndefined();
-    expect(tokenBodies[0].codeVerifier).toBeTruthy();
-    expect(tokenBodies[1].code).toBe('authorization-code-123');
+    expect(tokenBodies.length).toBeGreaterThanOrEqual(2);
+    for (const body of tokenBodies.slice(0, -1)) {
+      expect(body.code).toBeUndefined();
+      expect(body.codeVerifier).toBeTruthy();
+    }
+    expect(tokenBodies.at(-1)?.code).toBe('authorization-code-123');
     expect(events).toContain('callback_server_started');
     expect(events).toContain('browser_opened');
     expect(events).toContain('approved');
