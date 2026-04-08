@@ -188,7 +188,7 @@ export async function buildAuthHeaders(
  *
  * Format (from core/iridium verification_key.rs):
  *   x-verification-key: protobuf PublicKey { curve25519: <32b> } in base64 no-pad
- *   x-verification-key-signature: Ed25519 sign("{METHOD} {PATH}") in base64 no-pad
+ *   x-verification-key-signature: Ed25519 sign("{METHOD} {PATH}\n{TIMESTAMP}") in base64 no-pad
  *   x-verification-key-timestamp: unix timestamp string
  *
  * Allowed routes: /users/check, /users/subaccounts,
@@ -200,7 +200,7 @@ export async function buildVerificationKeyHeaders(
   auth: NonNullable<AuthMethod>,
 ): Promise<Record<string, string>> {
   const timestamp = Math.floor(Date.now() / 1000);
-  const message = new TextEncoder().encode(`${method.toUpperCase()} ${path}`);
+  const message = new TextEncoder().encode(`${method.toUpperCase()} ${path}\n${timestamp}`);
   const sig = await signMessage(message, auth.privateKey);
   // Protobuf-encoded PublicKey in base64 no-pad
   const publicKeyProto = encodePublicKey(fromHex(auth.publicKeyHex));
