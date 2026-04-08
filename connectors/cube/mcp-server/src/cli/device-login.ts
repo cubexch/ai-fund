@@ -15,7 +15,7 @@
 
 import { loadCredentials, getBackendName, importPrivateKey, type Ed25519KeyPair } from '../client/signing';
 import { getEnvironment } from '../client/auth';
-import { deviceAuthFlow, DeviceAuthError, type DeviceAuthEvent } from '../client/device-auth';
+import { deviceAuthFlow, DeviceAuthError, hostedAuthorizeUrl, type DeviceAuthEvent } from '../client/device-auth';
 import { execFile } from 'node:child_process';
 
 // ── ANSI helpers (no dependencies) ───────────────────────────
@@ -345,8 +345,8 @@ async function main() {
       case 'device_code_received':
         codeExpiresIn = event.expiresIn;
         deviceUserCode = event.userCode ?? '';
-        authUrl = event.authorizeUrl;
-        await copyToClipboard(event.authorizeUrl);
+        authUrl = hostedAuthorizeUrl(event.authorizeUrl);
+        await copyToClipboard(authUrl);
 
         if (headless || !event.userCode) {
           printTailSummary(deviceUserCode, authUrl);
@@ -366,7 +366,7 @@ async function main() {
 
       case 'browser_failed':
         spinner.warn('Could not open browser');
-        printTailSummary(deviceUserCode, event.url);
+        printTailSummary(deviceUserCode, hostedAuthorizeUrl(event.url));
         spinner.startCountdown('Waiting for approval...', codeExpiresIn);
         if (isTTY) console.log(`  ${c.dim}Press c to cancel${c.reset}`);
         break;
@@ -385,22 +385,31 @@ async function main() {
   };
 
   // Listen for 'c' to cancel
-  const abortController = new AbortController();
-  if (process.stdin.isTTY) {
+  const cancelKeyHandler = (key: Buffer) => {
+    if (key[0] === 0x63 /* c */ || key[0] === 0x03 /* Ctrl-C */) {
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+      console.log('');
+      console.log(`  ${c.yellow}Cancelled${c.reset}`);
+      console.log('');
+      process.exit(0);
+    }
+  };
+  const attachCancelHandler = () => {
+    if (!process.stdin.isTTY) {
+      return;
+    }
     process.stdin.setRawMode(true);
     process.stdin.resume();
-    process.stdin.on('data', (key: Buffer) => {
-      if (key[0] === 0x63 /* c */ || key[0] === 0x03 /* Ctrl-C */) {
-        abortController.abort();
-        process.stdin.setRawMode(false);
-        process.stdin.pause();
-        console.log('');
-        console.log(`  ${c.yellow}Cancelled${c.reset}`);
-        console.log('');
-        process.exit(0);
-      }
-    });
-  }
+    process.stdin.on('data', cancelKeyHandler);
+  };
+  const detachCancelHandler = () => {
+    if (!process.stdin.isTTY) {
+      return;
+    }
+    process.stdin.off('data', cancelKeyHandler);
+  };
+  attachCancelHandler();
   spinner.start(existingKeyPair ? 'Reusing keypair...' : 'Generating keypair...');
 
   const result = await deviceAuthFlow({
@@ -413,6 +422,7 @@ async function main() {
 
   // Stop listening for cancel
   if (process.stdin.isTTY) {
+    detachCancelHandler();
     process.stdin.setRawMode(false);
     process.stdin.pause();
   }
@@ -440,19 +450,8 @@ async function main() {
   console.log('');
   console.log(`  ${c.dim}Note: this key will expire in ${days} days. Re-run to re-authenticate.${c.reset}`);
   console.log('');
-  if (isTTY) {
-    console.log(`  ${c.green}Login successful.${c.reset} Press Enter to continue…`);
-    await new Promise<void>(resolve => {
-      process.stdin.setRawMode(false);
-      process.stdin.resume();
-      process.stdin.once('data', () => {
-        process.stdin.pause();
-        resolve();
-      });
-    });
-  } else {
-    console.log(`  ${c.green}Login successful.${c.reset}`);
-  }
+  console.log(`  ${c.green}Login successful.${c.reset}`);
+  process.exit(0);
 }
 
 main().catch(err => {

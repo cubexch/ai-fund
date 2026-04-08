@@ -5,6 +5,7 @@ import {
   type CallbackServer,
   DeviceAuthError,
   deviceAuthFlow,
+  hostedAuthorizeUrl,
   pollForToken,
   requestDeviceCode,
   requestDeviceToken,
@@ -82,6 +83,14 @@ afterEach(() => {
 // ── requestDeviceCode ────────────────────────────────────────
 
 describe('requestDeviceCode', () => {
+  it('adds hosted delivery override for manual authorization URLs', () => {
+    expect(
+      hostedAuthorizeUrl('https://w.cube.ngrok.app/agent/authorize?code=device-code'),
+    ).toBe(
+      'https://w.cube.ngrok.app/agent/authorize?code=device-code&delivery=hosted',
+    );
+  });
+
   it('sends correct request for interactive mode', async () => {
     const fetchFn = mockFetch([{ status: 200, body: MOCK_DEVICE_CODE_RESPONSE }]);
 

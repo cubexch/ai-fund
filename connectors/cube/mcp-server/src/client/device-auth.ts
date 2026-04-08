@@ -176,6 +176,12 @@ const renderFailureHtml = (message: string) => `<!DOCTYPE html>
 </body>
 </html>`;
 
+export function hostedAuthorizeUrl(authorizeUrl: string): string {
+  const url = new URL(authorizeUrl);
+  url.searchParams.set('delivery', 'hosted');
+  return url.toString();
+}
+
 const DEFAULT_HOSTED_REDIRECT_ORIGINS = new Set([
   'https://cube.exchange',
   'https://www.cube.exchange',
@@ -674,13 +680,13 @@ export async function deviceAuthFlow(options: DeviceAuthOptions): Promise<Device
         log('  Could not start callback server, falling back to headless mode...');
         break;
       case 'device_code_received':
-        log(event.userCode ? `\n  Open this URL in any browser:\n\n    ${event.authorizeUrl}\n` : `\n  Opening ${event.authorizeUrl}\n`);
+        log(event.userCode ? `\n  Open this URL in any browser:\n\n    ${hostedAuthorizeUrl(event.authorizeUrl)}\n` : `\n  Opening ${event.authorizeUrl}\n`);
         break;
       case 'browser_opened':
         log('  Waiting for approval in browser...\n');
         break;
       case 'browser_failed':
-        log(`  Browser failed to open. Please open this URL manually:\n    ${event.url}\n`);
+        log(`  Browser failed to open. Please open this URL manually:\n    ${hostedAuthorizeUrl(event.url)}\n`);
         break;
       case 'polling':
         break;
