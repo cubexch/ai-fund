@@ -17,16 +17,31 @@ ai-trading, crypto-trading-bot, hedge-fund, ai-hedge-fund, trading-agents, mcp, 
   <img src="docs/architecture-light.svg" alt="How AI Fund works — You talk to Claude Code, which orchestrates 45 trading agents across cube.exchange, Binance, Coinbase, Kraken, OKX, and 110 CCXT exchanges via MCP connectors" width="100%">
 </p>
 
-```
-> /hire risk-manager
-> /hire arthur-hayes
-> /hire market-maker
+## Quick Start — Run This Now
 
-> @arthur-hayes what's the macro thesis right now?
-> scan all exchanges for BTC price differences
-> the arbitrageur found a 15bps spread between cube.exchange and Binance — execute it
-> risk-manager, approve this trade
+```bash
+git clone https://github.com/cubexch/ai-fund
+cd ai-fund
+npm ci
+npx ai-fund diagnose     # verify your setup
+npx ai-fund install       # install all 45 agents
+npx ai-fund verify        # confirm everything works
 ```
+
+Open Claude Code and start trading (paper mode by default):
+
+```
+claude
+> /setup                                        # connect an exchange
+> /hire risk-manager                            # always hire risk first
+> /hire arthur-hayes                            # add a macro trader
+> @arthur-hayes what's the macro thesis? DXY is falling and the Fed paused.
+```
+
+**For traders:** `/hire` agents, ask them to scan and trade, `/review` to evaluate performance.
+**For developers:** Fork, add agents in `skills/`, add exchanges in `connectors/`. MIT licensed.
+
+> Try it without any API keys: `npx ai-fund demo` runs a full simulated trading session.
 
 ---
 
@@ -38,7 +53,8 @@ ai-trading, crypto-trading-bot, hedge-fund, ai-hedge-fund, trading-agents, mcp, 
 
 No config files. No YAML. You hire agents that fit your thesis and fire the ones that don't deliver. Each one carries its own personality, philosophy, and KPIs.
 
-### Count Snapshot (from this repo)
+<details>
+<summary>Count Snapshot (from this repo)</summary>
 
 - **45 agents total** in `skills/` (`_template` excluded)
 - **21 named personas** + **24 role-based specialists**
@@ -47,6 +63,8 @@ No config files. No YAML. You hire agents that fit your thesis and fire the ones
   - CCXT: 92 tools
   - Alpaca: 24 tools
 - **110 exchanges via CCXT** (from the installed `ccxt` package in this repo)
+
+</details>
 
 ### How is this different from a grid bot?
 
@@ -81,6 +99,9 @@ More exchanges = smarter desk. Cross-exchange arb, smart order routing, multi-ve
 
 Paper trading is on by default. You have to opt in to live.
 
+<details>
+<summary>Architecture flow</summary>
+
 ```
 YOU (trader)
   │
@@ -102,11 +123,9 @@ CLAUDE CODE (AI runtime)
 YOUR EXCHANGES (paper or live)
 ```
 
-Skills define what an agent thinks and does.
+Skills define what an agent thinks and does. Connectors talk to exchanges. The two layers don't know about each other.
 
-Connectors talk to exchanges.
-
-The two layers don't know about each other. Add an exchange, don't touch agent code. Write an agent, don't touch exchange code.
+</details>
 
 ---
 
@@ -121,7 +140,8 @@ The two layers don't know about each other. Add an exchange, don't touch agent c
 
 ---
 
-## AI Contributor Path (for faster maintenance)
+<details>
+<summary>AI Contributor Path (for faster maintenance)</summary>
 
 If you are modifying this repo with an AI coding agent, follow the maintainer guide:
 
@@ -132,38 +152,7 @@ If you are modifying this repo with an AI coding agent, follow the maintainer gu
 This gives agents a machine-readable architecture map, dependency-cycle detection, and a prompt-ready context pack for safer edits.
 PRs also run the **AI Repo Intelligence** workflow to publish these artifacts automatically.
 
----
-
-## Quick Start
-
-```bash
-git clone https://github.com/cubexch/ai-fund
-cd ai-fund
-npm ci
-```
-
-Open Claude Code and connect your exchanges:
-
-```
-claude
-> /setup
-```
-
-Hire your first agents:
-
-```
-> /hire risk-manager
-> /hire arthur-hayes
-> /hire jim-simons
-```
-
-Put them to work:
-
-```
-> @arthur-hayes what's the macro thesis? DXY is falling and the Fed paused.
-> @jim-simons scan for statistical anomalies across BTC pairs on all exchanges
-> @risk-manager size a long position given current portfolio
-```
+</details>
 
 ### Cube CLI + Expanded Tool Surface
 
@@ -404,7 +393,19 @@ What ships with each agent:
 | `/hire <role>` | Activate an agent |
 | `/fire <role>` | Remove an agent |
 | `/review` | Performance review + fire recs |
+| `/first-trade` | Guided first paper trade (5 min) |
+| `/health-report` | Daily PnL, drawdown, violations |
 | `/backtest` | Test on historical data |
+
+CLI tools:
+
+| Command | Description |
+|---------|------------|
+| `npx ai-fund install` | Install all 45 agents |
+| `npx ai-fund diagnose` | Check system requirements |
+| `npx ai-fund verify` | Verify installation works |
+| `npx ai-fund demo` | Run a simulated trading session |
+| `npx ai-fund list` | List available agents |
 
 ---
 

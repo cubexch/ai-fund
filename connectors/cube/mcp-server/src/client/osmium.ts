@@ -262,7 +262,7 @@ export class OsmiumClient {
         orderType: ORDER_TYPE_MAP[params.orderType ?? 'LIMIT'] ?? OrderType.LIMIT,
         subaccountId: this.getSubaccountId(),
         postOnly: params.postOnly ? PostOnly.ENABLED : PostOnly.DISABLED,
-        cancelOnDisconnect: params.cancelOnDisconnect ?? false,
+        cancelOnDisconnect: params.cancelOnDisconnect ?? true,
         quoteQuantity: params.quoteQuantity !== undefined ? BigInt(params.quoteQuantity) : undefined,
         stopPrice: params.stopPrice !== undefined ? BigInt(params.stopPrice) : undefined,
       },
@@ -640,7 +640,7 @@ export class OsmiumClient {
     const signatureInfo: SignatureInfo = {
       signature: Buffer.from(signature).toString('base64').replace(/=+$/, ''),
       verificationKey: this.verificationKeyEncoded,
-      timestamp: 0n,
+      timestamp: BigInt(Math.floor(Date.now() / 1000)),
     };
 
     return OrderRequestMethods.encode({
@@ -722,9 +722,9 @@ export class OsmiumClient {
           fillQuantity: response.fill.fillQuantity.toString(),
           fillQuoteQuantity: response.fill.fillQuoteQuantity.toString(),
         });
-        iocPending.totalFillQuantity += response.fill.fillQuantity;
+        iocPending.totalFillQuantity += BigInt(response.fill.fillQuantity);
         // If fully filled (leavesQuantity === 0), resolve immediately — no cancel will come
-        if (response.fill.leavesQuantity === 0n) {
+        if (BigInt(response.fill.leavesQuantity) === 0n) {
           this.pendingIocOrders.delete(response.fill.clientOrderId);
           clearTimeout(iocPending.timeout);
           this.onOrderProgress?.({ stage: 'done', clientOrderId: response.fill.clientOrderId.toString(), status: 'filled' });

@@ -171,6 +171,137 @@ function show() {
   console.log(JSON.stringify(state, null, 2));
 }
 
+function readOrders() {
+  const ordersPath = path.join(DESK, 'orders.json');
+  try {
+    return JSON.parse(fs.readFileSync(ordersPath, 'utf8'));
+  } catch {
+    return [];
+  }
+}
+
+function health(format) {
+  const state = readState();
+  const risk = readRisk();
+  const orders = readOrders();
+
+  const activeAgents = Object.entries(state.agents)
+    .filter(([, a]) => a.status === 'active')
+    .map(([slug]) => slug);
+
+  const firedAgents = Object.entries(state.agents)
+    .filter(([, a]) => a.status === 'fired')
+    .map(([slug, a]) => ({ slug, reason: a.fire_reason, date: a.fired_date }));
+
+  // Order metrics
+  const filled = orders.filter(o => o.status === 'filled');
+  const rejected = orders.filter(o => o.status === 'rejected');
+  const wins = filled.filter(o => (o.pnl || 0) > 0);
+  const losses = filled.filter(o => (o.pnl || 0) < 0);
+  const totalPnl = filled.reduce((sum, o) => sum + (o.pnl || 0), 0);
+  const winRate = filled.length > 0 ? wins.length / filled.length : 0;
+
+  // Drawdown from equity curve
+  let maxDrawdown = 0;
+  let equity = 0;
+  let peak = 0;
+  for (const o of filled) {
+    equity += o.pnl || 0;
+    if (equity > peak) peak = equity;
+    const dd = peak > 0 ? (peak - equity) / peak : 0;
+    if (dd > maxDrawdown) maxDrawdown = dd;
+  }
+
+  // Rule violations
+  const violations = [];
+  if (!risk.risk_manager_hired && activeAgents.length > 0) {
+    violations.push('No risk manager active while trading agents are hired');
+  }
+  if (rejected.length > 0) {
+    violations.push(`${rejected.length} order(s) rejected`);
+  }
+  if (maxDrawdown > (risk.parameters?.max_drawdown || 0.05)) {
+    violations.push(`Max drawdown ${(maxDrawdown * 100).toFixed(1)}% exceeds limit`);
+  }
+
+  const report = {
+    date: today(),
+    mode: state.desk?.mode || 'paper',
+    active_agents: activeAgents,
+    fired_agents: firedAgents,
+    metrics: {
+      total_orders: orders.length,
+      filled: filled.length,
+      rejected: rejected.length,
+      total_pnl: Math.round(totalPnl * 100) / 100,
+      win_rate: Math.round(winRate * 1000) / 10,
+      max_drawdown: Math.round(maxDrawdown * 1000) / 10,
+      wins: wins.length,
+      losses: losses.length,
+    },
+    violations,
+    risk_parameters: risk.parameters || {},
+  };
+
+  // Plain-English interpretation
+  const lines = [];
+  lines.push(`# Desk Health Report — ${today()}`);
+  lines.push('');
+  lines.push(`**Mode:** ${report.mode}`);
+  lines.push(`**Active agents:** ${activeAgents.length > 0 ? activeAgents.join(', ') : 'none'}`);
+  lines.push('');
+  lines.push('## Metrics');
+  lines.push('');
+  if (filled.length === 0) {
+    lines.push('_No filled orders yet. Start trading to generate metrics._');
+  } else {
+    lines.push(`| Metric | Value |`);
+    lines.push(`|--------|-------|`);
+    lines.push(`| Total PnL | $${report.metrics.total_pnl.toFixed(2)} |`);
+    lines.push(`| Win Rate | ${report.metrics.win_rate}% |`);
+    lines.push(`| Max Drawdown | ${report.metrics.max_drawdown}% |`);
+    lines.push(`| Filled Orders | ${report.metrics.filled} |`);
+    lines.push(`| Wins / Losses | ${report.metrics.wins} / ${report.metrics.losses} |`);
+  }
+  lines.push('');
+
+  if (violations.length > 0) {
+    lines.push('## Violations');
+    lines.push('');
+    for (const v of violations) {
+      lines.push(`- ${v}`);
+    }
+    lines.push('');
+  }
+
+  // Next actions
+  lines.push('## Next Actions');
+  lines.push('');
+  if (activeAgents.length === 0) {
+    lines.push('1. Hire agents: `/hire risk-manager` then `/hire market-maker`');
+  } else if (!risk.risk_manager_hired) {
+    lines.push('1. **Hire a risk manager** — trading without risk oversight is dangerous');
+  }
+  if (filled.length === 0) {
+    lines.push('1. Place your first paper trade to start generating metrics');
+  }
+  if (winRate < 0.45 && filled.length >= 5) {
+    lines.push('1. Review underperforming agents with `/review`');
+  }
+  if (firedAgents.length > 0) {
+    lines.push(`1. Consider replacements for fired agents: ${firedAgents.map(a => a.slug).join(', ')}`);
+  }
+  lines.push('');
+
+  report.summary_md = lines.join('\n');
+
+  if (format === 'md') {
+    console.log(lines.join('\n'));
+  } else {
+    console.log(JSON.stringify(report, null, 2));
+  }
+}
+
 // CLI
 const [,, cmd, ...args] = process.argv;
 switch (cmd) {
@@ -178,7 +309,8 @@ switch (cmd) {
   case 'fire':  fire(args[0], args.slice(1).join(' ')); break;
   case 'update': update(args[0], args[1], args.slice(2).join(' ')); break;
   case 'show':  show(); break;
+  case 'health': health(args[0]); break;
   default:
-    console.error('Usage: desk-state <hire|fire|update|show> [args]');
+    console.error('Usage: desk-state <hire|fire|update|show|health> [args]');
     process.exit(1);
 }

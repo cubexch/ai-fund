@@ -16,6 +16,8 @@ import { existsSync, mkdirSync, cpSync, readdirSync, readFileSync } from 'node:f
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { runDemo } from './demo.js';
+import { preInstallCheck, printDiagnostics } from './diagnose.js';
+import { runVerify } from './verify.js';
 
 const SKILLS_SRC = resolve(import.meta.dirname, '..', 'skills');
 const CLAUDE_SKILLS_DIR = join(homedir(), '.claude', 'skills');
@@ -91,9 +93,11 @@ function installAll() {
   }
 
   console.log(`\n✓ Installed ${installed}/${skills.length} agents to ${CLAUDE_SKILLS_DIR}`);
-  console.log('\nRestart Claude Code to load the new agents.');
-  console.log('Use /setup to connect your exchanges.');
-  console.log('Use /hire <role> to activate an agent.\n');
+  console.log('\nNext steps:');
+  console.log('  1. Restart Claude Code to load the new agents');
+  console.log('  2. Use /setup to connect your exchanges');
+  console.log('  3. Use /hire <role> to activate an agent');
+  console.log('\nRun "npx ai-fund diagnose" to verify your setup.\n');
 }
 
 // ── CLI ────────────────────────────────────────────────────
@@ -106,6 +110,10 @@ switch (command) {
     listSkills();
     break;
   case 'install': {
+    if (!preInstallCheck()) {
+      console.error('\nCritical issues found. Run "npx ai-fund diagnose" for details.\n');
+      process.exit(1);
+    }
     const skillName = args[1];
     if (skillName) {
       mkdirSync(CLAUDE_SKILLS_DIR, { recursive: true });
@@ -115,6 +123,12 @@ switch (command) {
     }
     break;
   }
+  case 'diagnose':
+    printDiagnostics();
+    break;
+  case 'verify':
+    runVerify();
+    break;
   case 'demo':
     runDemo(args.slice(1));
     break;
@@ -127,12 +141,14 @@ Usage:
   npx ai-fund install              Install all agents
   npx ai-fund install <role>       Install a specific agent
   npx ai-fund list                 List available agents
+  npx ai-fund diagnose             Check system requirements
+  npx ai-fund verify               Verify installation is working
   npx ai-fund demo                 Run a simulated trading desk demo
   npx ai-fund demo --seed 42       Run demo with reproducible results
 
 Example:
   npx ai-fund install risk-manager
   npx ai-fund install market-maker
-  npx ai-fund demo
+  npx ai-fund diagnose
     `);
 }

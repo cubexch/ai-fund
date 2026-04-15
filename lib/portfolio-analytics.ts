@@ -135,7 +135,7 @@ export function resolvePrice(
   if (currency === 'USDT' || currency === 'USD' || currency === 'USDC') return 1;
   const symbol = `${currency}/USDT`;
   const ticker = tickers.find(t => t.symbol === symbol);
-  return ticker?.last || 0;
+  return ticker?.last ?? 0;
 }
 
 // ── Portfolio exposure ───────────────────────────────────
@@ -564,8 +564,8 @@ export function monitorDrawdown(
   peakEstimate?: number,
 ): DrawdownMonitorResult {
   const peak = peakEstimate ?? currentEquity * 1.05;
-  const drawdownPct = ((peak - currentEquity) / peak) * 100;
-  const recoveryNeeded = ((peak / currentEquity) - 1) * 100;
+  const drawdownPct = peak > 0 ? ((peak - currentEquity) / peak) * 100 : 0;
+  const recoveryNeeded = currentEquity > 0 ? ((peak / currentEquity) - 1) * 100 : Infinity;
 
   const status: DrawdownMonitorResult['status'] = drawdownPct > maxDrawdownPct ? 'CRITICAL'
     : drawdownPct > maxDrawdownPct * 0.7 ? 'WARNING' : 'OK';
@@ -675,5 +675,215 @@ export function computeRiskDashboard(
       : topConcentration > maxConcentrationPct * 0.7 ? 'yellow' : 'green',
     diversificationStatus: holdings.length >= 5 ? 'green'
       : holdings.length >= 3 ? 'yellow' : 'red',
+  };
+}
+
+// ── Confidence Rails ────────────────────────────────────
+
+/**
+ * Safety profile presets. "safe" is the most conservative for new users.
+ */
+export const SAFETY_PROFILES = {
+  safe: {
+    maxPositionPct: 2,
+    maxPortfolioDrawdownPct: 5,
+    maxDailyLossPct: 1,
+    requirePaperMode: true,
+    maxOpenOrders: 5,
+    maxLeverage: 1,
+  },
+  moderate: {
+    maxPositionPct: 5,
+    maxPortfolioDrawdownPct: 10,
+    maxDailyLossPct: 3,
+    requirePaperMode: false,
+    maxOpenOrders: 20,
+    maxLeverage: 3,
+  },
+  aggressive: {
+    maxPositionPct: 15,
+    maxPortfolioDrawdownPct: 20,
+    maxDailyLossPct: 5,
+    requirePaperMode: false,
+    maxOpenOrders: 50,
+    maxLeverage: 10,
+  },
+} as const;
+
+export type SafetyProfileName = keyof typeof SAFETY_PROFILES;
+
+export interface SafetyProfile {
+  maxPositionPct: number;
+  maxPortfolioDrawdownPct: number;
+  maxDailyLossPct: number;
+  requirePaperMode: boolean;
+  maxOpenOrders: number;
+  maxLeverage: number;
+}
+
+export interface ConfidenceRail {
+  name: string;
+  passed: boolean;
+  severity: 'block' | 'warn';
+  detail: string;
+  explanation: string;
+}
+
+export interface ConfidenceResult {
+  decision: 'GO' | 'BLOCKED' | 'WARNING';
+  profile: string;
+  order: { symbol: string; side: string; amount: number; price: number };
+  orderValue: number;
+  rails: ConfidenceRail[];
+  summary: string;
+}
+
+/**
+ * Run confidence rails — an expanded pre-trade check with human-readable
+ * explanations for why each rail passed or failed.
+ *
+ * @param balances - current portfolio balances
+ * @param tickers - current ticker prices
+ * @param order - proposed order
+ * @param profile - safety profile name or custom limits
+ * @param context - additional context (trading mode, daily PnL, open orders, leverage)
+ */
+export function checkConfidenceRails(
+  balances: BalanceEntry[],
+  tickers: TickerEntry[],
+  order: { symbol: string; side: 'buy' | 'sell'; amount: number; price: number },
+  profile: SafetyProfileName | SafetyProfile = 'safe',
+  context: {
+    mode?: 'paper' | 'live';
+    dailyPnlPct?: number;
+    openOrderCount?: number;
+    leverage?: number;
+  } = {},
+): ConfidenceResult {
+  const limits: SafetyProfile = typeof profile === 'string'
+    ? { ...SAFETY_PROFILES[profile] }
+    : profile;
+  const profileName = typeof profile === 'string' ? profile : 'custom';
+
+  const orderValue = order.amount * order.price;
+
+  let totalValue = 0;
+  for (const bal of balances) {
+    totalValue += Math.abs(bal.total * resolvePrice(bal.currency, tickers));
+  }
+  const orderPct = totalValue > 0 ? (orderValue / totalValue) * 100 : 100;
+
+  const rails: ConfidenceRail[] = [];
+
+  // 1. Position size check
+  const posOk = orderPct <= limits.maxPositionPct;
+  rails.push({
+    name: 'position_size',
+    passed: posOk,
+    severity: 'block',
+    detail: `${orderPct.toFixed(1)}% of portfolio (max ${limits.maxPositionPct}%)`,
+    explanation: posOk
+      ? `This order is ${orderPct.toFixed(1)}% of your portfolio — within the ${limits.maxPositionPct}% limit.`
+      : `This order would be ${orderPct.toFixed(1)}% of your portfolio, exceeding the ${limits.maxPositionPct}% limit. Reduce size to $${(totalValue * limits.maxPositionPct / 100).toFixed(0)} or less.`,
+  });
+
+  // 2. Paper mode check
+  if (limits.requirePaperMode) {
+    const isPaper = context.mode === 'paper' || context.mode === undefined;
+    rails.push({
+      name: 'paper_mode',
+      passed: isPaper,
+      severity: 'block',
+      detail: `Trading mode: ${context.mode || 'unknown'}`,
+      explanation: isPaper
+        ? 'You are in paper mode — no real money at risk.'
+        : 'Your safety profile requires paper mode. Switch to paper trading or upgrade to a less restrictive profile.',
+    });
+  }
+
+  // 3. Daily loss limit
+  if (context.dailyPnlPct !== undefined) {
+    const dailyOk = context.dailyPnlPct > -limits.maxDailyLossPct;
+    rails.push({
+      name: 'daily_loss',
+      passed: dailyOk,
+      severity: 'block',
+      detail: `Daily PnL: ${context.dailyPnlPct.toFixed(2)}% (limit: -${limits.maxDailyLossPct}%)`,
+      explanation: dailyOk
+        ? `Today's PnL is ${context.dailyPnlPct.toFixed(2)}% — still within the ${limits.maxDailyLossPct}% daily loss limit.`
+        : `You've lost ${Math.abs(context.dailyPnlPct).toFixed(2)}% today, exceeding the ${limits.maxDailyLossPct}% daily limit. Stop trading for today.`,
+    });
+  }
+
+  // 4. Open orders limit
+  if (context.openOrderCount !== undefined) {
+    const ordersOk = context.openOrderCount < limits.maxOpenOrders;
+    rails.push({
+      name: 'open_orders',
+      passed: ordersOk,
+      severity: 'warn',
+      detail: `Open orders: ${context.openOrderCount} (max ${limits.maxOpenOrders})`,
+      explanation: ordersOk
+        ? `You have ${context.openOrderCount} open orders — below the ${limits.maxOpenOrders} limit.`
+        : `You have ${context.openOrderCount} open orders, at or above the ${limits.maxOpenOrders} limit. Cancel some orders first.`,
+    });
+  }
+
+  // 5. Leverage check
+  if (context.leverage !== undefined) {
+    const levOk = context.leverage <= limits.maxLeverage;
+    rails.push({
+      name: 'leverage',
+      passed: levOk,
+      severity: 'block',
+      detail: `Leverage: ${context.leverage}x (max ${limits.maxLeverage}x)`,
+      explanation: levOk
+        ? `Current leverage ${context.leverage}x is within the ${limits.maxLeverage}x limit.`
+        : `Leverage ${context.leverage}x exceeds the ${limits.maxLeverage}x limit. Reduce position size or close existing positions.`,
+    });
+  }
+
+  // 6. Sufficient balance (buys only)
+  if (order.side === 'buy') {
+    const quoteCurrency = order.symbol.split('/')[1] || 'USDT';
+    const quoteBal = balances.find(b => b.currency === quoteCurrency);
+    const available = quoteBal?.free || 0;
+    const balOk = available >= orderValue;
+    rails.push({
+      name: 'sufficient_balance',
+      passed: balOk,
+      severity: 'block',
+      detail: `Available ${quoteCurrency}: ${available.toFixed(2)}, needed: ${orderValue.toFixed(2)}`,
+      explanation: balOk
+        ? `You have ${available.toFixed(2)} ${quoteCurrency} available — enough for this ${orderValue.toFixed(2)} order.`
+        : `You need ${orderValue.toFixed(2)} ${quoteCurrency} but only have ${available.toFixed(2)}. Reduce order size or deposit more funds.`,
+    });
+  }
+
+  // Determine decision
+  const blocks = rails.filter(r => !r.passed && r.severity === 'block');
+  const warns = rails.filter(r => !r.passed && r.severity === 'warn');
+
+  let decision: ConfidenceResult['decision'];
+  let summary: string;
+
+  if (blocks.length > 0) {
+    decision = 'BLOCKED';
+    summary = `Order blocked by ${blocks.length} rail(s): ${blocks.map(r => r.name).join(', ')}`;
+  } else if (warns.length > 0) {
+    decision = 'WARNING';
+    summary = `Order approved with ${warns.length} warning(s): ${warns.map(r => r.name).join(', ')}`;
+  } else {
+    decision = 'GO';
+    summary = `All ${rails.length} confidence rails passed.`;
+  }
+
+  return {
+    decision,
+    profile: profileName,
+    order: { symbol: order.symbol, side: order.side, amount: order.amount, price: order.price },
+    orderValue,
+    rails,
+    summary,
   };
 }

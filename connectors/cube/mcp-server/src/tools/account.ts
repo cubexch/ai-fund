@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import type { IridiumClient } from '../client/iridium';
+import { toolError } from '@ai-fund/lib/tool-errors';
 
 export function registerAccountTools(server: McpServer, iridium: IridiumClient) {
   const defaultSubaccountId = () => iridium.getDefaultSubaccountId();
@@ -34,11 +35,8 @@ export function registerAccountTools(server: McpServer, iridium: IridiumClient) 
             },
           ],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );
@@ -112,11 +110,8 @@ export function registerAccountTools(server: McpServer, iridium: IridiumClient) 
             },
           ],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );
@@ -145,11 +140,8 @@ export function registerAccountTools(server: McpServer, iridium: IridiumClient) 
             },
           ],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );
@@ -178,11 +170,8 @@ export function registerAccountTools(server: McpServer, iridium: IridiumClient) 
             },
           ],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );
@@ -198,11 +187,8 @@ export function registerAccountTools(server: McpServer, iridium: IridiumClient) 
           },
         ],
       };
-    } catch (error: any) {
-      return {
-        content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-        isError: true,
-      };
+    } catch (error) {
+      return toolError(error);
     }
   });
 

@@ -1,5 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { toolError } from '@ai-fund/lib/tool-errors';
 
 type ArticleRecord = {
   source: string;
@@ -345,11 +346,8 @@ export function registerContentTools(server: McpServer) {
             }, null, 2),
           }],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );

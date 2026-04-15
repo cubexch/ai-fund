@@ -4,6 +4,7 @@ import type { IridiumClient } from '../client/iridium';
 import type { MendelevClient } from '../client/mendelev';
 import { sma, ema, rsi, macd, bollingerBands, atr, adx, obv, stochastic } from '@ai-fund/lib/indicators';
 import type { OHLCV } from '@ai-fund/lib/indicators';
+import { toolError } from '@ai-fund/lib/tool-errors';
 
 export function registerMarketDataTools(server: McpServer, iridium: IridiumClient, mendelev?: MendelevClient) {
   const defaultSubaccountId = () => iridium.getDefaultSubaccountId();
@@ -39,11 +40,8 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
             },
           ],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );
@@ -100,11 +98,8 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
             },
           ],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );
@@ -171,11 +166,8 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
             },
           ],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );
@@ -236,11 +228,8 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
             },
           ],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );
@@ -293,11 +282,8 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
             },
           ],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );
@@ -341,14 +327,11 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
             },
           ],
         };
-      } catch (error: any) {
-        const msg = error.message?.includes('verification-key auth not allowed')
+      } catch (error) {
+        const msg = error instanceof Error && error.message?.includes('verification-key auth not allowed')
           ? 'Fee estimation requires API key auth — not available with verification-key login. Use get_order_book to estimate fees from spread instead.'
-          : `Failed: ${error.message}`;
-        return {
-          content: [{ type: 'text' as const, text: msg }],
-          isError: true,
-        };
+          : undefined;
+        return toolError(msg ? new Error(msg) : error);
       }
     }
   );
@@ -550,11 +533,8 @@ export function registerMarketDataTools(server: McpServer, iridium: IridiumClien
             },
           ],
         };
-      } catch (error: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed: ${error.message}` }],
-          isError: true,
-        };
+      } catch (error) {
+        return toolError(error);
       }
     }
   );

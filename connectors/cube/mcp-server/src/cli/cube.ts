@@ -949,7 +949,7 @@ async function confirmIfNeeded(spec: CliCommandSpec, flags: GlobalFlags): Promis
   const rl = createInterface({ input, output: terminalOutput });
   try {
     const answer = await rl.question(`${c.yellow}This is a live trading action. Proceed? [y/N] ${c.reset}`);
-    return ['y', 'yes', 't', 'true', '1'].includes(answer.trim().toLowerCase());
+    return ['y', 'yes'].includes(answer.trim().toLowerCase());
   } finally {
     rl.close();
   }

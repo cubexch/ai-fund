@@ -1,6 +1,6 @@
 # AI Fund
 
-An AI trading desk with 45 hedge fund agent personas (including 22 named personas like Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Warren Buffett, and Peter Lynch) for Claude Code. 150 MCP tools across 3 built-in connectors. 28 shared analysis libraries. Trade on any exchange — Cube, OKX, Kraken, Binance, Coinbase, and 100+ more via CCXT.
+An AI trading desk with 45 hedge fund agent personas (including 22 named personas like Arthur Hayes, Jim Simons, George Soros, Jesse Livermore, Warren Buffett, and Peter Lynch) for Claude Code. 150 MCP tools across 3 built-in connectors. 31 shared analysis libraries. Trade on any exchange — Cube, OKX, Kraken, Binance, Coinbase, and 100+ more via CCXT.
 
 ## Project Structure
 
@@ -85,7 +85,7 @@ After every code change, run the following before considering the work done:
 - **Imports**: ES module syntax only (`import`/`export`), no `require()`. Use `.js` extensions in import paths.
 - **Commit messages**: Conventional Commits format — `feat(skills): add new persona`, `fix(cube): correct order signing`, `docs: update exchange table`. Scopes: `skills`, `cube`, `lib`, `desk`, `commands`, `docs`
 
-## Shared Libraries (28 modules, 250+ exported functions)
+## Shared Libraries (33 modules, 270+ exported functions)
 
 - **`lib/indicators.ts`** — `sma`, `ema`, `rsi`, `macd`, `bollingerBands`, `atr`, `obv`, `stochastic`, `adx`, `vwap`, `momentum`, `hurst` + `OHLCV` interface
 - **`lib/math.ts`** — `kelly`, `fixedFractionalSize`, `valueAtRisk`, `maxDrawdown`, `sharpeRatio`, `sortinoRatio`, `calmarRatio`, `correlation`, `correlationMatrix`, `mean`, `standardDeviation`, `zScore`, `returns`, `winRate`, `profitFactor`, `annualizedVolatility`, `beta`, `alpha`, `informationRatio`, `tailRisk`
@@ -94,7 +94,11 @@ After every code change, run the following before considering the work done:
 - **`lib/execution-analytics.ts`** — `simulateOrderBookFill`, `analyzeDepthAtBands`, `computeOrderBookImbalance`, `analyzeOrderBookShape`, `computeWeightedMid`, `analyzeTradeFlow`, `computeMomentumScore`, `computeExecutionQuality`, `recommendEntry`
 - **`lib/portfolio-analytics.ts`** — `resolvePrice`, `computePortfolioExposure`, `checkPreTrade`, `simulateStressTest`, `assessPortfolioRisk`, `calculateRebalanceTrades`, `detectCorrelationClusters`, `monitorDrawdown`, `computeMarginHealth`, `computeRiskDashboard`
 - **`lib/portfolio-optimizer.ts`** — `meanVariance`, `minimumVariance`, `riskParity`, `blackLitterman`, `maxDiversification`, `efficientFrontier`, `hierarchicalRiskParity`, `equalWeight`, `inverseVolatility`, `rebalanceOptimal`
-- **`lib/factor-model.ts`** — `pcaFactors`, `factorExposure`, `factorAttribution`, `marginalVaR`, `incrementalVaR`, `componentVaR`, `cryptoFactorModel`, `equityFactorModel`, `crossSectionalMomentum`, `computeFactorReturns`, `styleAnalysis`, `covarianceMatrix`, `riskDecomposition`, `sectorExposure`
+- **`lib/factor-model.ts`** — Barrel re-export of the three submodules below (backward-compatible)
+- **`lib/matrix.ts`** — `matTranspose`, `matMultiply`, `matVecMultiply`, `vecDot`, `vecNorm`, `vecScale`, `vecSub`, `matInverse`, `sampleCov`, `powerIteration`, `deflateMatrix`, `olsRegression`, `zScoreForConfidence`
+- **`lib/factor-extraction.ts`** — `pcaFactors`, `factorExposure`, `factorAttribution`, `computeFactorReturns`, `styleAnalysis`
+- **`lib/factor-risk.ts`** — `marginalVaR`, `incrementalVaR`, `componentVaR`, `riskDecomposition`, `covarianceMatrix`
+- **`lib/factor-models.ts`** — `cryptoFactorModel`, `equityFactorModel`, `sectorExposure`, `crossSectionalMomentum`
 - **`lib/options.ts`** — `blackScholes`, `black76`, `binomialPrice`, `impliedVol`, `putCallParity`, `volSurface`, `skewMetrics`, `greeksExposure`, `breakeven`, `maxPain`
 - **`lib/monte-carlo.ts`** — `simulateGBM`, `simulateJumpDiffusion`, `monteCarloVaR`, `portfolioMonteCarloVaR`, `confidenceInterval`, `scenarioGeneration`, `drawdownDistribution`, `optionMonteCarlo`
 - **`lib/stat-arb.ts`** — `engleGranger`, `adfTest`, `halfLife`, `hedgeRatio`, `spreadZScore`, `pairSignal`, `scorePairs`, `kalmanHedgeRatio`, `johansen`, `rollingSpreadStats`
@@ -109,11 +113,17 @@ After every code change, run the following before considering the work done:
 - **`lib/grid-trading.ts`** — `computeDcaSchedule`, `optimizeGridParams`, `analyzeBasisTrade`, `classifyVolRegime`
 - **`lib/volume-profile.ts`** — `computeVolumeProfile`, `detectCorrelationRegime`
 - **`lib/datastore.ts`** — `MarketDataStore` (DuckDB columnar store for OHLCV data with SQL queries, Parquet I/O, incremental updates)
-- **`lib/analytics-store.ts`** — `AnalyticsStore` class (DuckDB-powered: rolling correlations, cross-sectional sorts, factor returns, covariance, rolling beta, risk reports, universe screening, pairwise correlations, regime stats)
-- **`lib/backtester.ts`** — `Backtester` class (9 built-in strategies, walk-forward optimization)
+- **`lib/analytics-store.ts`** — `AnalyticsStore` class (barrel re-export of submodules below, backward-compatible)
+- **`lib/analytics-correlation.ts`** — `getReturnsSeries`, `rollingCorrelationMatrix`, `pairwiseCorrelations`
+- **`lib/analytics-factor.ts`** — `factorReturnsFromDB`, `covarianceFromDB`, `riskReport`, `reorderCovMatrix`
+- **`lib/analytics-screening.ts`** — `crossSectionalSort`, `screenUniverse`, `rollingBeta`, `regimeStats`
+- **`lib/backtester.ts`** — `Backtester` class (run, runAll, optimize, walkForward) — imports strategies from submodule
+- **`lib/backtest-strategies.ts`** — 9 built-in strategies (`STRATEGIES` registry, `DEFAULT_PARAMS`): SMA crossover, RSI mean reversion, MACD momentum, Bollinger breakout/mean-reversion, EMA trend, stochastic, ADX, multi-indicator confluence
 - **`lib/regime-detector.ts`** — `RegimeDetector` class (trend/range/volatile regime classification)
 - **`lib/signal-generator.ts`** — `SignalGenerator` class (multi-indicator signal scanning)
 - **`lib/valuation.ts`** — 19 valuation functions (DCF, NVT, MVRV, stock-to-flow, etc.)
+- **`lib/elicitation.ts`** — `canElicit`, `buildOrderConfirmation`, `buildDestructiveConfirmation`, `buildLiveModeConfirmation`, `buildExecutionPlanConfirmation`, `isConfirmed`, `cancelledResponse`, `riskSummaryText`
+- **`lib/elicitation-middleware.ts`** — `withElicitation`, `LiveModeGate`, `RiskCheckPolicy`, `DestructiveActionPolicy`, `createSessionState`, `elicit`
 - **`lib/connector-registry.ts`** — Connector discovery and registration
 - **`lib/ingest/exchange.ts`** — `ingestFromExchange` (generic exchange data ingester into DuckDB)
 
@@ -253,6 +263,8 @@ Agent state, briefing books, and trade history persist between sessions in the `
 - `desk-state fire <slug> [reason]` — marks agent inactive, warns if risk-manager fired with active traders
 - `desk-state update <slug> <key> <value>` — updates agent metadata
 - `desk-state show` — dumps full desk state as JSON
+- `desk-state health` — generates health report as JSON
+- `desk-state health md` — generates health report as markdown
 
 ### Briefing Books (`.desk/briefings/<agent>.md`)
 
@@ -274,6 +286,8 @@ Defined in `.claude/commands/` as markdown files:
 - `/hire <role>` — Activate a trading agent (reads/writes `.desk/`)
 - `/fire <role>` — Deactivate an underperforming agent (updates `.desk/`)
 - `/review` — Run desk-wide performance evaluation
+- `/health-report` — Generate desk health report with PnL, drawdown, violations
+- `/first-trade` — Guided walkthrough to your first paper trade in under 5 minutes
 - `/backtest` — Test a strategy on historical data
 
 ## Safety Rules

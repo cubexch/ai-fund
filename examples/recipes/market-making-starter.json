@@ -1,0 +1,33 @@
+{
+  "name": "Market Making Starter",
+  "description": "Run a basic market-making strategy with risk oversight",
+  "difficulty": "intermediate",
+  "prerequisites": [
+    "At least one exchange connected via /setup",
+    "Paper mode enabled"
+  ],
+  "agents": [
+    "risk-manager",
+    "market-maker",
+    "volatility-analyst"
+  ],
+  "commands": [
+    "/hire risk-manager",
+    "/hire market-maker",
+    "/hire volatility-analyst"
+  ],
+  "workflow": [
+    "1. Ask volatility-analyst to classify the current vol regime for your target asset",
+    "2. Ask market-maker to propose bid/ask spreads based on the vol regime",
+    "3. Ask risk-manager to set position limits and max inventory",
+    "4. Ask market-maker to start quoting (paper mode)",
+    "5. After a few fills, run /health-report to check PnL and spread capture"
+  ],
+  "expected_output": "Two-sided quotes with spread capture metrics, inventory tracking, and PnL",
+  "failure_modes": [
+    "High volatility regime → market-maker widens spreads automatically",
+    "Inventory buildup → risk-manager flags concentration risk",
+    "Adverse selection → orderflow-analyst can diagnose if hired"
+  ],
+  "estimated_time": "10-15 minutes"
+}
