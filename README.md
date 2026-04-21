@@ -167,7 +167,7 @@ Put them to work:
 
 ### Codex Quick Start
 
-Codex can run AI Fund too. Use `AGENTS.md` as the Codex instruction entrypoint and follow [Running AI Fund With Codex](docs/codex.md) for Codex OAuth, Cube browser auth, and MCP registration.
+Codex can run AI Fund too. Use `AGENTS.md` as the Codex instruction entrypoint and follow [Running AI Fund With Codex](docs/codex.md) for Codex OAuth, Cube browser auth, and repo-local MCP registration.
 
 ```bash
 codex login
@@ -176,6 +176,8 @@ npm ci
 cd connectors/cube/mcp-server
 CUBE_ENV=staging npm run login
 ```
+
+Copy `.codex/config.example.toml` to local `.codex/config.toml`, then start Codex from the repo root. Do not register `ai-fund-cube` globally in `~/.codex/config.toml`; this keeps the trading MCP server scoped to `ai-fund`.
 
 ### Cube CLI + Expanded Tool Surface
 

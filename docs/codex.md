@@ -56,25 +56,42 @@ CUBE_ENV=staging npm run login -- --reuse-keypair
 CUBE_ENV=staging npm run login -- --new-keypair
 ```
 
-## 4. Register The Cube MCP Server With Codex
+## 4. Use The Repo-Local Cube MCP Server
 
-Run this from the repo root:
+AI Fund keeps the Cube MCP registration local to this repo. Start from the committed template:
 
 ```bash
-REPO="$(pwd)"
-codex mcp add ai-fund-cube \
-  --env CUBE_ENV=staging \
-  -- npm --prefix "$REPO/connectors/cube/mcp-server" --silent run mcp
+cp .codex/config.example.toml .codex/config.toml
 ```
 
-Verify Codex can see the server:
+`.codex/config.toml` is ignored by Git because it is local machine configuration. Do not add `ai-fund-cube` to `~/.codex/config.toml`. Global registration makes Codex start this trading MCP server from unrelated repos. Keep only the project trust entry in your global config:
+
+```toml
+[projects."/absolute/path/to/ai-fund"]
+trust_level = "trusted"
+```
+
+Start Codex from the repo root so it loads your local `.codex/config.toml`:
+
+```bash
+cd ai-fund
+codex
+```
+
+Verify Codex can see the repo-scoped server:
 
 ```bash
 codex mcp list
 codex mcp get ai-fund-cube
 ```
 
-Restart Codex after adding the MCP server. Then ask Codex to call a public Cube tool such as `get_assets` before testing authenticated account or trading tools.
+If `ai-fund-cube` appears in `codex mcp list` while you are outside this repo, remove the global entry:
+
+```bash
+codex mcp remove ai-fund-cube
+```
+
+Restart Codex after changing config. Then ask Codex to call a public Cube tool such as `get_assets` before testing authenticated account or trading tools.
 
 ## 5. Working With Agents In Codex
 

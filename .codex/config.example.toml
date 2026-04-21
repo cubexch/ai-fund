@@ -1,0 +1,43 @@
+[mcp_servers.ai-fund-cube]
+command = "/bin/zsh"
+args = ["-lc", 'repo="$(git rev-parse --show-toplevel 2>/dev/null)" && case "$repo" in */ai-fund) cd "$repo/connectors/cube/mcp-server" && exec npm --silent run mcp ;; *) echo "ai-fund-cube MCP must be started from inside the ai-fund repo" >&2; exit 1 ;; esac']
+required = false
+
+[mcp_servers.ai-fund-cube.env]
+CUBE_ENV = "staging"
+
+[mcp_servers.ai-fund-cube.tools.search_assets]
+approval_mode = "approve"
+
+[mcp_servers.ai-fund-cube.tools.get_assets]
+approval_mode = "approve"
+
+[mcp_servers.ai-fund-cube.tools.get_order_book]
+approval_mode = "approve"
+
+[mcp_servers.ai-fund-cube.tools.get_market_microstructure]
+approval_mode = "approve"
+
+[mcp_servers.ai-fund-cube.tools.get_bars]
+approval_mode = "approve"
+
+[mcp_servers.ai-fund-cube.tools.get_tickers]
+approval_mode = "approve"
+
+[mcp_servers.ai-fund-cube.tools.get_account]
+approval_mode = "approve"
+
+[mcp_servers.ai-fund-cube.tools.get_positions]
+approval_mode = "approve"
+
+[mcp_servers.ai-fund-cube.tools.get_orders]
+approval_mode = "approve"
+
+[mcp_servers.ai-fund-cube.tools.place_order]
+approval_mode = "approve"
+
+[mcp_servers.ai-fund-cube.tools.get_fills]
+approval_mode = "approve"
+
+[mcp_servers.ai-fund-cube.tools.get_order_history]
+approval_mode = "approve"

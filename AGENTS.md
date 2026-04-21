@@ -4,7 +4,8 @@ This repo was originally documented for Claude Code in `CLAUDE.md`. For Codex, t
 
 ## Runtime Setup
 
-- Use `docs/codex.md` for the Codex quick start, MCP registration, and Cube browser login flow.
+- Use `docs/codex.md` for the Codex quick start, repo-local MCP registration, and Cube browser login flow.
+- Keep the `ai-fund-cube` MCP server in local `.codex/config.toml`, copied from `.codex/config.example.toml`. Do not add it to `~/.codex/config.toml`, because global MCP registration makes Codex expose trading tools in unrelated repos.
 - Codex/OpenAI auth and Cube Exchange auth are separate:
   - `codex login` authenticates the Codex CLI with OpenAI.
   - `npm run login` in `connectors/cube/mcp-server/` authenticates the Cube connector with Cube via browser/device authorization.
