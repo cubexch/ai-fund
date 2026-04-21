@@ -5,6 +5,7 @@ dist/
 *.d.ts.map
 .claude/worktrees/
 /.mcp.json
+/.codex/config.toml
 
 # Scripts are committed (not build output)
 !scripts/

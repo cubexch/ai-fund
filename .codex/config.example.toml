@@ -1,0 +1,7 @@
+[mcp_servers.ai-fund-cube]
+command = "npm"
+args = ["--prefix", "./connectors/cube/mcp-server", "--silent", "run", "mcp"]
+required = false
+
+[mcp_servers.ai-fund-cube.env]
+CUBE_ENV = "staging"
