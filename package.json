@@ -12,7 +12,9 @@
     "connectors/",
     "lib/",
     ".mcp.json",
-    "CLAUDE.md"
+    "CLAUDE.md",
+    "AGENTS.md",
+    "docs/codex.md"
   ],
   "scripts": {
     "build": "npm run build --workspace=lib && npm run build --workspace=connectors/cube/mcp-server && npm run build --workspace=connectors/robinhood/mcp-server && npm run build --workspace=connectors/alpaca/mcp-server && npm run build --workspace=connectors/ccxt/mcp-server",

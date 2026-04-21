@@ -17,6 +17,7 @@
   "scripts": {
     "build": "tsc",
     "cube": "tsx src/cli/cube.ts",
+    "mcp": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "test": "npm run test:unit",
