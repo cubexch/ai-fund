@@ -1,6 +1,6 @@
 [mcp_servers.ai-fund-cube]
-command = "/bin/zsh"
-args = ["-lc", 'repo="$(git rev-parse --show-toplevel 2>/dev/null)" && case "$repo" in */ai-fund) cd "$repo/connectors/cube/mcp-server" && exec npm --silent run mcp ;; *) echo "ai-fund-cube MCP must be started from inside the ai-fund repo" >&2; exit 1 ;; esac']
+command = "npm"
+args = ["--prefix", "./connectors/cube/mcp-server", "--silent", "run", "mcp"]
 required = false
 
 [mcp_servers.ai-fund-cube.env]
